@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 400,
+    "message": "Mask should have either image or polygon.",
+    "status": "INVALID_ARGUMENT"
+  }
+}

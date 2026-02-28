@@ -1,0 +1,1414 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { randomUUID } from 'crypto';
+import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleAuth } from 'google-auth-library';
+import sharp from 'sharp';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
+import Stripe from 'stripe';
+import {
+    addUsername,
+    clearAuthLoginAttempts,
+    createAuthUser,
+    recordAuthLoginFailure,
+    createPasswordResetToken,
+    consumePasswordResetToken,
+    getAuthLoginAttemptState,
+    getAuthUserByUsername,
+    getUsernameDatabasePath,
+    initUsernameDatabase,
+    listAuthUsernamesByRecoveryEmail,
+    listUsernames,
+    removeUsername,
+    updateAuthUserPassword,
+} from './userDatabase';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '0.0.0.0';
+
+type SubscriptionTier = 'free' | 'pro' | 'enterprise';
+
+type UsageEvent = {
+    id: string;
+    timestamp: number;
+    action: string;
+    tokens: number;
+};
+
+type UserAccount = {
+    userId: string;
+    tokenBalance: number;
+    usage: UsageEvent[];
+};
+
+const BILLING_MODEL = 'usage';
+const DEFAULT_STARTING_TOKENS = Number(process.env.DEFAULT_STARTING_TOKENS || 0);
+
+const ACTION_TOKEN_COST: Record<string, number> = {
+    colorize: 8,
+    upscale: 5,
+    vibrancy: 2,
+    sharpen: 2,
+    animate_start: 20,
+};
+
+const userAccounts = new Map<string, UserAccount>();
+
+const BILLING_HEADER = 'x-user-id';
+const ADMIN_API_KEY_HEADER = 'x-admin-api-key';
+const AUTH_HEADER = 'authorization';
+const AUTH_TOKEN_LIFETIME = '7d';
+
+const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_API_KEY || 'dev-only-secret-change-me';
+
+const LOGIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LOCK_THRESHOLD = 5;
+const LOGIN_LOCK_DURATION_MS = 15 * 60 * 1000;
+const CAPTCHA_TRIGGER_THRESHOLD = 3;
+const CAPTCHA_BYPASS_TOKEN = process.env.CAPTCHA_BYPASS_TOKEN || 'dev-captcha-ok';
+const CAPTCHA_VERIFY_URL = process.env.CAPTCHA_VERIFY_URL || 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+const CAPTCHA_SECRET_KEY = process.env.CAPTCHA_SECRET_KEY || '';
+const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL || 'http://localhost:3000';
+
+const STRIPE_TOKEN_PACKS = {
+    starter: {
+        id: 'starter',
+        label: 'Starter',
+        tokens: 50,
+        amountCents: 500,
+        currency: 'usd',
+    },
+    creator: {
+        id: 'creator',
+        label: 'Creator',
+        tokens: 150,
+        amountCents: 1200,
+        currency: 'usd',
+    },
+    studio: {
+        id: 'studio',
+        label: 'Studio',
+        tokens: 500,
+        amountCents: 3500,
+        currency: 'usd',
+    },
+} as const;
+
+type StripeTokenPackId = keyof typeof STRIPE_TOKEN_PACKS;
+
+const stripeSecretKey = (process.env.STRIPE_SECRET_KEY || '').trim();
+const stripeClient = stripeSecretKey
+    ? new Stripe(stripeSecretKey, {
+        apiVersion: '2024-06-20',
+    })
+    : null;
+
+const processedStripeSessions = new Set<string>();
+
+const getUserIdFromRequest = (req: express.Request) => {
+    const authUserId = (req as BillingRequest).authUser?.username?.trim();
+    if (authUserId) return authUserId;
+
+    const rawHeader = req.header(BILLING_HEADER) || req.header(BILLING_HEADER.toUpperCase());
+    const userId = (rawHeader || 'demo-user').trim();
+    return userId.length > 0 ? userId : 'demo-user';
+};
+
+const getOrCreateUserAccount = (userId: string): UserAccount => {
+    const existing = userAccounts.get(userId);
+    if (existing) {
+        return existing;
+    }
+
+    const created: UserAccount = {
+        userId,
+        tokenBalance: Number.isFinite(DEFAULT_STARTING_TOKENS) && DEFAULT_STARTING_TOKENS > 0
+            ? Math.floor(DEFAULT_STARTING_TOKENS)
+            : 0,
+        usage: [],
+    };
+    userAccounts.set(userId, created);
+    void addUsername('subscriber', userId).catch((error) => {
+        console.error('Failed to persist subscriber username:', error);
+    });
+    return created;
+};
+
+const chargeTokens = (account: UserAccount, action: string, cost: number) => {
+    if (account.tokenBalance < cost) {
+        const error: any = new Error('Insufficient tokens');
+        error.statusCode = 402;
+        error.details = {
+            required: cost,
+            available: account.tokenBalance,
+            action,
+            billingModel: BILLING_MODEL,
+        };
+        throw error;
+    }
+
+    account.tokenBalance -= cost;
+    account.usage.unshift({
+        id: randomUUID(),
+        timestamp: Date.now(),
+        action,
+        tokens: cost,
+    });
+    if (account.usage.length > 200) {
+        account.usage = account.usage.slice(0, 200);
+    }
+};
+
+const publicAccountView = (account: UserAccount) => ({
+    userId: account.userId,
+    billingModel: BILLING_MODEL,
+    tokenBalance: account.tokenBalance,
+    actionTokenCost: ACTION_TOKEN_COST,
+});
+
+const handleBillingError = (res: express.Response, error: any) => {
+    if (error?.statusCode) {
+        res.status(error.statusCode).json({
+            error: error.message || 'Billing error',
+            details: error.details,
+        });
+        return true;
+    }
+    return false;
+};
+
+type BillingRequest = express.Request & {
+    billingUserId?: string;
+    billingAccount?: UserAccount;
+    authUser?: {
+        username: string;
+    };
+};
+
+const sanitizeUsername = (username: string) => username.trim();
+
+const validatePasswordStrength = (password: string) => {
+    if (!password || password.length < 8) return 'Password must be at least 8 characters';
+    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return 'Password must include letters and numbers';
+    return null;
+};
+
+const signAuthToken = (username: string) => jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: AUTH_TOKEN_LIFETIME });
+
+const attachAuthUser = (req: express.Request, _res: express.Response, next: express.NextFunction) => {
+    const rawAuth = req.header(AUTH_HEADER) || '';
+    const token = rawAuth.startsWith('Bearer ') ? rawAuth.slice(7).trim() : '';
+
+    if (!token) return next();
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
+        const username = String(decoded.sub || '').trim();
+        if (username) {
+            (req as BillingRequest).authUser = { username };
+        }
+    } catch {
+        // Requests without a valid auth token can still access public endpoints.
+    }
+
+    next();
+};
+
+const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authUser = (req as BillingRequest).authUser;
+    if (!authUser) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    next();
+};
+
+const getClientIp = (req: express.Request) => req.ip || req.socket.remoteAddress || 'unknown-ip';
+
+const getLoginAttemptKey = (req: express.Request, username: string) => {
+    return `${username.toLowerCase()}::${getClientIp(req)}`;
+};
+
+const registerFailedLoginAttempt = async (key: string) => {
+    return recordAuthLoginFailure(key, {
+        windowMs: LOGIN_LOCK_WINDOW_MS,
+        lockThreshold: LOGIN_LOCK_THRESHOLD,
+        lockDurationMs: LOGIN_LOCK_DURATION_MS,
+        captchaThreshold: CAPTCHA_TRIGGER_THRESHOLD,
+    });
+};
+
+const verifyCaptchaToken = async (captchaToken: string | undefined, clientIp?: string) => {
+    const token = (captchaToken || '').trim();
+    if (!token) return false;
+
+    if (!CAPTCHA_SECRET_KEY) {
+        return process.env.NODE_ENV !== 'production' && token === CAPTCHA_BYPASS_TOKEN;
+    }
+
+    try {
+        const body = new URLSearchParams();
+        body.set('secret', CAPTCHA_SECRET_KEY);
+        body.set('response', token);
+        if (clientIp) body.set('remoteip', clientIp);
+
+        const response = await fetch(CAPTCHA_VERIFY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
+        });
+
+        const parsed = await response.json().catch(() => ({}));
+        return Boolean(parsed.success);
+    } catch {
+        return false;
+    }
+};
+
+const authWriteLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 40,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many auth requests. Please try again shortly.' },
+});
+
+const loginLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many login attempts. Please try again shortly.' },
+});
+
+const checkLoginLock = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const { username } = req.body as { username?: string };
+    const normalizedUsername = sanitizeUsername(username || '');
+    if (!normalizedUsername) return next();
+
+    const key = getLoginAttemptKey(req, normalizedUsername);
+    const state = await getAuthLoginAttemptState(key);
+    const now = Date.now();
+
+    if (state?.lockedUntil && state.lockedUntil > now) {
+        const retryAfterSeconds = Math.ceil((state.lockedUntil - now) / 1000);
+        return res.status(429).json({
+            error: 'Too many failed login attempts. Try again later.',
+            retryAfterSeconds,
+            captchaRequired: state.captchaRequired,
+        });
+    }
+
+    if (state?.captchaRequired) {
+        const { captchaToken } = req.body as { captchaToken?: string };
+        const captchaValid = await verifyCaptchaToken(captchaToken, getClientIp(req));
+        if (!captchaValid) {
+            return res.status(403).json({
+                error: 'Captcha verification is required.',
+                captchaRequired: true,
+                captchaProviderConfigured: Boolean(CAPTCHA_SECRET_KEY),
+            });
+        }
+    }
+
+    next();
+};
+
+const attachBillingAccount = (req: express.Request, _res: express.Response, next: express.NextFunction) => {
+    const userId = getUserIdFromRequest(req);
+    const account = getOrCreateUserAccount(userId);
+    const billingReq = req as BillingRequest;
+    billingReq.billingUserId = userId;
+    billingReq.billingAccount = account;
+    next();
+};
+
+const requireBilling = (action: keyof typeof ACTION_TOKEN_COST) => (
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+) => {
+    try {
+        const billingReq = req as BillingRequest;
+        const account = billingReq.billingAccount || getOrCreateUserAccount(getUserIdFromRequest(req));
+        const cost = ACTION_TOKEN_COST[action] ?? 1;
+        chargeTokens(account, action, cost);
+        billingReq.billingAccount = account;
+        next();
+    } catch (error: any) {
+        if (handleBillingError(res, error)) return;
+        next(error);
+    }
+};
+
+type AnimationJob = {
+    status: 'pending' | 'done' | 'error';
+    createdAt: number;
+    videoUrl?: string;
+    error?: string;
+    userId: string;
+};
+
+const animationJobs = new Map<string, AnimationJob>();
+
+// Middleware
+app.use(cors());
+app.use(express.json({ limit: '50mb' })); // Increased limit for base64 images
+app.use(attachAuthUser);
+app.use(attachBillingAccount);
+
+/**
+ * AI Client Factory
+ * Configures either Vertex AI (Service Account) or Google AI Studio (API Key)
+ */
+const createAI = () => {
+    if (process.env.GCP_PROJECT_ID && process.env.GCP_LOCATION) {
+        console.log("Initializing Vertex AI Client...");
+        return new GoogleGenAI({
+            vertexai: true,
+            project: process.env.GCP_PROJECT_ID,
+            location: process.env.GCP_LOCATION,
+        });
+    }
+    console.log("Initializing API Key Client...");
+    return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+};
+
+const getCloudAccessToken = async (): Promise<string | undefined> => {
+    try {
+        const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+        const client = await auth.getClient();
+        const at = await client.getAccessToken();
+        return typeof at === 'string' ? at : at?.token || undefined;
+    } catch {
+        return undefined;
+    }
+};
+
+const normalizeAnimationImage = async (base64Data: string) => {
+    const inputBuffer = Buffer.from(base64Data, 'base64');
+    const inputSharp = sharp(inputBuffer).rotate();
+    const meta = await inputSharp.metadata();
+
+    if (!meta.width || !meta.height) {
+        throw new Error('Invalid image data: unable to read image dimensions');
+    }
+
+    let transformed = inputSharp;
+    if (meta.width < 256 || meta.height < 256) {
+        transformed = transformed.resize({
+            width: Math.max(meta.width, 256),
+            height: Math.max(meta.height, 256),
+            fit: 'contain',
+            background: { r: 0, g: 0, b: 0, alpha: 1 }
+        });
+    } else {
+        transformed = transformed.resize({
+            width: 1280,
+            height: 1280,
+            fit: 'inside',
+            withoutEnlargement: true
+        });
+    }
+
+    const normalizedBuffer = await transformed.png().toBuffer();
+    return {
+        imageBytes: normalizedBuffer.toString('base64'),
+        mimeType: 'image/png'
+    };
+};
+
+const extractVideoUriFromOperation = (operation: any): string | undefined => {
+    const candidates = [
+        operation?.response?.generatedVideos?.[0]?.video?.uri,
+        operation?.response?.generatedVideos?.[0]?.video,
+        operation?.response?.generatedVideos?.[0]?.uri,
+        operation?.response?.videos?.[0]?.video?.uri,
+        operation?.response?.videos?.[0]?.video,
+        operation?.response?.videos?.[0]?.uri,
+        operation?.generatedVideos?.[0]?.video?.uri,
+        operation?.generatedVideos?.[0]?.video,
+        operation?.generatedVideos?.[0]?.uri,
+        operation?.result?.generatedVideos?.[0]?.video?.uri,
+        operation?.result?.generatedVideos?.[0]?.video,
+        operation?.result?.generatedVideos?.[0]?.uri,
+    ];
+
+    for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+    }
+
+    const visited = new Set<any>();
+    const stack: any[] = [operation?.response, operation?.result, operation];
+    while (stack.length) {
+        const current = stack.pop();
+        if (!current || typeof current !== 'object' || visited.has(current)) continue;
+        visited.add(current);
+
+        for (const [key, value] of Object.entries(current)) {
+            if (typeof value === 'string' && (key.toLowerCase().includes('uri') || key.toLowerCase().includes('url'))) {
+                if (/^(https?:\/\/|gs:\/\/)/i.test(value)) {
+                    return value;
+                }
+            }
+            if (value && typeof value === 'object') {
+                stack.push(value);
+            }
+        }
+    }
+
+    return undefined;
+};
+
+const getAnimationModelCandidates = () => {
+    const configured = (process.env.VIDEO_MODEL_CANDIDATES || '')
+        .split(',')
+        .map(model => model.trim())
+        .filter(Boolean);
+
+    if (configured.length > 0) return configured;
+
+    return [
+        'veo-3.1-generate-preview',
+        'veo-3.1-generate-001',
+        'veo-2.0-generate-001',
+        'veo-2.0-generate-preview',
+    ];
+};
+
+const generateAnimationVideoUri = async (base64Data: string, mimeType: string): Promise<string> => {
+    const ai = createAI();
+    const normalized = await normalizeAnimationImage(base64Data);
+    const modelCandidates = getAnimationModelCandidates();
+    const errors: string[] = [];
+
+    for (const model of modelCandidates) {
+        try {
+            let operation = await ai.models.generateVideos({
+                model,
+                prompt: 'Animate this exact image. Keep subject identity/background/details consistent. Add subtle natural motion only. High-definition, photorealistic.',
+                image: {
+                    imageBytes: normalized.imageBytes,
+                    mimeType: normalized.mimeType,
+                },
+                config: { numberOfVideos: 1 }
+            });
+
+            let attempts = 0;
+            while (!operation.done && attempts < 90) {
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                attempts += 1;
+                operation = await (ai.operations as any).getVideosOperation({ operation });
+            }
+
+            if (!operation.done) {
+                errors.push(`${model}: timed out waiting for completion`);
+                continue;
+            }
+
+            const opErr = (operation as any)?.error?.message || (operation as any)?.response?.error?.message;
+            const videoUri = extractVideoUriFromOperation(operation);
+            if (videoUri) return videoUri;
+
+            const responseShape = {
+                operationName: (operation as any)?.name,
+                done: (operation as any)?.done,
+                hasResponse: Boolean((operation as any)?.response),
+                responseKeys: Object.keys((operation as any)?.response || {}),
+                generatedVideosCount: ((operation as any)?.response?.generatedVideos || []).length,
+                videosCount: ((operation as any)?.response?.videos || []).length,
+                raiMediaFilteredCount: (operation as any)?.response?.raiMediaFilteredCount ?? null,
+                error: opErr || null,
+            };
+            console.warn(`Video operation completed without URI for model ${model}:`, JSON.stringify(responseShape));
+
+            errors.push(`${model}: ${opErr || 'no video URI returned'}`);
+        } catch (error: any) {
+            errors.push(`${model}: ${error?.message || String(error)}`);
+        }
+    }
+
+    throw new Error(`Video generation failed. ${errors.join(' | ')}`);
+};
+
+/**
+ * Colorization Core Logic
+ * Prioritizes Imagen 3 Capability for structure-locked editing.
+ * Failsafe: Gemini 2.5 Flash Image for robust multimodal editing.
+ */
+const callColorizationAPI = async (base64Image: string) => {
+    if (!process.env.GCP_PROJECT_ID || !process.env.GCP_LOCATION) {
+        throw new Error('GCP_PROJECT_ID and GCP_LOCATION are required for Vertex colorization');
+    }
+
+    const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    const client = await auth.getClient();
+    const at = await client.getAccessToken();
+    const token = typeof at === 'string' ? at : at?.token;
+
+    const postPredict = async (model: string, body: any) => {
+        const url = `https://${process.env.GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.GCP_PROJECT_ID}/locations/${process.env.GCP_LOCATION}/publishers/google/models/${model}:predict`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body)
+        });
+
+        const text = await response.text();
+        let parsed: any = {};
+        try { parsed = JSON.parse(text); } catch { parsed = { raw: text }; }
+        return { response, parsed, rawText: text, model };
+    };
+
+    // 1. PRIMARY ATTEMPT: Imagen 3 Capability (Structure-Preserving Colorization)
+    const capabilityBody = {
+        instances: [{
+            prompt: 'Colorize this photo naturally. Maintain 100% original texture and subject detail.',
+            referenceImages: [{
+                referenceId: 1,
+                referenceType: 'REFERENCE_TYPE_RAW',
+                image: {
+                    bytesBase64Encoded: base64Image,
+                    mimeType: 'image/png'
+                }
+            }]
+        }],
+        parameters: {
+            sampleCount: 1,
+            editConfig: {
+                editMode: 'EDIT_MODE_INPAINT_INSERTION',
+                guidanceScale: 70 // High guidance prevents random generations
+            }
+        }
+    };
+
+    const capabilityResult = await postPredict('imagen-3.0-capability-001', capabilityBody);
+    if (capabilityResult.response.ok) return capabilityResult;
+
+    // 2. FAILSAFE ATTEMPT: Gemini 2.5 Flash Image (Multimodal "Vision-to-Vision")
+    // Replaces the random-generating fallback with a model that respects input pixels.
+    console.log('Imagen capability failed, falling back to Gemini 2.5 Flash Image...');
+    const ai = createAI();
+    const geminiResult = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [{
+            role: 'user',
+            parts: [
+                { inlineData: { data: base64Image, mimeType: 'image/png' } },
+                { text: "INSTRUCTION: Colorize this specific B&W photo. Do not change the subjects. Preserve 100% structural consistency." }
+            ]
+        }],
+        config: {
+            responseModalities: ["IMAGE"], // Correct camelCase property
+            temperature: 0.3
+        }
+    });
+
+    return geminiResult;
+};
+
+const runColorization = async (image: string): Promise<string> => {
+    const base64Data = image.includes(',') ? image.split(',')[1] : image;
+    const result = await callColorizationAPI(base64Data);
+
+    if ((result as any).candidates) {
+        const part = (result as any).candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
+        const data = part?.inlineData?.data;
+        if (!data) throw new Error('No image returned from Gemini response');
+        return `data:image/png;base64,${data}`;
+    }
+
+    const imgBase64 = (result as any).parsed?.predictions?.[0]?.bytesBase64Encoded;
+    if (!imgBase64) throw new Error('No image returned from AI');
+    return `data:image/png;base64,${imgBase64}`;
+};
+
+// --- Endpoints ---
+
+app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
+    try {
+        const { username, password, recoveryEmail } = req.body as {
+            username?: string;
+            password?: string;
+            recoveryEmail?: string;
+        };
+
+        const normalizedUsername = sanitizeUsername(username || '');
+        const normalizedRecoveryEmail = (recoveryEmail || '').trim().toLowerCase();
+
+        if (!normalizedUsername || normalizedUsername.length < 3) {
+            return res.status(400).json({ error: 'Username must be at least 3 characters' });
+        }
+
+        const passwordError = validatePasswordStrength(password || '');
+        if (passwordError) {
+            return res.status(400).json({ error: passwordError });
+        }
+
+        if (!normalizedRecoveryEmail || !normalizedRecoveryEmail.includes('@')) {
+            return res.status(400).json({ error: 'Valid recoveryEmail is required' });
+        }
+
+        const existing = await getAuthUserByUsername(normalizedUsername);
+        if (existing) {
+            return res.status(409).json({ error: 'Username already exists' });
+        }
+
+        const passwordHash = await bcrypt.hash(password as string, 12);
+        await createAuthUser(normalizedUsername, passwordHash, normalizedRecoveryEmail);
+        await addUsername('subscriber', normalizedUsername);
+
+        const token = signAuthToken(normalizedUsername);
+        const account = getOrCreateUserAccount(normalizedUsername);
+
+        res.status(201).json({
+            token,
+            user: { username: normalizedUsername },
+            account: publicAccountView(account),
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to register user' });
+    }
+});
+
+app.post('/api/auth/login', loginLimiter, checkLoginLock, async (req, res) => {
+    try {
+        const { username, password } = req.body as { username?: string; password?: string };
+        const normalizedUsername = sanitizeUsername(username || '');
+        const attemptKey = normalizedUsername ? getLoginAttemptKey(req, normalizedUsername) : null;
+
+        if (!normalizedUsername || !password) {
+            return res.status(400).json({ error: 'username and password are required' });
+        }
+
+        const authUser = await getAuthUserByUsername(normalizedUsername);
+        if (!authUser) {
+            if (attemptKey) {
+                const state = await registerFailedLoginAttempt(attemptKey);
+                return res.status(401).json({
+                    error: 'Invalid username or password',
+                    captchaRequired: state?.captchaRequired || false,
+                });
+            }
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+
+        const validPassword = await bcrypt.compare(password, authUser.passwordHash);
+        if (!validPassword) {
+            if (attemptKey) {
+                const state = await registerFailedLoginAttempt(attemptKey);
+                return res.status(401).json({
+                    error: 'Invalid username or password',
+                    captchaRequired: state?.captchaRequired || false,
+                });
+            }
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+
+        if (attemptKey) await clearAuthLoginAttempts(attemptKey);
+
+        const token = signAuthToken(authUser.username);
+        const account = getOrCreateUserAccount(authUser.username);
+
+        res.json({
+            token,
+            user: { username: authUser.username },
+            account: publicAccountView(account),
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Login failed' });
+    }
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+    const authUser = (req as BillingRequest).authUser!;
+    res.json({ user: { username: authUser.username } });
+});
+
+app.post('/api/auth/recover/username', authWriteLimiter, async (req, res) => {
+    try {
+        const { recoveryEmail } = req.body as { recoveryEmail?: string };
+        const normalizedRecoveryEmail = (recoveryEmail || '').trim().toLowerCase();
+
+        if (!normalizedRecoveryEmail || !normalizedRecoveryEmail.includes('@')) {
+            return res.status(400).json({ error: 'Valid recoveryEmail is required' });
+        }
+
+        const usernames = await listAuthUsernamesByRecoveryEmail(normalizedRecoveryEmail);
+        res.json({
+            usernames,
+            message: usernames.length
+                ? 'Usernames recovered successfully'
+                : 'No usernames found for this recovery email',
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Username recovery failed' });
+    }
+});
+
+app.post('/api/auth/recover/password/request', authWriteLimiter, async (req, res) => {
+    try {
+        const { username, recoveryEmail } = req.body as { username?: string; recoveryEmail?: string };
+        const normalizedUsername = sanitizeUsername(username || '');
+        const normalizedRecoveryEmail = (recoveryEmail || '').trim().toLowerCase();
+
+        if (!normalizedUsername || !normalizedRecoveryEmail) {
+            return res.status(400).json({ error: 'username and recoveryEmail are required' });
+        }
+
+        const authUser = await getAuthUserByUsername(normalizedUsername);
+        if (!authUser || authUser.recoveryEmail !== normalizedRecoveryEmail) {
+            return res.status(404).json({ error: 'No matching account found for provided recovery information' });
+        }
+
+        const resetToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
+        const expiresAt = Date.now() + 15 * 60 * 1000;
+        await createPasswordResetToken(resetToken, authUser.username, expiresAt);
+
+        res.json({
+            message: 'Password reset token generated. Use it to set a new password.',
+            resetToken: process.env.NODE_ENV === 'production' ? undefined : resetToken,
+            expiresAt,
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Password reset request failed' });
+    }
+});
+
+app.post('/api/auth/recover/password/confirm', authWriteLimiter, async (req, res) => {
+    try {
+        const { resetToken, newPassword } = req.body as { resetToken?: string; newPassword?: string };
+        if (!resetToken) {
+            return res.status(400).json({ error: 'resetToken is required' });
+        }
+
+        const passwordError = validatePasswordStrength(newPassword || '');
+        if (passwordError) {
+            return res.status(400).json({ error: passwordError });
+        }
+
+        const username = await consumePasswordResetToken(resetToken);
+        if (!username) {
+            return res.status(400).json({ error: 'Reset token is invalid or expired' });
+        }
+
+        const newPasswordHash = await bcrypt.hash(newPassword as string, 12);
+        const updated = await updateAuthUserPassword(username, newPasswordHash);
+        if (!updated) {
+            return res.status(404).json({ error: 'User not found for this token' });
+        }
+
+        res.json({ message: 'Password reset successful' });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Password reset failed' });
+    }
+});
+
+// Health check
+app.get('/api/health', (_req, res) => {
+    res.json({
+        ok: true,
+        service: 'chromasnap-server',
+        vertexConfigured: Boolean(process.env.GCP_PROJECT_ID),
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/api/subscription/plans', (_req, res) => {
+    res.json({
+        billingModel: BILLING_MODEL,
+        actionTokenCost: ACTION_TOKEN_COST,
+        notes: ['Usage-based token billing is enabled', 'Top up tokens any time via /api/subscription/topup'],
+    });
+});
+
+app.get('/api/subscription/me', (req, res) => {
+    const userId = getUserIdFromRequest(req);
+    const account = getOrCreateUserAccount(userId);
+    res.json({ account: publicAccountView(account) });
+});
+
+app.post('/api/subscription/subscribe', (req, res) => {
+    try {
+        const userId = getUserIdFromRequest(req);
+        const account = getOrCreateUserAccount(userId);
+
+        res.status(410).json({
+            error: 'Monthly subscription tiers are disabled. This server now uses usage-based tokenization.',
+            account: publicAccountView(account),
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to process request' });
+    }
+});
+
+app.post('/api/subscription/topup', (req, res) => {
+    try {
+        const { tokens } = req.body as { tokens?: number };
+        const topUp = Number(tokens);
+        if (!Number.isFinite(topUp) || topUp <= 0) {
+            return res.status(400).json({ error: 'tokens must be a positive number' });
+        }
+
+        const userId = getUserIdFromRequest(req);
+        const account = getOrCreateUserAccount(userId);
+
+        account.tokenBalance += Math.floor(topUp);
+
+        res.json({ account: publicAccountView(account) });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to top up tokens' });
+    }
+});
+
+app.get('/api/subscription/usage', (req, res) => {
+    const userId = getUserIdFromRequest(req);
+    const account = getOrCreateUserAccount(userId);
+    res.json({
+        account: publicAccountView(account),
+        usage: account.usage,
+    });
+});
+
+app.get('/api/payments/stripe/packs', (_req, res) => {
+    res.json({
+        enabled: Boolean(stripeClient),
+        packs: Object.values(STRIPE_TOKEN_PACKS),
+    });
+});
+
+app.post('/api/payments/stripe/checkout-session', async (req, res) => {
+    try {
+        if (!stripeClient) {
+            return res.status(503).json({ error: 'Stripe is not configured on this server' });
+        }
+
+        const { packId } = req.body as { packId?: StripeTokenPackId };
+        if (!packId || !(packId in STRIPE_TOKEN_PACKS)) {
+            return res.status(400).json({ error: 'Valid packId is required' });
+        }
+
+        const pack = STRIPE_TOKEN_PACKS[packId];
+        const userId = getUserIdFromRequest(req);
+
+        const session = await stripeClient.checkout.sessions.create({
+            mode: 'payment',
+            payment_method_types: ['card'],
+            line_items: [
+                {
+                    quantity: 1,
+                    price_data: {
+                        currency: pack.currency,
+                        unit_amount: pack.amountCents,
+                        product_data: {
+                            name: `${pack.label} Token Pack`,
+                            description: `${pack.tokens} ChromaSnap tokens`,
+                        },
+                    },
+                },
+            ],
+            success_url: `${PUBLIC_APP_URL}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${PUBLIC_APP_URL}/?payment=cancel`,
+            metadata: {
+                userId,
+                packId: pack.id,
+                tokens: String(pack.tokens),
+            },
+        });
+
+        if (!session.url) {
+            return res.status(500).json({ error: 'Stripe checkout URL is unavailable' });
+        }
+
+        res.json({
+            checkoutUrl: session.url,
+            sessionId: session.id,
+            pack,
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to create Stripe checkout session' });
+    }
+});
+
+app.post('/api/payments/stripe/confirm-session', async (req, res) => {
+    try {
+        if (!stripeClient) {
+            return res.status(503).json({ error: 'Stripe is not configured on this server' });
+        }
+
+        const { sessionId } = req.body as { sessionId?: string };
+        if (!sessionId || !sessionId.trim()) {
+            return res.status(400).json({ error: 'sessionId is required' });
+        }
+
+        const session = await stripeClient.checkout.sessions.retrieve(sessionId);
+        if (session.payment_status !== 'paid') {
+            return res.status(400).json({ error: 'Payment has not completed yet' });
+        }
+
+        const metadataUserId = String(session.metadata?.userId || '').trim();
+        const requestUserId = getUserIdFromRequest(req);
+        if (!metadataUserId || metadataUserId !== requestUserId) {
+            return res.status(403).json({ error: 'Forbidden for this checkout session' });
+        }
+
+        const metadataTokens = Number(session.metadata?.tokens || 0);
+        if (!Number.isFinite(metadataTokens) || metadataTokens <= 0) {
+            return res.status(400).json({ error: 'Invalid token metadata on checkout session' });
+        }
+
+        const account = getOrCreateUserAccount(metadataUserId);
+        if (processedStripeSessions.has(session.id)) {
+            return res.json({
+                account: publicAccountView(account),
+                credited: false,
+                message: 'Session already processed',
+            });
+        }
+
+        account.tokenBalance += Math.floor(metadataTokens);
+        processedStripeSessions.add(session.id);
+
+        return res.json({
+            account: publicAccountView(account),
+            credited: true,
+            tokensAdded: Math.floor(metadataTokens),
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to confirm Stripe checkout session' });
+    }
+});
+
+const requireAdminAccess = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const expectedAdminApiKey = process.env.ADMIN_API_KEY;
+    if (!expectedAdminApiKey) {
+        return res.status(500).json({ error: 'ADMIN_API_KEY is not configured on the server' });
+    }
+
+    const providedApiKey = req.header(ADMIN_API_KEY_HEADER) || req.header(ADMIN_API_KEY_HEADER.toUpperCase());
+    if (!providedApiKey || providedApiKey !== expectedAdminApiKey) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    next();
+};
+
+app.get('/api/admin/usernames', requireAdminAccess, async (_req, res) => {
+    try {
+        const [subscribers, admins] = await Promise.all([
+            listUsernames('subscriber'),
+            listUsernames('admin'),
+        ]);
+
+        res.json({ subscribers, admins });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to load usernames' });
+    }
+});
+
+app.post('/api/admin/usernames/admins', requireAdminAccess, async (req, res) => {
+    try {
+        const { username } = req.body as { username?: string };
+        if (!username || !username.trim()) {
+            return res.status(400).json({ error: 'username is required' });
+        }
+
+        await addUsername('admin', username);
+        const admins = await listUsernames('admin');
+        res.json({ admins });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to store admin username' });
+    }
+});
+
+app.delete('/api/admin/usernames/:role/:username', requireAdminAccess, async (req, res) => {
+    try {
+        const roleParam = req.params.role;
+        const role = roleParam === 'admins'
+            ? 'admin'
+            : roleParam === 'subscribers'
+                ? 'subscriber'
+                : null;
+
+        if (!role) {
+            return res.status(400).json({ error: 'role must be admins or subscribers' });
+        }
+
+        const decodedUsername = decodeURIComponent(req.params.username || '').trim();
+        if (!decodedUsername) {
+            return res.status(400).json({ error: 'username is required' });
+        }
+
+        const removed = await removeUsername(role, decodedUsername);
+        const [subscribers, admins] = await Promise.all([
+            listUsernames('subscriber'),
+            listUsernames('admin'),
+        ]);
+
+        res.json({ removed, username: decodedUsername, subscribers, admins });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message || 'Failed to delete username' });
+    }
+});
+
+// Compatibility analysis endpoint used by frontend
+app.post('/api/analyze/monochromatic', async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const ai = createAI();
+        const base64Data = image.includes(',') ? image.split(',')[1] : image;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                role: 'user',
+                parts: [
+                    { inlineData: { data: base64Data, mimeType: 'image/png' } },
+                    { text: 'Is this image black and white (monochromatic)? Respond strictly in JSON with key isMonochromatic.' }
+                ]
+            }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: { isMonochromatic: { type: Type.BOOLEAN } },
+                    required: ['isMonochromatic']
+                }
+            }
+        });
+
+        const anyResp = response as any;
+        const text = typeof anyResp.text === 'function'
+            ? (anyResp.text()?.trim() || '{}')
+            : (response as any).candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+
+        const parsed = JSON.parse(text);
+        res.json({ isMonochromatic: Boolean(parsed.isMonochromatic) });
+    } catch (error: any) {
+        console.error('Monochromatic check failed:', error);
+        res.status(500).json({ error: error.message || 'Analysis failed' });
+    }
+});
+
+// Compatibility safety endpoint used by frontend
+app.post('/api/analyze/safety', async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const ai = createAI();
+        const base64Data = image.includes(',') ? image.split(',')[1] : image;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                role: 'user',
+                parts: [
+                    { inlineData: { data: base64Data, mimeType: 'image/png' } },
+                    { text: 'Check this image for nudity/sexually explicit content and minors. Return JSON: isSafe(boolean), containsMinors(boolean), reason(string).' }
+                ]
+            }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        isSafe: { type: Type.BOOLEAN },
+                        containsMinors: { type: Type.BOOLEAN },
+                        reason: { type: Type.STRING }
+                    },
+                    required: ['isSafe', 'containsMinors', 'reason']
+                }
+            }
+        });
+
+        const anyResp = response as any;
+        const text = typeof anyResp.text === 'function'
+            ? (anyResp.text()?.trim() || '{"isSafe":true,"containsMinors":false,"reason":""}')
+            : (response as any).candidates?.[0]?.content?.parts?.[0]?.text || '{"isSafe":true,"containsMinors":false,"reason":""}';
+
+        const parsed = JSON.parse(text);
+        res.json({
+            isSafe: Boolean(parsed.isSafe),
+            containsMinors: Boolean(parsed.containsMinors),
+            reason: String(parsed.reason || '')
+        });
+    } catch (error: any) {
+        console.error('Safety check failed:', error);
+        res.status(500).json({ error: error.message || 'Safety check failed' });
+    }
+});
+
+// Main Colorization Endpoint
+app.post('/api/colorize', requireBilling('colorize'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+        const dataUrl = await runColorization(image);
+        res.json({ image: dataUrl });
+    } catch (error: any) {
+        console.error("Colorization failed:", error);
+        res.status(500).json({ error: error.message || 'Colorization failed' });
+    }
+});
+
+// Frontend-compatible processing route
+app.post('/api/process/colorize', requireBilling('colorize'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+        const dataUrl = await runColorization(image);
+        res.json({ result: dataUrl });
+    } catch (error: any) {
+        console.error('Colorization failed:', error);
+        res.status(500).json({ error: error.message || 'Colorization failed' });
+    }
+});
+
+app.post('/api/process/upscale', requireBilling('upscale'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const hasPrefix = typeof image === 'string' && image.includes(',');
+        const base64Data = hasPrefix ? image.split(',')[1] : image;
+        const mimeType = hasPrefix
+            ? image.split(';')[0].split(':')[1] || 'image/png'
+            : 'image/png';
+
+        const inputBuffer = Buffer.from(base64Data, 'base64');
+        const metadata = await sharp(inputBuffer).metadata();
+        if (!metadata.width || !metadata.height) {
+            return res.status(400).json({ error: 'Invalid image data' });
+        }
+
+        const upscaleFactor = 2;
+        const maxDimension = 4096;
+        const targetWidth = Math.min(Math.round(metadata.width * upscaleFactor), maxDimension);
+        const targetHeight = Math.min(Math.round(metadata.height * upscaleFactor), maxDimension);
+
+        let pipeline = sharp(inputBuffer)
+            .resize({
+                width: targetWidth,
+                height: targetHeight,
+                fit: 'inside',
+                kernel: sharp.kernel.lanczos3,
+                withoutEnlargement: false,
+            })
+            .sharpen({ sigma: 1.1, m1: 1, m2: 2 });
+
+        if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') {
+            pipeline = pipeline.jpeg({ quality: 92 });
+        } else if (mimeType === 'image/webp') {
+            pipeline = pipeline.webp({ quality: 92 });
+        } else {
+            pipeline = pipeline.png();
+        }
+
+        const outputBuffer = await pipeline.toBuffer();
+        const resultBase64 = outputBuffer.toString('base64');
+        res.json({ result: `data:${mimeType};base64,${resultBase64}` });
+    } catch (error: any) {
+        console.error('Upscaling failed:', error);
+        res.status(500).json({ error: error.message || 'Upscaling failed' });
+    }
+});
+
+app.post('/api/process/vibrancy', requireBilling('vibrancy'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const hasPrefix = typeof image === 'string' && image.includes(',');
+        const base64Data = hasPrefix ? image.split(',')[1] : image;
+        const mimeType = hasPrefix
+            ? image.split(';')[0].split(':')[1] || 'image/png'
+            : 'image/png';
+
+        const inputBuffer = Buffer.from(base64Data, 'base64');
+        const outputBuffer = await sharp(inputBuffer)
+            .modulate({ saturation: 1.5 })
+            .toBuffer();
+
+        const resultBase64 = outputBuffer.toString('base64');
+        res.json({ result: `data:${mimeType};base64,${resultBase64}` });
+    } catch (error: any) {
+        console.error('Vibrancy enhancement failed:', error);
+        res.status(500).json({ error: error.message || 'Vibrancy failed' });
+    }
+});
+
+app.post('/api/process/sharpen', requireBilling('sharpen'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const hasPrefix = typeof image === 'string' && image.includes(',');
+        const base64Data = hasPrefix ? image.split(',')[1] : image;
+        const mimeType = hasPrefix
+            ? image.split(';')[0].split(':')[1] || 'image/png'
+            : 'image/png';
+
+        const inputBuffer = Buffer.from(base64Data, 'base64');
+        const outputBuffer = await sharp(inputBuffer)
+            .sharpen()
+            .toBuffer();
+
+        const resultBase64 = outputBuffer.toString('base64');
+        res.json({ result: `data:${mimeType};base64,${resultBase64}` });
+    } catch (error: any) {
+        console.error('Sharpening failed:', error);
+        res.status(500).json({ error: error.message || 'Sharpening failed' });
+    }
+});
+
+app.post('/api/process/animate/start', requireBilling('animate_start'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const userId = getUserIdFromRequest(req);
+
+        const hasPrefix = typeof image === 'string' && image.includes(',');
+        const base64Data = hasPrefix ? image.split(',')[1] : image;
+        const mimeType = hasPrefix ? (image.split(';')[0].split(':')[1] || 'image/png') : 'image/png';
+
+        const jobId = randomUUID();
+        animationJobs.set(jobId, { status: 'pending', createdAt: Date.now(), userId });
+
+        void (async () => {
+            try {
+                const videoUri = await generateAnimationVideoUri(base64Data, mimeType);
+                animationJobs.set(jobId, { status: 'done', createdAt: Date.now(), videoUrl: videoUri, userId });
+            } catch (error: any) {
+                animationJobs.set(jobId, {
+                    status: 'error',
+                    createdAt: Date.now(),
+                    error: error?.message || 'Animation failed',
+                    userId
+                });
+            }
+        })();
+
+        res.json({ jobId, status: 'pending' });
+    } catch (error: any) {
+        console.error('Animation start failed:', error);
+        res.status(500).json({ error: error.message || 'Failed to start animation' });
+    }
+});
+
+app.get('/api/process/animate/status/:jobId', (req, res) => {
+    const job = animationJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Animation job not found' });
+    const userId = getUserIdFromRequest(req);
+    if (job.userId !== userId) return res.status(403).json({ error: 'Forbidden' });
+    res.json({
+        jobId: req.params.jobId,
+        status: job.status,
+        error: job.error,
+        videoUrl: job.videoUrl
+    });
+});
+
+app.get('/api/process/animate/result/:jobId', async (req, res) => {
+    const job = animationJobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Animation job not found' });
+    const userId = getUserIdFromRequest(req);
+    if (job.userId !== userId) return res.status(403).json({ error: 'Forbidden' });
+    if (job.status === 'pending') return res.status(409).json({ error: 'Animation is still processing' });
+    if (job.status === 'error') return res.status(500).json({ error: job.error || 'Animation failed' });
+    if (!job.videoUrl) return res.status(500).json({ error: 'Animation result URL missing' });
+
+    try {
+        let videoResponse = await fetch(job.videoUrl);
+        if (!videoResponse.ok) {
+            const token = await getCloudAccessToken();
+            if (token) {
+                videoResponse = await fetch(job.videoUrl, { headers: { Authorization: `Bearer ${token}` } });
+            }
+        }
+
+        if (!videoResponse.ok) {
+            return res.status(502).json({ error: 'Failed to fetch generated video from provider' });
+        }
+
+        const buffer = Buffer.from(await videoResponse.arrayBuffer());
+        res.setHeader('Content-Type', videoResponse.headers.get('content-type') || 'video/mp4');
+        return res.send(buffer);
+    } catch (error: any) {
+        console.error('Animation result fetch failed:', error);
+        return res.status(500).json({ error: error.message || 'Failed to fetch animation result' });
+    }
+});
+
+app.post('/api/process/animate', requireBilling('animate_start'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const hasPrefix = typeof image === 'string' && image.includes(',');
+        const base64Data = hasPrefix ? image.split(',')[1] : image;
+        const mimeType = hasPrefix ? (image.split(';')[0].split(':')[1] || 'image/png') : 'image/png';
+
+        const videoUri = await generateAnimationVideoUri(base64Data, mimeType);
+
+        let videoResponse = await fetch(videoUri);
+        if (!videoResponse.ok) {
+            const token = await getCloudAccessToken();
+            if (token) {
+                videoResponse = await fetch(videoUri, { headers: { Authorization: `Bearer ${token}` } });
+            }
+        }
+
+        if (videoResponse.ok) {
+            const buffer = Buffer.from(await videoResponse.arrayBuffer());
+            res.setHeader('Content-Type', videoResponse.headers.get('content-type') || 'video/mp4');
+            return res.send(buffer);
+        }
+
+        return res.json({ videoUrl: videoUri });
+    } catch (error: any) {
+        console.error('Animation failed:', error);
+        res.status(500).json({ error: error.message || 'Animation failed' });
+    }
+});
+
+// Animation / Motion Endpoint
+app.post('/api/animate', requireBilling('animate_start'), async (req, res) => {
+    try {
+        const { image } = req.body;
+        if (!image) return res.status(400).json({ error: 'Image data required' });
+
+        const hasPrefix = typeof image === 'string' && image.includes(',');
+        const base64Data = hasPrefix ? image.split(',')[1] : image;
+        const mimeType = hasPrefix ? (image.split(';')[0].split(':')[1] || 'image/png') : 'image/png';
+
+        const videoLink = await generateAnimationVideoUri(base64Data, mimeType);
+        res.json({ videoUrl: videoLink });
+    } catch (error: any) {
+        console.error("Animation failed:", error);
+        res.status(500).json({ error: error.message || 'Animation failed' });
+    }
+});
+
+const startServer = async () => {
+    await initUsernameDatabase();
+    console.log(`Username database initialized using ${getUsernameDatabasePath()}`);
+
+    app.listen(Number(PORT), HOST, () => console.log(`ChromaSnap Production Server running on http://${HOST}:${PORT}`));
+};
+
+startServer().catch((error) => {
+    console.error('Server startup failed:', error);
+    process.exit(1);
+});

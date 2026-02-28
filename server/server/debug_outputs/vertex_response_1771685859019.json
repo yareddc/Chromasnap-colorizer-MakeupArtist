@@ -1,7 +1,0 @@
-{
-  "error": {
-    "code": 400,
-    "message": "Reference image should have image field.",
-    "status": "INVALID_ARGUMENT"
-  }
-}

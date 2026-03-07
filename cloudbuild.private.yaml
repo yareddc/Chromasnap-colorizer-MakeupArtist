@@ -1,0 +1,53 @@
+substitutions:
+  _SERVICE: chromasnap-server
+  _REGION: us-central1
+  _GCP_LOCATION: us-central1
+
+  # Secret Manager secret names (create these in your GCP project first)
+  _SECRET_GEMINI_API_KEY: GEMINI_API_KEY
+  _SECRET_JWT_SECRET: JWT_SECRET
+  _SECRET_ADMIN_API_KEY: ADMIN_API_KEY
+  _SECRET_CAPTCHA_SECRET_KEY: CAPTCHA_SECRET_KEY
+  _SECRET_CAPTCHA_BYPASS_TOKEN: CAPTCHA_BYPASS_TOKEN
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - gcr.io/$PROJECT_ID/$_SERVICE:$COMMIT_SHA
+      - -t
+      - gcr.io/$PROJECT_ID/$_SERVICE:latest
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/$_SERVICE:$COMMIT_SHA
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - gcr.io/$PROJECT_ID/$_SERVICE:latest
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_SERVICE
+      - --image
+      - gcr.io/$PROJECT_ID/$_SERVICE:$COMMIT_SHA
+      - --region
+      - $_REGION
+      - --platform
+      - managed
+      - --no-allow-unauthenticated
+      - --set-env-vars
+      - NODE_ENV=production,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=$_GCP_LOCATION
+      - --set-secrets
+      - GEMINI_API_KEY=$_SECRET_GEMINI_API_KEY:latest,JWT_SECRET=$_SECRET_JWT_SECRET:latest,ADMIN_API_KEY=$_SECRET_ADMIN_API_KEY:latest,CAPTCHA_SECRET_KEY=$_SECRET_CAPTCHA_SECRET_KEY:latest,CAPTCHA_BYPASS_TOKEN=$_SECRET_CAPTCHA_BYPASS_TOKEN:latest
+
+images:
+  - gcr.io/$PROJECT_ID/$_SERVICE:$COMMIT_SHA
+  - gcr.io/$PROJECT_ID/$_SERVICE:latest

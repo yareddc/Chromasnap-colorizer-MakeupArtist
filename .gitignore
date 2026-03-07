@@ -22,24 +22,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Environment files
-.env
-.env.*
-!.env.example
-server/.env
-server/.env.*
-!server/.env.example
-
-# Credentials and secrets
-*service-account*.json
-*credentials*.json
-server/config/chrommasnap-vertex-ai-use-b587bb3ad2be.json
-
-# Local databases and debug artifacts
-*.db
-server/**/debug_outputs/
-
-# Native/build outputs
-android/**/build/
-ios/**/DerivedData/

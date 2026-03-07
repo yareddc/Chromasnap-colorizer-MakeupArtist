@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "setup:native": "node scripts/setup-native-plugin.js",
     "server": "cd server && npm run dev",
-    "plugin:build": "cd capacitor-plugin && npm run build"
+    "plugin:build": "cd capacitor-plugin && npm run build",
+    "gcp:secrets:sh": "bash scripts/setup-gcp-secrets.sh",
+    "gcp:secrets:ps1": "powershell -ExecutionPolicy Bypass -File scripts/setup-gcp-secrets.ps1",
+    "gcp:deploy:public": "gcloud builds submit --config cloudbuild.yaml",
+    "gcp:deploy:private": "gcloud builds submit --config cloudbuild.private.yaml"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.2",

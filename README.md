@@ -2,8 +2,6 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-AI Photo colorizer and animation creator
-
 # Run and deploy your AI Studio app
 
 This contains everything you need to run your app locally.
@@ -46,30 +44,23 @@ Turnstile setup (recommended):
 
 ## Subscription Management API
 
-All usage-billing endpoints require the `x-user-id` header to identify the account.
+All subscription endpoints require the `x-user-id` header to identify the account.
 
-- `GET /api/subscription/plans` - returns usage billing config and action token costs
-- `GET /api/subscription/me` - current account token balance
+- `GET /api/subscription/plans` - list available plans
+- `GET /api/subscription/me` - current account balance and tier
+- `POST /api/subscription/subscribe` - body: `{ "tier": "free" | "pro" | "enterprise" }`
+- `POST /api/subscription/topup` - body: `{ "tokens": number }`
 - `GET /api/subscription/usage` - usage history and account snapshot
-- `POST /api/subscription/subscribe` - returns `410` (deprecated in usage-billing mode)
-
-## Stripe Token Purchase API
-
-To enable Stripe checkout for users, set the following in `server/.env`:
-
-- `STRIPE_SECRET_KEY` - your Stripe secret key
-- `PUBLIC_APP_URL` - frontend URL used for checkout success/cancel redirects (e.g. `http://localhost:3000`)
-
-Endpoints:
-
-- `GET /api/payments/stripe/packs` - list available token packs and Stripe availability
-- `POST /api/payments/stripe/checkout-session` - body: `{ "packId": "starter" | "creator" | "studio" }`
-- `POST /api/payments/stripe/confirm-session` - body: `{ "sessionId": string }` (credits tokens after successful payment)
 
 Example curl:
 
 ```bash
 curl -H "x-user-id: demo-user" http://localhost:3001/api/subscription/me
+
+curl -X POST http://localhost:3001/api/subscription/subscribe \
+   -H "Content-Type: application/json" \
+   -H "x-user-id: demo-user" \
+   -d '{"tier":"pro"}'
 
 curl -X POST http://localhost:3001/api/subscription/topup \
    -H "Content-Type: application/json" \
@@ -108,32 +99,112 @@ curl -X DELETE http://localhost:3001/api/admin/usernames/subscribers/demo-user \
 
 Use this sequence to verify admin auth and username create/list/delete in under a minute.
 
-```powershell
+```bash
 # 1) Set your admin key (PowerShell)
 $env:ADMIN_KEY="your-admin-key"
 
 # 2) List current usernames
-curl.exe http://localhost:3001/api/admin/usernames \
+curl http://localhost:3001/api/admin/usernames \
    -H "x-admin-api-key: $env:ADMIN_KEY"
 
 # 3) Add a test admin username
-curl.exe -X POST http://localhost:3001/api/admin/usernames/admins \
+curl -X POST http://localhost:3001/api/admin/usernames/admins \
    -H "Content-Type: application/json" \
    -H "x-admin-api-key: $env:ADMIN_KEY" \
    -d '{"username":"quick-test-admin"}'
 
 # 4) Confirm it appears
-curl.exe http://localhost:3001/api/admin/usernames \
+curl http://localhost:3001/api/admin/usernames \
    -H "x-admin-api-key: $env:ADMIN_KEY"
 
 # 5) Delete the test username
-curl.exe -X DELETE http://localhost:3001/api/admin/usernames/admins/quick-test-admin \
+curl -X DELETE http://localhost:3001/api/admin/usernames/admins/quick-test-admin \
    -H "x-admin-api-key: $env:ADMIN_KEY"
 ```
 
+## Cloud Run Deployment
+
+This repo includes production container/deploy files for Cloud Run:
+
+- `Dockerfile`
+- `.dockerignore`
+- `cloudbuild.yaml` (public service)
+- `cloudbuild.private.yaml` (private service + Secret Manager wiring)
+
+### First-time setup
+
+1. Enable required APIs:
+
 ```bash
-# Bash / Git Bash variant
-export ADMIN_KEY="your-admin-key"
-curl http://localhost:3001/api/admin/usernames \
-  -H "x-admin-api-key: $ADMIN_KEY"
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com artifactregistry.googleapis.com
+```
+
+2. Create/add secrets (Windows PowerShell):
+
+```bash
+npm run gcp:secrets:ps1 -- -ProjectId YOUR_PROJECT_ID -RuntimeServiceAccount YOUR_RUNTIME_SA_EMAIL
+```
+
+or Bash:
+
+```bash
+npm run gcp:secrets:sh -- YOUR_PROJECT_ID YOUR_RUNTIME_SA_EMAIL
+```
+
+### Deploy
+
+Public Cloud Run service:
+
+```bash
+npm run gcp:deploy:public
+```
+
+Private Cloud Run service:
+
+```bash
+npm run gcp:deploy:private
+```
+
+Override service/region values when needed:
+
+```bash
+gcloud builds submit --config cloudbuild.private.yaml --substitutions _SERVICE=chromasnap-server,_REGION=us-central1,_GCP_LOCATION=us-central1
+```
+
+### Troubleshooting
+
+`Permission denied` when reading secrets at runtime:
+
+```bash
+gcloud run services describe chromasnap-server --region us-central1 --format='value(spec.template.spec.serviceAccountName)'
+gcloud secrets add-iam-policy-binding GEMINI_API_KEY --member="serviceAccount:YOUR_RUNTIME_SA_EMAIL" --role="roles/secretmanager.secretAccessor"
+```
+
+`Container failed to start` / port errors:
+
+- Cloud Run injects `PORT`; this server already binds `PORT` on `0.0.0.0`.
+- Verify logs:
+
+```bash
+gcloud run services logs read chromasnap-server --region us-central1 --limit 200
+```
+
+`Unauthenticated` when calling private service:
+
+```bash
+gcloud run services add-iam-policy-binding chromasnap-server --region us-central1 --member="user:you@example.com" --role="roles/run.invoker"
+```
+
+`Build failed` due to API not enabled:
+
+```bash
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com artifactregistry.googleapis.com
+```
+
+Wrong region/project in deploy:
+
+- Re-run with explicit substitutions:
+
+```bash
+gcloud builds submit --config cloudbuild.private.yaml --substitutions _SERVICE=chromasnap-server,_REGION=us-central1,_GCP_LOCATION=us-central1
 ```

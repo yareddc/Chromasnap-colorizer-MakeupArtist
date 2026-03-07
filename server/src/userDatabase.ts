@@ -1,4 +1,7 @@
-import { Pool } from 'pg';
+import path from 'path';
+import { mkdir } from 'fs/promises';
+import sqlite3 from 'sqlite3';
+import { open, type Database } from 'sqlite';
 
 export type UsernameRole = 'subscriber' | 'admin';
 
@@ -17,7 +20,9 @@ export type AuthLoginAttemptState = {
     captchaRequired: boolean;
 };
 
-let database: Pool | null = null;
+let database: Database<sqlite3.Database, sqlite3.Statement> | null = null;
+
+const dbFilePath = path.resolve(process.cwd(), 'data', 'usernames.db');
 
 const normalizeUsername = (username: string) => username.trim();
 
@@ -28,91 +33,54 @@ const getDatabase = () => {
     return database;
 };
 
-const getDatabaseConnectionConfig = () => {
-    const connectionString = process.env.DATABASE_URL?.trim();
-    if (!connectionString) {
-        throw new Error('DATABASE_URL is required for PostgreSQL connectivity');
-    }
-
-    const sslMode = (process.env.PGSSLMODE || '').trim().toLowerCase();
-    const ssl = sslMode === 'require'
-        ? { rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED !== 'false' }
-        : undefined;
-
-    return { connectionString, ssl };
-};
-
-const getDatabaseIdentifier = () => {
-    const connectionString = process.env.DATABASE_URL?.trim();
-    if (!connectionString) return 'postgres://(not-configured)';
-
-    try {
-        const parsed = new URL(connectionString);
-        const databaseName = parsed.pathname.replace(/^\//, '') || '(default)';
-        const port = parsed.port || '5432';
-        return `postgres://${parsed.hostname}:${port}/${databaseName}`;
-    } catch {
-        return 'postgres://(configured)';
-    }
-};
-
 export const initUsernameDatabase = async () => {
     if (database) return database;
 
-    const db = new Pool(getDatabaseConnectionConfig());
+    await mkdir(path.dirname(dbFilePath), { recursive: true });
 
-    await db.query(`
+    const db = await open({
+        filename: dbFilePath,
+        driver: sqlite3.Database,
+    });
+
+    await db.exec(`
         CREATE TABLE IF NOT EXISTS usernames (
-            id BIGSERIAL PRIMARY KEY,
-            username TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL COLLATE NOCASE,
             role TEXT NOT NULL CHECK(role IN ('subscriber', 'admin')),
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(username, role)
         );
     `);
 
-    await db.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS usernames_unique_role_username_ci
-        ON usernames (role, LOWER(username));
-    `);
-
-    await db.query(`
+    await db.exec(`
         CREATE TABLE IF NOT EXISTS auth_users (
-            id BIGSERIAL PRIMARY KEY,
-            username TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE COLLATE NOCASE,
             password_hash TEXT NOT NULL,
-            recovery_email TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            recovery_email TEXT NOT NULL COLLATE NOCASE,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     `);
 
-    await db.query(`
-        CREATE UNIQUE INDEX IF NOT EXISTS auth_users_username_ci
-        ON auth_users (LOWER(username));
-    `);
-
-    await db.query(`
-        CREATE INDEX IF NOT EXISTS auth_users_recovery_email_idx
-        ON auth_users (LOWER(recovery_email));
-    `);
-
-    await db.query(`
+    await db.exec(`
         CREATE TABLE IF NOT EXISTS password_reset_tokens (
             token TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            expires_at BIGINT NOT NULL,
-            used BOOLEAN NOT NULL DEFAULT FALSE,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            username TEXT NOT NULL COLLATE NOCASE,
+            expires_at INTEGER NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     `);
 
-    await db.query(`
+    await db.exec(`
         CREATE TABLE IF NOT EXISTS auth_login_attempts (
             attempt_key TEXT PRIMARY KEY,
-            failure_count INT NOT NULL,
-            first_failed_at BIGINT NOT NULL,
-            last_failed_at BIGINT NOT NULL,
-            locked_until BIGINT,
-            captcha_required BOOLEAN NOT NULL DEFAULT FALSE
+            failure_count INTEGER NOT NULL,
+            first_failed_at INTEGER NOT NULL,
+            last_failed_at INTEGER NOT NULL,
+            locked_until INTEGER,
+            captcha_required INTEGER NOT NULL DEFAULT 0
         );
     `);
 
@@ -127,20 +95,21 @@ export const addUsername = async (role: UsernameRole, username: string) => {
     }
 
     const db = getDatabase();
-    await db.query(
-        'INSERT INTO usernames (username, role) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-        [normalized, role]
+    await db.run(
+        'INSERT OR IGNORE INTO usernames (username, role) VALUES (?, ?)',
+        normalized,
+        role
     );
 };
 
 export const listUsernames = async (role: UsernameRole) => {
     const db = getDatabase();
-    const result = await db.query<{ username: string }>(
-        'SELECT username FROM usernames WHERE role = $1 ORDER BY LOWER(username) ASC, username ASC',
-        [role]
+    const rows = await db.all<{ username: string }[]>(
+        'SELECT username FROM usernames WHERE role = ? ORDER BY username COLLATE NOCASE ASC',
+        role
     );
 
-    return result.rows.map(row => row.username);
+    return rows.map(row => row.username);
 };
 
 export const removeUsername = async (role: UsernameRole, username: string) => {
@@ -150,12 +119,13 @@ export const removeUsername = async (role: UsernameRole, username: string) => {
     }
 
     const db = getDatabase();
-    const result = await db.query(
-        'DELETE FROM usernames WHERE role = $1 AND LOWER(username) = LOWER($2)',
-        [role, normalized]
+    const result = await db.run(
+        'DELETE FROM usernames WHERE role = ? AND username = ?',
+        role,
+        normalized
     );
 
-    return (result.rowCount ?? 0) > 0;
+    return (result.changes || 0) > 0;
 };
 
 export const createAuthUser = async (username: string, passwordHash: string, recoveryEmail: string) => {
@@ -166,9 +136,11 @@ export const createAuthUser = async (username: string, passwordHash: string, rec
     }
 
     const db = getDatabase();
-    await db.query(
-        'INSERT INTO auth_users (username, password_hash, recovery_email) VALUES ($1, $2, $3)',
-        [normalizedUsername, passwordHash, normalizedRecoveryEmail]
+    await db.run(
+        'INSERT INTO auth_users (username, password_hash, recovery_email) VALUES (?, ?, ?)',
+        normalizedUsername,
+        passwordHash,
+        normalizedRecoveryEmail
     );
 };
 
@@ -177,16 +149,14 @@ export const getAuthUserByUsername = async (username: string): Promise<AuthUserR
     if (!normalizedUsername) return null;
 
     const db = getDatabase();
-    const result = await db.query<{
+    const row = await db.get<{
         username: string;
         password_hash: string;
         recovery_email: string;
     }>(
-        'SELECT username, password_hash, recovery_email FROM auth_users WHERE LOWER(username) = LOWER($1) LIMIT 1',
-        [normalizedUsername]
+        'SELECT username, password_hash, recovery_email FROM auth_users WHERE username = ?',
+        normalizedUsername
     );
-
-    const row = result.rows[0];
 
     if (!row) return null;
     return {
@@ -201,12 +171,12 @@ export const listAuthUsernamesByRecoveryEmail = async (recoveryEmail: string): P
     if (!normalizedRecoveryEmail) return [];
 
     const db = getDatabase();
-    const result = await db.query<{ username: string }>(
-        'SELECT username FROM auth_users WHERE LOWER(recovery_email) = LOWER($1) ORDER BY LOWER(username) ASC, username ASC',
-        [normalizedRecoveryEmail]
+    const rows = await db.all<{ username: string }[]>(
+        'SELECT username FROM auth_users WHERE recovery_email = ? ORDER BY username COLLATE NOCASE ASC',
+        normalizedRecoveryEmail
     );
 
-    return result.rows.map(row => row.username);
+    return rows.map(row => row.username);
 };
 
 export const createPasswordResetToken = async (token: string, username: string, expiresAt: number) => {
@@ -216,9 +186,11 @@ export const createPasswordResetToken = async (token: string, username: string, 
     }
 
     const db = getDatabase();
-    await db.query(
-        'INSERT INTO password_reset_tokens (token, username, expires_at, used) VALUES ($1, $2, $3, FALSE)',
-        [token, normalizedUsername, expiresAt]
+    await db.run(
+        'INSERT INTO password_reset_tokens (token, username, expires_at, used) VALUES (?, ?, ?, 0)',
+        token,
+        normalizedUsername,
+        expiresAt
     );
 };
 
@@ -226,15 +198,17 @@ export const consumePasswordResetToken = async (token: string): Promise<string |
     if (!token) return null;
 
     const db = getDatabase();
-    const result = await db.query<{ username: string }>(
-        `UPDATE password_reset_tokens
-         SET used = TRUE
-         WHERE token = $1 AND used = FALSE AND expires_at >= $2
-         RETURNING username`,
-        [token, Date.now()]
+    const row = await db.get<{ username: string; expires_at: number; used: number }>(
+        'SELECT username, expires_at, used FROM password_reset_tokens WHERE token = ?',
+        token
     );
 
-    return result.rows[0]?.username || null;
+    if (!row || row.used || Date.now() > row.expires_at) {
+        return null;
+    }
+
+    await db.run('UPDATE password_reset_tokens SET used = 1 WHERE token = ?', token);
+    return row.username;
 };
 
 export const updateAuthUserPassword = async (username: string, passwordHash: string) => {
@@ -244,31 +218,30 @@ export const updateAuthUserPassword = async (username: string, passwordHash: str
     }
 
     const db = getDatabase();
-    const result = await db.query(
-        'UPDATE auth_users SET password_hash = $1 WHERE LOWER(username) = LOWER($2)',
-        [passwordHash, normalizedUsername]
+    const result = await db.run(
+        'UPDATE auth_users SET password_hash = ? WHERE username = ?',
+        passwordHash,
+        normalizedUsername
     );
 
-    return (result.rowCount ?? 0) > 0;
+    return (result.changes || 0) > 0;
 };
 
 export const getAuthLoginAttemptState = async (attemptKey: string): Promise<AuthLoginAttemptState | null> => {
     if (!attemptKey) return null;
 
     const db = getDatabase();
-    const result = await db.query<{
+    const row = await db.get<{
         attempt_key: string;
         failure_count: number;
         first_failed_at: number;
         last_failed_at: number;
         locked_until: number | null;
-        captcha_required: boolean;
+        captcha_required: number;
     }>(
-        'SELECT attempt_key, failure_count, first_failed_at, last_failed_at, locked_until, captcha_required FROM auth_login_attempts WHERE attempt_key = $1 LIMIT 1',
-        [attemptKey]
+        'SELECT attempt_key, failure_count, first_failed_at, last_failed_at, locked_until, captcha_required FROM auth_login_attempts WHERE attempt_key = ?',
+        attemptKey
     );
-
-    const row = result.rows[0];
 
     if (!row) return null;
 
@@ -278,14 +251,14 @@ export const getAuthLoginAttemptState = async (attemptKey: string): Promise<Auth
         firstFailedAt: row.first_failed_at,
         lastFailedAt: row.last_failed_at,
         lockedUntil: row.locked_until || undefined,
-        captchaRequired: row.captcha_required,
+        captchaRequired: Boolean(row.captcha_required),
     };
 };
 
 export const clearAuthLoginAttempts = async (attemptKey: string) => {
     if (!attemptKey) return;
     const db = getDatabase();
-    await db.query('DELETE FROM auth_login_attempts WHERE attempt_key = $1', [attemptKey]);
+    await db.run('DELETE FROM auth_login_attempts WHERE attempt_key = ?', attemptKey);
 };
 
 export const recordAuthLoginFailure = async (
@@ -303,16 +276,21 @@ export const recordAuthLoginFailure = async (
     const existing = await getAuthLoginAttemptState(attemptKey);
     if (!existing || (now - existing.firstFailedAt) > config.windowMs) {
         const captchaRequired = config.captchaThreshold <= 1;
-        await db.query(
+        await db.run(
             `INSERT INTO auth_login_attempts (attempt_key, failure_count, first_failed_at, last_failed_at, locked_until, captcha_required)
-             VALUES ($1, $2, $3, $4, $5, $6)
+             VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT(attempt_key) DO UPDATE SET
                failure_count=excluded.failure_count,
                first_failed_at=excluded.first_failed_at,
                last_failed_at=excluded.last_failed_at,
                locked_until=excluded.locked_until,
                captcha_required=excluded.captcha_required`,
-            [attemptKey, 1, now, now, null, captchaRequired]
+            attemptKey,
+            1,
+            now,
+            now,
+            null,
+            captchaRequired ? 1 : 0
         );
         return getAuthLoginAttemptState(attemptKey);
     }
@@ -321,12 +299,16 @@ export const recordAuthLoginFailure = async (
     const lockedUntil = nextFailureCount >= config.lockThreshold ? now + config.lockDurationMs : null;
     const captchaRequired = existing.captchaRequired || nextFailureCount >= config.captchaThreshold;
 
-    await db.query(
-        'UPDATE auth_login_attempts SET failure_count = $1, last_failed_at = $2, locked_until = $3, captcha_required = $4 WHERE attempt_key = $5',
-        [nextFailureCount, now, lockedUntil, captchaRequired, attemptKey]
+    await db.run(
+        'UPDATE auth_login_attempts SET failure_count = ?, last_failed_at = ?, locked_until = ?, captcha_required = ? WHERE attempt_key = ?',
+        nextFailureCount,
+        now,
+        lockedUntil,
+        captchaRequired ? 1 : 0,
+        attemptKey
     );
 
     return getAuthLoginAttemptState(attemptKey);
 };
 
-export const getUsernameDatabasePath = () => getDatabaseIdentifier();
+export const getUsernameDatabasePath = () => dbFilePath;

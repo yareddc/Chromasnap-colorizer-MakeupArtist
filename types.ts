@@ -23,17 +23,20 @@ export interface ProcessingState {
   type?: 'colorizing' | 'animating' | 'editing';
 }
 
-export interface SubscriptionBillingConfig {
-  billingModel: 'usage';
-  actionTokenCost: Record<string, number>;
-  notes?: string[];
+export interface SubscriptionPlan {
+  id: 'free' | 'pro' | 'enterprise';
+  name: string;
+  monthlyTokens: number;
+  maxTopUpPerMonth: number;
 }
 
 export interface SubscriptionAccount {
   userId: string;
-  billingModel: 'usage';
+  tier: 'free' | 'pro' | 'enterprise';
   tokenBalance: number;
-  actionTokenCost: Record<string, number>;
+  monthlyRemainingTopUp: number;
+  cycleStartedAt: string;
+  cycleEndsAt: string;
 }
 
 export interface SubscriptionUsageItem {
@@ -41,14 +44,6 @@ export interface SubscriptionUsageItem {
   timestamp: number;
   action: string;
   tokens: number;
-}
-
-export interface StripeTokenPack {
-  id: string;
-  label: string;
-  tokens: number;
-  amountCents: number;
-  currency: string;
 }
 
 export interface AuthUser {

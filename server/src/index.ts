@@ -8,7 +8,6 @@ import sharp from 'sharp';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
-import Stripe from 'stripe';
 import {
     addUsername,
     clearAuthLoginAttempts,
@@ -34,6 +33,13 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 type SubscriptionTier = 'free' | 'pro' | 'enterprise';
 
+type PlanConfig = {
+    id: SubscriptionTier;
+    name: string;
+    monthlyTokens: number;
+    maxTopUpPerMonth: number;
+};
+
 type UsageEvent = {
     id: string;
     timestamp: number;
@@ -43,12 +49,33 @@ type UsageEvent = {
 
 type UserAccount = {
     userId: string;
+    tier: SubscriptionTier;
     tokenBalance: number;
+    monthlyRemainingTopUp: number;
+    cycleStartedAt: number;
     usage: UsageEvent[];
 };
 
-const BILLING_MODEL = 'usage';
-const DEFAULT_STARTING_TOKENS = Number(process.env.DEFAULT_STARTING_TOKENS || 0);
+const PLAN_CONFIG: Record<SubscriptionTier, PlanConfig> = {
+    free: {
+        id: 'free',
+        name: 'Free',
+        monthlyTokens: 50,
+        maxTopUpPerMonth: 100,
+    },
+    pro: {
+        id: 'pro',
+        name: 'Pro',
+        monthlyTokens: 1000,
+        maxTopUpPerMonth: 5000,
+    },
+    enterprise: {
+        id: 'enterprise',
+        name: 'Enterprise',
+        monthlyTokens: 10000,
+        maxTopUpPerMonth: 50000,
+    },
+};
 
 const ACTION_TOKEN_COST: Record<string, number> = {
     colorize: 8,
@@ -74,42 +101,18 @@ const CAPTCHA_TRIGGER_THRESHOLD = 3;
 const CAPTCHA_BYPASS_TOKEN = process.env.CAPTCHA_BYPASS_TOKEN || 'dev-captcha-ok';
 const CAPTCHA_VERIFY_URL = process.env.CAPTCHA_VERIFY_URL || 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const CAPTCHA_SECRET_KEY = process.env.CAPTCHA_SECRET_KEY || '';
-const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL || 'http://localhost:3000';
 
-const STRIPE_TOKEN_PACKS = {
-    starter: {
-        id: 'starter',
-        label: 'Starter',
-        tokens: 50,
-        amountCents: 500,
-        currency: 'usd',
-    },
-    creator: {
-        id: 'creator',
-        label: 'Creator',
-        tokens: 150,
-        amountCents: 1200,
-        currency: 'usd',
-    },
-    studio: {
-        id: 'studio',
-        label: 'Studio',
-        tokens: 500,
-        amountCents: 3500,
-        currency: 'usd',
-    },
-} as const;
+const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
-type StripeTokenPackId = keyof typeof STRIPE_TOKEN_PACKS;
-
-const stripeSecretKey = (process.env.STRIPE_SECRET_KEY || '').trim();
-const stripeClient = stripeSecretKey
-    ? new Stripe(stripeSecretKey, {
-        apiVersion: '2024-06-20',
-    })
-    : null;
-
-const processedStripeSessions = new Set<string>();
+const resetCycleIfNeeded = (account: UserAccount) => {
+    if (Date.now() - account.cycleStartedAt >= thirtyDaysMs) {
+        const plan = PLAN_CONFIG[account.tier];
+        account.cycleStartedAt = Date.now();
+        account.tokenBalance = plan.monthlyTokens;
+        account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
+        account.usage = [];
+    }
+};
 
 const getUserIdFromRequest = (req: express.Request) => {
     const authUserId = (req as BillingRequest).authUser?.username?.trim();
@@ -123,14 +126,17 @@ const getUserIdFromRequest = (req: express.Request) => {
 const getOrCreateUserAccount = (userId: string): UserAccount => {
     const existing = userAccounts.get(userId);
     if (existing) {
+        resetCycleIfNeeded(existing);
         return existing;
     }
 
+    const plan = PLAN_CONFIG.free;
     const created: UserAccount = {
         userId,
-        tokenBalance: Number.isFinite(DEFAULT_STARTING_TOKENS) && DEFAULT_STARTING_TOKENS > 0
-            ? Math.floor(DEFAULT_STARTING_TOKENS)
-            : 0,
+        tier: 'free',
+        tokenBalance: plan.monthlyTokens,
+        monthlyRemainingTopUp: plan.maxTopUpPerMonth,
+        cycleStartedAt: Date.now(),
         usage: [],
     };
     userAccounts.set(userId, created);
@@ -141,6 +147,7 @@ const getOrCreateUserAccount = (userId: string): UserAccount => {
 };
 
 const chargeTokens = (account: UserAccount, action: string, cost: number) => {
+    resetCycleIfNeeded(account);
     if (account.tokenBalance < cost) {
         const error: any = new Error('Insufficient tokens');
         error.statusCode = 402;
@@ -148,7 +155,7 @@ const chargeTokens = (account: UserAccount, action: string, cost: number) => {
             required: cost,
             available: account.tokenBalance,
             action,
-            billingModel: BILLING_MODEL,
+            tier: account.tier,
         };
         throw error;
     }
@@ -167,9 +174,11 @@ const chargeTokens = (account: UserAccount, action: string, cost: number) => {
 
 const publicAccountView = (account: UserAccount) => ({
     userId: account.userId,
-    billingModel: BILLING_MODEL,
+    tier: account.tier,
     tokenBalance: account.tokenBalance,
-    actionTokenCost: ACTION_TOKEN_COST,
+    monthlyRemainingTopUp: account.monthlyRemainingTopUp,
+    cycleStartedAt: new Date(account.cycleStartedAt).toISOString(),
+    cycleEndsAt: new Date(account.cycleStartedAt + thirtyDaysMs).toISOString(),
 });
 
 const handleBillingError = (res: express.Response, error: any) => {
@@ -823,11 +832,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.get('/api/subscription/plans', (_req, res) => {
-    res.json({
-        billingModel: BILLING_MODEL,
-        actionTokenCost: ACTION_TOKEN_COST,
-        notes: ['Usage-based token billing is enabled', 'Top up tokens any time via /api/subscription/topup'],
-    });
+    res.json({ plans: Object.values(PLAN_CONFIG) });
 });
 
 app.get('/api/subscription/me', (req, res) => {
@@ -838,15 +843,24 @@ app.get('/api/subscription/me', (req, res) => {
 
 app.post('/api/subscription/subscribe', (req, res) => {
     try {
+        const { tier } = req.body as { tier?: SubscriptionTier };
+        if (!tier || !PLAN_CONFIG[tier]) {
+            return res.status(400).json({ error: 'Valid tier is required (free, pro, enterprise)' });
+        }
+
         const userId = getUserIdFromRequest(req);
         const account = getOrCreateUserAccount(userId);
+        const plan = PLAN_CONFIG[tier];
 
-        res.status(410).json({
-            error: 'Monthly subscription tiers are disabled. This server now uses usage-based tokenization.',
-            account: publicAccountView(account),
-        });
+        account.tier = tier;
+        account.tokenBalance = plan.monthlyTokens;
+        account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
+        account.cycleStartedAt = Date.now();
+        account.usage = [];
+
+        res.json({ account: publicAccountView(account), message: `Subscribed to ${plan.name}` });
     } catch (error: any) {
-        res.status(500).json({ error: error.message || 'Failed to process request' });
+        res.status(500).json({ error: error.message || 'Failed to change subscription' });
     }
 });
 
@@ -861,7 +875,15 @@ app.post('/api/subscription/topup', (req, res) => {
         const userId = getUserIdFromRequest(req);
         const account = getOrCreateUserAccount(userId);
 
+        if (topUp > account.monthlyRemainingTopUp) {
+            return res.status(400).json({
+                error: 'Top-up limit exceeded for current billing cycle',
+                remaining: account.monthlyRemainingTopUp,
+            });
+        }
+
         account.tokenBalance += Math.floor(topUp);
+        account.monthlyRemainingTopUp -= Math.floor(topUp);
 
         res.json({ account: publicAccountView(account) });
     } catch (error: any) {
@@ -876,115 +898,6 @@ app.get('/api/subscription/usage', (req, res) => {
         account: publicAccountView(account),
         usage: account.usage,
     });
-});
-
-app.get('/api/payments/stripe/packs', (_req, res) => {
-    res.json({
-        enabled: Boolean(stripeClient),
-        packs: Object.values(STRIPE_TOKEN_PACKS),
-    });
-});
-
-app.post('/api/payments/stripe/checkout-session', async (req, res) => {
-    try {
-        if (!stripeClient) {
-            return res.status(503).json({ error: 'Stripe is not configured on this server' });
-        }
-
-        const { packId } = req.body as { packId?: StripeTokenPackId };
-        if (!packId || !(packId in STRIPE_TOKEN_PACKS)) {
-            return res.status(400).json({ error: 'Valid packId is required' });
-        }
-
-        const pack = STRIPE_TOKEN_PACKS[packId];
-        const userId = getUserIdFromRequest(req);
-
-        const session = await stripeClient.checkout.sessions.create({
-            mode: 'payment',
-            payment_method_types: ['card'],
-            line_items: [
-                {
-                    quantity: 1,
-                    price_data: {
-                        currency: pack.currency,
-                        unit_amount: pack.amountCents,
-                        product_data: {
-                            name: `${pack.label} Token Pack`,
-                            description: `${pack.tokens} ChromaSnap tokens`,
-                        },
-                    },
-                },
-            ],
-            success_url: `${PUBLIC_APP_URL}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${PUBLIC_APP_URL}/?payment=cancel`,
-            metadata: {
-                userId,
-                packId: pack.id,
-                tokens: String(pack.tokens),
-            },
-        });
-
-        if (!session.url) {
-            return res.status(500).json({ error: 'Stripe checkout URL is unavailable' });
-        }
-
-        res.json({
-            checkoutUrl: session.url,
-            sessionId: session.id,
-            pack,
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message || 'Failed to create Stripe checkout session' });
-    }
-});
-
-app.post('/api/payments/stripe/confirm-session', async (req, res) => {
-    try {
-        if (!stripeClient) {
-            return res.status(503).json({ error: 'Stripe is not configured on this server' });
-        }
-
-        const { sessionId } = req.body as { sessionId?: string };
-        if (!sessionId || !sessionId.trim()) {
-            return res.status(400).json({ error: 'sessionId is required' });
-        }
-
-        const session = await stripeClient.checkout.sessions.retrieve(sessionId);
-        if (session.payment_status !== 'paid') {
-            return res.status(400).json({ error: 'Payment has not completed yet' });
-        }
-
-        const metadataUserId = String(session.metadata?.userId || '').trim();
-        const requestUserId = getUserIdFromRequest(req);
-        if (!metadataUserId || metadataUserId !== requestUserId) {
-            return res.status(403).json({ error: 'Forbidden for this checkout session' });
-        }
-
-        const metadataTokens = Number(session.metadata?.tokens || 0);
-        if (!Number.isFinite(metadataTokens) || metadataTokens <= 0) {
-            return res.status(400).json({ error: 'Invalid token metadata on checkout session' });
-        }
-
-        const account = getOrCreateUserAccount(metadataUserId);
-        if (processedStripeSessions.has(session.id)) {
-            return res.json({
-                account: publicAccountView(account),
-                credited: false,
-                message: 'Session already processed',
-            });
-        }
-
-        account.tokenBalance += Math.floor(metadataTokens);
-        processedStripeSessions.add(session.id);
-
-        return res.json({
-            account: publicAccountView(account),
-            credited: true,
-            tokensAdded: Math.floor(metadataTokens),
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message || 'Failed to confirm Stripe checkout session' });
-    }
 });
 
 const requireAdminAccess = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -1403,7 +1316,7 @@ app.post('/api/animate', requireBilling('animate_start'), async (req, res) => {
 
 const startServer = async () => {
     await initUsernameDatabase();
-    console.log(`Username database initialized using ${getUsernameDatabasePath()}`);
+    console.log(`Username database initialized at ${getUsernameDatabasePath()}`);
 
     app.listen(Number(PORT), HOST, () => console.log(`ChromaSnap Production Server running on http://${HOST}:${PORT}`));
 };

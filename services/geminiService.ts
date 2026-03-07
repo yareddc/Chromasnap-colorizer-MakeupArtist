@@ -3,7 +3,7 @@
  * API Service for communicating with the backend
  */
 import { API_ENDPOINTS } from './apiConfig';
-import type { AuthUser, StripeTokenPack, SubscriptionAccount, SubscriptionBillingConfig, SubscriptionUsageItem } from '../types';
+import type { AuthUser, SubscriptionAccount, SubscriptionPlan, SubscriptionUsageItem } from '../types';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -290,14 +290,15 @@ export const animateImage = async (
   }
 };
 
-export const fetchSubscriptionPlans = async (): Promise<SubscriptionBillingConfig> => {
+export const fetchSubscriptionPlans = async (): Promise<SubscriptionPlan[]> => {
   const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_PLANS, {
     headers: getJsonHeaders(),
   });
   if (!response.ok) {
-    throw new Error('Failed to load billing config');
+    throw new Error('Failed to load plans');
   }
-  return parseJsonResponse(response) as Promise<SubscriptionBillingConfig>;
+  const data = await parseJsonResponse(response);
+  return data.plans || [];
 };
 
 export const fetchSubscriptionMe = async (): Promise<SubscriptionAccount> => {
@@ -319,6 +320,19 @@ export const fetchSubscriptionUsage = async (): Promise<{ account: SubscriptionA
     throw new Error('Failed to load usage');
   }
   return parseJsonResponse(response);
+};
+
+export const subscribeToPlan = async (tier: SubscriptionPlan['id']): Promise<SubscriptionAccount> => {
+  const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_SUBSCRIBE, {
+    method: 'POST',
+    headers: getJsonHeaders(),
+    body: JSON.stringify({ tier }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to change subscription');
+  }
+  return data.account as SubscriptionAccount;
 };
 
 export const registerUser = async (payload: { username: string; password: string; recoveryEmail: string }): Promise<{ user: AuthUser; account: SubscriptionAccount }> => {
@@ -434,53 +448,5 @@ export const topUpTokens = async (tokens: number): Promise<SubscriptionAccount> 
     throw new Error(data.error || 'Failed to top up tokens');
   }
   return data.account as SubscriptionAccount;
-};
-
-export const fetchStripeTokenPacks = async (): Promise<{ enabled: boolean; packs: StripeTokenPack[] }> => {
-  const response = await fetch(API_ENDPOINTS.STRIPE_PAYMENT_PACKS, {
-    headers: getJsonHeaders(),
-  });
-  if (!response.ok) {
-    throw new Error('Failed to load Stripe token packs');
-  }
-  const data = await parseJsonResponse(response);
-  return {
-    enabled: Boolean(data.enabled),
-    packs: (data.packs || []) as StripeTokenPack[],
-  };
-};
-
-export const createStripeCheckoutSession = async (packId: string): Promise<{ checkoutUrl: string; sessionId: string }> => {
-  const response = await fetch(API_ENDPOINTS.STRIPE_CHECKOUT_SESSION, {
-    method: 'POST',
-    headers: getJsonHeaders(),
-    body: JSON.stringify({ packId }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error || 'Failed to create Stripe checkout session');
-  }
-  return {
-    checkoutUrl: String(data.checkoutUrl || ''),
-    sessionId: String(data.sessionId || ''),
-  };
-};
-
-export const confirmStripeCheckoutSession = async (sessionId: string): Promise<{ account: SubscriptionAccount; credited: boolean; tokensAdded?: number; message?: string }> => {
-  const response = await fetch(API_ENDPOINTS.STRIPE_CONFIRM_SESSION, {
-    method: 'POST',
-    headers: getJsonHeaders(),
-    body: JSON.stringify({ sessionId }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error || 'Failed to confirm Stripe payment');
-  }
-  return {
-    account: data.account as SubscriptionAccount,
-    credited: Boolean(data.credited),
-    tokensAdded: typeof data.tokensAdded === 'number' ? data.tokensAdded : undefined,
-    message: data.message,
-  };
 };
 

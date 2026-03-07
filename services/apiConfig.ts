@@ -35,11 +35,6 @@ export const API_ENDPOINTS = {
   SUBSCRIPTION_TOPUP: `${API_BASE_URL}/api/subscription/topup`,
   SUBSCRIPTION_USAGE: `${API_BASE_URL}/api/subscription/usage`,
 
-  // Stripe payment endpoints
-  STRIPE_PAYMENT_PACKS: `${API_BASE_URL}/api/payments/stripe/packs`,
-  STRIPE_CHECKOUT_SESSION: `${API_BASE_URL}/api/payments/stripe/checkout-session`,
-  STRIPE_CONFIRM_SESSION: `${API_BASE_URL}/api/payments/stripe/confirm-session`,
-
   // Auth endpoints
   AUTH_REGISTER: `${API_BASE_URL}/api/auth/register`,
   AUTH_LOGIN: `${API_BASE_URL}/api/auth/login`,

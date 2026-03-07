@@ -7,7 +7,7 @@ import VideoResult from './components/VideoResult';
 import LoadingOverlay from './components/LoadingOverlay';
 import TurnstileCaptcha from './components/TurnstileCaptcha';
 import AdminLoginPage from './components/AdminLoginPage';
-import { AuthUser, ColorizedImage, AnimatedResult, ProcessingState, StripeTokenPack, SubscriptionAccount, SubscriptionBillingConfig, SubscriptionUsageItem } from './types';
+import { AuthUser, ColorizedImage, AnimatedResult, ProcessingState, SubscriptionAccount, SubscriptionPlan, SubscriptionUsageItem } from './types';
 import {
   clearAuthToken,
   colorizeImage,
@@ -21,7 +21,6 @@ import {
   enhanceVibrancy,
   sharpenImage,
   fetchSubscriptionPlans,
-  fetchStripeTokenPacks,
   fetchSubscriptionUsage,
   getCurrentUserId,
   hasAuthToken,
@@ -29,8 +28,8 @@ import {
   registerUser,
   requestPasswordReset,
   setCurrentUserId,
-  confirmStripeCheckoutSession,
-  createStripeCheckoutSession,
+  subscribeToPlan,
+  topUpTokens,
 } from './services/geminiService';
 
 const PALETTES = [
@@ -71,11 +70,10 @@ const App: React.FC = () => {
   const [activeUserId, setActiveUserId] = useState<string>(() => getCurrentUserId());
   const [userIdInput, setUserIdInput] = useState<string>(activeUserId);
   const [subscriptionAccount, setSubscriptionAccount] = useState<SubscriptionAccount | null>(null);
-  const [subscriptionBillingConfig, setSubscriptionBillingConfig] = useState<SubscriptionBillingConfig | null>(null);
-  const [stripeEnabled, setStripeEnabled] = useState<boolean>(false);
-  const [stripeTokenPacks, setStripeTokenPacks] = useState<StripeTokenPack[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<SubscriptionPlan[]>([]);
   const [subscriptionUsage, setSubscriptionUsage] = useState<SubscriptionUsageItem[]>([]);
   const [billingMessage, setBillingMessage] = useState<string | null>(null);
+  const [topUpAmount, setTopUpAmount] = useState<string>('50');
   const [billingLoading, setBillingLoading] = useState<boolean>(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authInitialized, setAuthInitialized] = useState(false);
@@ -97,18 +95,20 @@ const App: React.FC = () => {
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
   const isDeveloperMode = import.meta.env.DEV || import.meta.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true';
 
+  const currentPlan = subscriptionPlans.find((plan) => plan.id === (subscriptionAccount?.tier ?? 'free'));
+  const planMonthlyTokens = currentPlan?.monthlyTokens ?? 1;
+  const usedThisCycle = Math.max(0, planMonthlyTokens - (subscriptionAccount?.tokenBalance ?? 0));
+  const usagePercent = Math.min(100, Math.round((usedThisCycle / planMonthlyTokens) * 100));
+
   const refreshSubscription = async () => {
     setBillingLoading(true);
     setBillingMessage(null);
     try {
-      const [billingConfig, usageData] = await Promise.all([
+      const [plans, usageData] = await Promise.all([
         fetchSubscriptionPlans(),
         fetchSubscriptionUsage(),
       ]);
-      const stripeData = await fetchStripeTokenPacks();
-      setSubscriptionBillingConfig(billingConfig);
-      setStripeEnabled(stripeData.enabled);
-      setStripeTokenPacks(stripeData.packs || []);
+      setSubscriptionPlans(plans);
       setSubscriptionAccount(usageData.account);
       setSubscriptionUsage(usageData.usage || []);
     } catch (error: any) {
@@ -142,55 +142,6 @@ const App: React.FC = () => {
     if (!authUser) return;
     refreshSubscription();
   }, [activeUserId, authUser]);
-
-  useEffect(() => {
-    if (!authUser) return;
-    const params = new URLSearchParams(window.location.search);
-    const paymentStatus = params.get('payment');
-    const sessionId = params.get('session_id');
-
-    if (paymentStatus !== 'success' || !sessionId) {
-      if (paymentStatus === 'cancel') {
-        setBillingMessage('Stripe checkout was canceled.');
-        const cleaned = new URL(window.location.href);
-        cleaned.searchParams.delete('payment');
-        window.history.replaceState({}, '', cleaned.toString());
-      }
-      return;
-    }
-
-    let isMounted = true;
-
-    const finalizeStripePayment = async () => {
-      setBillingLoading(true);
-      setBillingMessage('Finalizing Stripe payment...');
-      try {
-        const result = await confirmStripeCheckoutSession(sessionId);
-        if (!isMounted) return;
-        setSubscriptionAccount(result.account);
-        setBillingMessage(result.credited
-          ? `Payment complete. Added ${result.tokensAdded || 0} tokens.`
-          : (result.message || 'Payment already processed.'));
-        await refreshSubscription();
-      } catch (error: any) {
-        if (!isMounted) return;
-        setBillingMessage(error.message || 'Failed to confirm Stripe payment.');
-      } finally {
-        if (!isMounted) return;
-        setBillingLoading(false);
-        const cleaned = new URL(window.location.href);
-        cleaned.searchParams.delete('payment');
-        cleaned.searchParams.delete('session_id');
-        window.history.replaceState({}, '', cleaned.toString());
-      }
-    };
-
-    finalizeStripePayment();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [authUser]);
 
   const handleLogout = () => {
     clearAuthToken();
@@ -309,23 +260,36 @@ const App: React.FC = () => {
     setActiveUserId(storedId);
   };
 
-  const handlePurchasePack = async (packId: string) => {
+  const handleSubscribeTier = async (tier: SubscriptionPlan['id']) => {
     setBillingLoading(true);
     setBillingMessage(null);
     try {
-      const checkout = await createStripeCheckoutSession(packId);
-      if (!checkout.checkoutUrl) {
-        throw new Error('Stripe checkout URL is missing');
-      }
-      window.location.href = checkout.checkoutUrl;
+      const account = await subscribeToPlan(tier);
+      setSubscriptionAccount(account);
+      await refreshSubscription();
     } catch (error: any) {
-      setBillingMessage(error.message || 'Failed to start Stripe checkout');
-      setBillingLoading(false);
-      return;
+      setBillingMessage(error.message || 'Failed to change plan');
     } finally {
-      if (!document.hidden) {
-        setBillingLoading(false);
-      }
+      setBillingLoading(false);
+    }
+  };
+
+  const handleTopUp = async () => {
+    const amount = Number(topUpAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setBillingMessage('Enter a valid top-up amount.');
+      return;
+    }
+    setBillingLoading(true);
+    setBillingMessage(null);
+    try {
+      const account = await topUpTokens(amount);
+      setSubscriptionAccount(account);
+      await refreshSubscription();
+    } catch (error: any) {
+      setBillingMessage(error.message || 'Failed to top up tokens');
+    } finally {
+      setBillingLoading(false);
     }
   };
 
@@ -774,7 +738,7 @@ const App: React.FC = () => {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account & Tokens</h3>
-              <p className="text-xs sm:text-sm leading-relaxed text-slate-400">Manage usage-based token billing and user id.</p>
+              <p className="text-xs sm:text-sm leading-relaxed text-slate-400">Manage subscription, tokens, and user id for billing.</p>
             </div>
             <div className="flex gap-2">
               <button
@@ -819,48 +783,64 @@ const App: React.FC = () => {
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Balance</label>
               <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3 space-y-1">
                 <div className="text-lg sm:text-xl font-semibold text-white leading-tight">{subscriptionAccount?.tokenBalance ?? '--'} tokens</div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Billing: {subscriptionAccount?.billingModel ?? 'usage'}</div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Tier: {subscriptionAccount?.tier ?? 'free'}</div>
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Top-up left: {subscriptionAccount?.monthlyRemainingTopUp ?? '--'}</div>
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Buy Tokens</label>
-              <div className="text-[10px] text-slate-400">Purchase token packs securely with Stripe Checkout.</div>
-              <div className="grid grid-cols-1 gap-2">
-                {stripeTokenPacks.map((pack) => (
-                  <button
-                    key={pack.id}
-                    onClick={() => handlePurchasePack(pack.id)}
-                    disabled={billingLoading || !stripeEnabled}
-                    className="w-full rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3 text-left text-xs text-slate-200 hover:border-emerald-500/60 transition-colors disabled:opacity-50"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="font-semibold text-white">{pack.label}</span>
-                      <span className="text-emerald-300">{new Intl.NumberFormat(undefined, { style: 'currency', currency: (pack.currency || 'usd').toUpperCase() }).format(pack.amountCents / 100)}</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 mt-1">{pack.tokens} tokens</div>
-                  </button>
-                ))}
-                {!stripeEnabled && (
-                  <div className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
-                    Stripe payments are not configured on this server.
-                  </div>
-                )}
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Top-up</label>
+              <div className="flex gap-2">
+                <input
+                  value={topUpAmount}
+                  onChange={(event) => setTopUpAmount(event.target.value)}
+                  className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                />
+                <button
+                  onClick={handleTopUp}
+                  disabled={billingLoading}
+                  className="px-4 py-3 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                >
+                  Add
+                </button>
               </div>
+              <div className="text-[10px] text-slate-400">Cycle ends {subscriptionAccount?.cycleEndsAt ? new Date(subscriptionAccount.cycleEndsAt).toLocaleDateString() : '--'}</div>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Action Token Cost</div>
-            {Object.entries(subscriptionAccount?.actionTokenCost || subscriptionBillingConfig?.actionTokenCost || {}).map(([action, tokens]) => (
-              <div key={action} className="flex items-center justify-between text-xs text-slate-300">
-                <span className="uppercase tracking-wider text-slate-400">{action.replace('_', ' ')}</span>
-                <span>{tokens} tokens</span>
-              </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            {subscriptionPlans.map((plan) => (
+              <button
+                key={plan.id}
+                onClick={() => handleSubscribeTier(plan.id)}
+                disabled={billingLoading}
+                className={`rounded-2xl border px-4 py-4 text-left transition-all min-h-[110px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+                  subscriptionAccount?.tier === plan.id
+                    ? 'border-indigo-500 bg-indigo-500/10 text-white'
+                    : 'border-slate-800 bg-slate-950/50 text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold">{plan.name}</div>
+                  {plan.id === 'pro' && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-300">Most Popular</span>
+                  )}
+                </div>
+                <div className="text-[10px] uppercase tracking-wider text-slate-400">{plan.monthlyTokens} tokens / month</div>
+                <div className="text-[10px] text-slate-400">Top-up cap {plan.maxTopUpPerMonth}</div>
+              </button>
             ))}
-            {!Object.keys(subscriptionAccount?.actionTokenCost || subscriptionBillingConfig?.actionTokenCost || {}).length && (
-              <div className="text-xs text-slate-400">Token cost data unavailable.</div>
-            )}
+          </div>
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              <span>Token usage this cycle</span>
+              <span>{usagePercent}%</span>
+            </div>
+            <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+              <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${usagePercent}%` }} />
+            </div>
+            <div className="text-[10px] text-slate-400">{usedThisCycle} used of {planMonthlyTokens} monthly tokens</div>
           </div>
 
           <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">

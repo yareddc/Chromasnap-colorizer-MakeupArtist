@@ -48,4 +48,7 @@ export interface SubscriptionUsageItem {
 
 export interface AuthUser {
   username: string;
+  name?: string;
+  email?: string;
+  phoneNumber?: string | null;
 }

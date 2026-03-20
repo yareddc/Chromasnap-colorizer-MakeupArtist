@@ -6,12 +6,16 @@
     "scripts": {
         "dev": "tsx watch src/index.ts",
         "build": "tsc",
-        "start": "node dist/index.js"
+        "start": "node dist/index.js",
+        "smoke:auth-cookie": "node scripts/smoke-auth-cookie.mjs",
+        "smoke:auth-cookie:cloudrun": "node scripts/smoke-auth-cookie-cloudrun.mjs",
+        "secrets:scan": "gitleaks detect --source .. --no-git --redact --config ../.gitleaks.toml"
     },
     "keywords": [],
     "author": "",
     "license": "ISC",
     "dependencies": {
+        "@google-cloud/storage": "^7.13.0",
         "@google/genai": "^1.38.0",
         "bcryptjs": "^2.4.3",
         "cors": "^2.8.5",
@@ -19,6 +23,7 @@
         "express": "^4.19.2",
         "express-rate-limit": "^7.5.0",
         "google-auth-library": "^10.5.0",
+        "helmet": "^8.1.0",
         "jsonwebtoken": "^9.0.2",
         "sharp": "^0.34.5",
         "sqlite": "^5.1.1",

@@ -1,13 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { randomUUID } from 'crypto';
+import fs, { existsSync } from 'fs';
+import path from 'path';
+import { randomUUID, timingSafeEqual } from 'crypto';
 import { GoogleGenAI, Type } from '@google/genai';
 import { GoogleAuth } from 'google-auth-library';
 import sharp from 'sharp';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import {
     addUsername,
     clearAuthLoginAttempts,
@@ -88,11 +91,76 @@ const ACTION_TOKEN_COST: Record<string, number> = {
 const userAccounts = new Map<string, UserAccount>();
 
 const BILLING_HEADER = 'x-user-id';
+const CLIENT_PLATFORM_HEADER = 'x-client-platform';
 const ADMIN_API_KEY_HEADER = 'x-admin-api-key';
 const AUTH_HEADER = 'authorization';
 const AUTH_TOKEN_LIFETIME = '7d';
+const isProduction = process.env.NODE_ENV === 'production';
+const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'chromasnap_auth';
+const AUTH_COOKIE_SAME_SITE = (process.env.AUTH_COOKIE_SAME_SITE || (isProduction ? 'none' : 'lax')) as 'lax' | 'strict' | 'none';
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.ADMIN_API_KEY || 'dev-only-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? process.env.ADMIN_API_KEY || 'dev-only-secret-change-me' : '');
+
+if (isProduction && !JWT_SECRET) {
+    throw new Error('JWT_SECRET must be configured in production');
+}
+
+const isPlaceholderLikeSecret = (value: string) => {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return true;
+
+    const weakMarkers = [
+        'change-me',
+        'replace',
+        'your_',
+        'your-',
+        'example',
+        'test',
+        'password',
+        'secret',
+        'dev-only-secret-change-me',
+        'dev-captcha-ok',
+        'succ-prob',
+    ];
+
+    return weakMarkers.some((marker) => normalized.includes(marker));
+};
+
+const looksLikeGoogleApiKey = (value: string) => /^AIza[0-9A-Za-z\-_]{20,}$/.test(value.trim());
+
+const validateProductionSecret = (name: string, value: string | undefined, minLength: number) => {
+    const rawValue = (value || '').trim();
+    if (!rawValue) {
+        throw new Error(`${name} must be configured in production`);
+    }
+    if (rawValue.length < minLength) {
+        throw new Error(`${name} must be at least ${minLength} characters in production`);
+    }
+    if (isPlaceholderLikeSecret(rawValue)) {
+        throw new Error(`${name} appears to be a placeholder or weak value in production`);
+    }
+};
+
+if (isProduction) {
+    validateProductionSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
+    validateProductionSecret('ADMIN_API_KEY', process.env.ADMIN_API_KEY, 24);
+
+    const adminUiToggleEnabled = process.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true'
+        || process.env.VITE_ENABLE_ADMIN_PAGE === 'true'
+        || process.env.ENABLE_ADMIN_PAGE === 'true';
+
+    if (adminUiToggleEnabled) {
+        throw new Error('Admin UI toggle env vars are not allowed in production');
+    }
+
+    if (looksLikeGoogleApiKey(process.env.JWT_SECRET || '')) {
+        throw new Error('JWT_SECRET cannot be a Google API key in production');
+    }
+
+    if (looksLikeGoogleApiKey(process.env.ADMIN_API_KEY || '')) {
+        throw new Error('ADMIN_API_KEY cannot be a Google API key in production');
+    }
+}
 
 const LOGIN_LOCK_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_LOCK_THRESHOLD = 5;
@@ -103,6 +171,114 @@ const CAPTCHA_VERIFY_URL = process.env.CAPTCHA_VERIFY_URL || 'https://challenges
 const CAPTCHA_SECRET_KEY = process.env.CAPTCHA_SECRET_KEY || '';
 
 const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+const ENFORCE_GOOGLE_PLAY_FOR_ANDROID = isProduction || process.env.ENFORCE_GOOGLE_PLAY_FOR_ANDROID === 'true';
+const PLAY_PACKAGE_NAME = (process.env.PLAY_PACKAGE_NAME || process.env.ANDROID_APPLICATION_ID || 'com.chromasnap.app').trim();
+const PLAY_PUBLISHER_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
+const consumedGooglePlayTokens = new Set<string>();
+
+const playSubscriptionProductToTier: Record<string, SubscriptionTier> = {
+    [process.env.PLAY_PRODUCT_SUBSCRIPTION_PRO || 'chromasnap_pro']: 'pro',
+    [process.env.PLAY_PRODUCT_SUBSCRIPTION_ENTERPRISE || 'chromasnap_enterprise']: 'enterprise',
+};
+
+const playTopupProductToTokens: Record<string, number> = {
+    [process.env.PLAY_PRODUCT_TOPUP_100 || 'chromasnap_topup_100']: 100,
+    [process.env.PLAY_PRODUCT_TOPUP_500 || 'chromasnap_topup_500']: 500,
+    [process.env.PLAY_PRODUCT_TOPUP_1000 || 'chromasnap_topup_1000']: 1000,
+};
+
+type GooglePlayProductType = 'subs' | 'inapp';
+
+const isAndroidClient = (req: express.Request) => {
+    const platformHeader = (req.header(CLIENT_PLATFORM_HEADER) || req.header(CLIENT_PLATFORM_HEADER.toUpperCase()) || '').toLowerCase();
+    if (platformHeader === 'android') return true;
+
+    const userAgent = String(req.header('user-agent') || '').toLowerCase();
+    return userAgent.includes('android');
+};
+
+const playAuth = new GoogleAuth({ scopes: [PLAY_PUBLISHER_SCOPE] });
+
+const getPlayAccessToken = async () => {
+    const client = await playAuth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    const token = tokenResponse?.token || '';
+    if (!token) throw new Error('Failed to obtain Google Play access token');
+    return token;
+};
+
+const callGooglePlayApi = async (url: string, init?: { method?: string; body?: any }) => {
+    const token = await getPlayAccessToken();
+    const response = await fetch(url, {
+        method: init?.method || 'GET',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        },
+        body: init?.body ? JSON.stringify(init.body) : undefined,
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const message = data?.error?.message || data?.message || 'Google Play API request failed';
+        throw new Error(message);
+    }
+
+    return data;
+};
+
+const verifyGooglePlayPurchase = async (productType: GooglePlayProductType, productId: string, purchaseToken: string) => {
+    const packageName = encodeURIComponent(PLAY_PACKAGE_NAME);
+    const encodedProductId = encodeURIComponent(productId);
+    const encodedToken = encodeURIComponent(purchaseToken);
+
+    if (productType === 'subs') {
+        const subscriptionUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/subscriptions/${encodedProductId}/tokens/${encodedToken}`;
+        const data = await callGooglePlayApi(subscriptionUrl);
+
+        const expiryMs = Number(data.expiryTimeMillis || 0);
+        const isExpired = Number.isFinite(expiryMs) && expiryMs > 0 ? expiryMs <= Date.now() : false;
+        if (isExpired) {
+            throw new Error('Google Play subscription is expired');
+        }
+
+        if (Number(data.cancelReason || 0) !== 0) {
+            throw new Error('Google Play subscription is canceled');
+        }
+
+        if (Number(data.acknowledgementState || 0) === 0) {
+            const ackUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/subscriptions/${encodedProductId}/tokens/${encodedToken}:acknowledge`;
+            await callGooglePlayApi(ackUrl, {
+                method: 'POST',
+                body: { developerPayload: 'chromasnap-server' },
+            });
+        }
+
+        return {
+            orderId: String(data.orderId || ''),
+            purchaseTimeMillis: Number(data.startTimeMillis || 0),
+        };
+    }
+
+    const inAppUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/products/${encodedProductId}/tokens/${encodedToken}`;
+    const data = await callGooglePlayApi(inAppUrl);
+    if (Number(data.purchaseState || 1) !== 0) {
+        throw new Error('Google Play in-app product is not purchased');
+    }
+
+    if (Number(data.acknowledgementState || 0) === 0) {
+        const ackUrl = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/purchases/products/${encodedProductId}/tokens/${encodedToken}:acknowledge`;
+        await callGooglePlayApi(ackUrl, {
+            method: 'POST',
+            body: { developerPayload: 'chromasnap-server' },
+        });
+    }
+
+    return {
+        orderId: String(data.orderId || ''),
+        purchaseTimeMillis: Number(data.purchaseTimeMillis || 0),
+    };
+};
 
 const resetCycleIfNeeded = (account: UserAccount) => {
     if (Date.now() - account.cycleStartedAt >= thirtyDaysMs) {
@@ -118,9 +294,12 @@ const getUserIdFromRequest = (req: express.Request) => {
     const authUserId = (req as BillingRequest).authUser?.username?.trim();
     if (authUserId) return authUserId;
 
+    const allowHeaderBillingId = process.env.ALLOW_HEADER_BILLING_ID === 'true' || !isProduction;
+    if (!allowHeaderBillingId) return '';
+
     const rawHeader = req.header(BILLING_HEADER) || req.header(BILLING_HEADER.toUpperCase());
-    const userId = (rawHeader || 'demo-user').trim();
-    return userId.length > 0 ? userId : 'demo-user';
+    const userId = (rawHeader || '').trim();
+    return userId.length > 0 ? userId : '';
 };
 
 const getOrCreateUserAccount = (userId: string): UserAccount => {
@@ -202,6 +381,22 @@ type BillingRequest = express.Request & {
 
 const sanitizeUsername = (username: string) => username.trim();
 
+const sanitizeEmail = (email: string) => email.trim().toLowerCase();
+
+const validateEmailFormat = (email: string) => {
+    const normalizedEmail = sanitizeEmail(email);
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+    return emailRegex.test(normalizedEmail);
+};
+
+const sanitizePhoneNumber = (phoneNumber: string) => phoneNumber.trim();
+
+const validatePhoneNumber = (phoneNumber: string) => {
+    const normalizedPhone = sanitizePhoneNumber(phoneNumber);
+    if (!normalizedPhone) return true;
+    return /^\+?[0-9()\-\s]{7,20}$/.test(normalizedPhone);
+};
+
 const validatePasswordStrength = (password: string) => {
     if (!password || password.length < 8) return 'Password must be at least 8 characters';
     if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return 'Password must include letters and numbers';
@@ -210,9 +405,47 @@ const validatePasswordStrength = (password: string) => {
 
 const signAuthToken = (username: string) => jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: AUTH_TOKEN_LIFETIME });
 
+const setAuthCookie = (res: express.Response, token: string) => {
+    res.cookie(AUTH_COOKIE_NAME, token, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: AUTH_COOKIE_SAME_SITE,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: '/',
+    });
+};
+
+const clearAuthCookie = (res: express.Response) => {
+    res.clearCookie(AUTH_COOKIE_NAME, {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: AUTH_COOKIE_SAME_SITE,
+        path: '/',
+    });
+};
+
+const getCookieValue = (cookieHeader: string | undefined, cookieName: string): string | null => {
+    if (!cookieHeader) return null;
+    const pieces = cookieHeader.split(';');
+    for (const piece of pieces) {
+        const [name, ...valueParts] = piece.trim().split('=');
+        if (name !== cookieName) continue;
+        const rawValue = valueParts.join('=');
+        if (!rawValue) return null;
+        try {
+            return decodeURIComponent(rawValue);
+        } catch {
+            return rawValue;
+        }
+    }
+    return null;
+};
+
 const attachAuthUser = (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     const rawAuth = req.header(AUTH_HEADER) || '';
-    const token = rawAuth.startsWith('Bearer ') ? rawAuth.slice(7).trim() : '';
+    const bearerToken = rawAuth.startsWith('Bearer ') ? rawAuth.slice(7).trim() : '';
+    const cookieToken = getCookieValue(req.header('cookie') || undefined, AUTH_COOKIE_NAME) || '';
+    const token = bearerToken || cookieToken;
 
     if (!token) return next();
 
@@ -330,8 +563,14 @@ const checkLoginLock = async (req: express.Request, res: express.Response, next:
 
 const attachBillingAccount = (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     const userId = getUserIdFromRequest(req);
-    const account = getOrCreateUserAccount(userId);
     const billingReq = req as BillingRequest;
+    if (!userId) {
+        billingReq.billingUserId = undefined;
+        billingReq.billingAccount = undefined;
+        return next();
+    }
+
+    const account = getOrCreateUserAccount(userId);
     billingReq.billingUserId = userId;
     billingReq.billingAccount = account;
     next();
@@ -344,9 +583,15 @@ const requireBilling = (action: keyof typeof ACTION_TOKEN_COST) => (
 ) => {
     try {
         const billingReq = req as BillingRequest;
-        const account = billingReq.billingAccount || getOrCreateUserAccount(getUserIdFromRequest(req));
+        const userId = billingReq.authUser?.username?.trim() || billingReq.billingUserId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const account = billingReq.billingAccount || getOrCreateUserAccount(userId);
         const cost = ACTION_TOKEN_COST[action] ?? 1;
         chargeTokens(account, action, cost);
+        billingReq.billingUserId = userId;
         billingReq.billingAccount = account;
         next();
     } catch (error: any) {
@@ -365,11 +610,78 @@ type AnimationJob = {
 
 const animationJobs = new Map<string, AnimationJob>();
 
+const configuredCorsOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+const canonicalWebOrigins = ['https://chromasnap.app', 'https://www.chromasnap.app'];
+
+const corsOptions: cors.CorsOptions = {
+    origin: (origin, callback) => {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+
+        if (canonicalWebOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        if (configuredCorsOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        if (!isProduction && configuredCorsOrigins.length === 0) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error('Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', BILLING_HEADER, ADMIN_API_KEY_HEADER, CLIENT_PLATFORM_HEADER],
+    credentials: true,
+    optionsSuccessStatus: 204,
+};
+
+const processingLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many image processing requests. Please try again shortly.' },
+});
+
+const cspDirectives = helmet.contentSecurityPolicy.getDefaultDirectives();
+cspDirectives['script-src'] = ["'self'", 'https://cdn.tailwindcss.com'];
+
 // Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Increased limit for base64 images
+app.use(
+    helmet({
+        contentSecurityPolicy: {
+            directives: cspDirectives,
+        },
+    })
+);
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '20mb' }));
+
+app.use((req, res, next) => {
+    const host = (req.headers.host || '').toLowerCase();
+    if (host === 'www.chromasnap.app') {
+        return res.redirect(308, `https://chromasnap.app${req.originalUrl || '/'}`);
+    }
+    next();
+});
+
 app.use(attachAuthUser);
 app.use(attachBillingAccount);
+app.use('/api/analyze', processingLimiter);
+app.use('/api/process', processingLimiter);
+app.use('/api/colorize', processingLimiter);
 
 /**
  * AI Client Factory
@@ -432,6 +744,19 @@ const normalizeAnimationImage = async (base64Data: string) => {
     };
 };
 
+const normalizeImageToPngBase64 = async (image: string): Promise<string> => {
+    const hasPrefix = typeof image === 'string' && image.includes(',');
+    const base64Data = hasPrefix ? image.split(',')[1] : image;
+
+    const inputBuffer = Buffer.from(base64Data, 'base64');
+    const normalizedBuffer = await sharp(inputBuffer)
+        .rotate()
+        .png()
+        .toBuffer();
+
+    return normalizedBuffer.toString('base64');
+};
+
 const extractVideoUriFromOperation = (operation: any): string | undefined => {
     const candidates = [
         operation?.response?.generatedVideos?.[0]?.video?.uri,
@@ -482,61 +807,289 @@ const getAnimationModelCandidates = () => {
 
     if (configured.length > 0) return configured;
 
+    const hasVertexConfig = Boolean(process.env.GCP_PROJECT_ID && process.env.GCP_LOCATION);
+
+    if (hasVertexConfig) {
+        return [
+            'veo-3.1-fast-generate-preview',
+            'veo-3.1-generate-preview',
+            'veo-3.0-fast-generate-001',
+            'veo-3.0-generate-001',
+            'veo-2.0-generate-001',
+        ];
+    }
+
     return [
-        'veo-3.1-generate-preview',
-        'veo-3.1-generate-001',
+        'veo-3.1-fast-preview',
+        'veo-3.1-standard-preview',
         'veo-2.0-generate-001',
-        'veo-2.0-generate-preview',
     ];
 };
 
+const parsePositiveInt = (value: string | undefined, fallback: number) => {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const animationPollIntervalMs = parsePositiveInt(process.env.ANIMATION_POLL_INTERVAL_MS, 3000);
+const animationMaxWaitMsPerModel = parsePositiveInt(process.env.ANIMATION_MAX_WAIT_MS_PER_MODEL, 180000);
+const animationMaxTotalWaitMs = parsePositiveInt(process.env.ANIMATION_MAX_TOTAL_WAIT_MS, 300000);
+
+const extractUriFromObject = (input: any): string | undefined => {
+    if (!input || typeof input !== 'object') return undefined;
+
+    const visited = new Set<any>();
+    const stack: any[] = [input];
+
+    while (stack.length) {
+        const current = stack.pop();
+        if (!current || typeof current !== 'object' || visited.has(current)) continue;
+        visited.add(current);
+
+        for (const [key, value] of Object.entries(current)) {
+            if (typeof value === 'string' && (key.toLowerCase().includes('uri') || key.toLowerCase().includes('url'))) {
+                if (/^(https?:\/\/|gs:\/\/)/i.test(value)) {
+                    return value;
+                }
+            }
+            if (value && typeof value === 'object') {
+                stack.push(value);
+            }
+        }
+    }
+
+    return undefined;
+};
+
+const generateVeo31VideoUri = async (model: string, base64Data: string, mimeType: string): Promise<string> => {
+    const geminiApiKey = (process.env.GEMINI_API_KEY || '').trim();
+    if (!geminiApiKey) {
+        throw new Error(`${model}: GEMINI_API_KEY is required for Gemini inlineData flow`);
+    }
+
+    const geminiClient = new GoogleGenAI({ apiKey: geminiApiKey });
+    const response = await geminiClient.models.generateContent({
+        model,
+        contents: [{
+            parts: [{
+                inlineData: { data: base64Data, mimeType }
+            }]
+        }],
+    });
+
+    const directUri = (response as any)?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+    if (typeof directUri === 'string' && directUri.length > 0) {
+        return directUri;
+    }
+
+    const discovered = extractUriFromObject(response);
+    if (discovered) {
+        return discovered;
+    }
+
+    throw new Error(`${model}: no video URI returned`);
+};
+
+const generateVeoVertexVideoUri = async (model: string, base64Data: string, mimeType: string): Promise<string> => {
+    if (!process.env.GCP_PROJECT_ID || !process.env.GCP_LOCATION) {
+        throw new Error(`${model}: GCP_PROJECT_ID and GCP_LOCATION are required for Vertex predict flow`);
+    }
+
+    const token = await getCloudAccessToken();
+    if (!token) {
+        throw new Error(`${model}: unable to obtain cloud access token`);
+    }
+
+    const endpoint = `https://${process.env.GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.GCP_PROJECT_ID}/locations/${process.env.GCP_LOCATION}/publishers/google/models/${model}:predictLongRunning`;
+    const body = {
+        instances: [{
+            prompt: 'Animate this exact image. Keep subject identity/background/details consistent. Add subtle natural motion only. High-definition, photorealistic.',
+            image: {
+                bytesBase64Encoded: base64Data,
+                mimeType,
+            }
+        }],
+        parameters: {
+            aspectRatio: '16:9',
+            resolution: '720p',
+        }
+    };
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+
+    const responseText = await response.text();
+    if (!response.ok) {
+        throw new Error(`${model}: predictLongRunning failed (${response.status}) ${responseText.slice(0, 300)}`);
+    }
+
+    let operation: any = null;
+    try {
+        operation = responseText ? JSON.parse(responseText) : {};
+    } catch {
+        throw new Error(`${model}: predictLongRunning returned non-JSON response`);
+    }
+
+    const operationName = operation?.name;
+    if (!operationName || typeof operationName !== 'string') {
+        throw new Error(`${model}: predictLongRunning did not return operation name`);
+    }
+
+    const fetchOperationEndpoint = `https://${process.env.GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.GCP_PROJECT_ID}/locations/${process.env.GCP_LOCATION}/publishers/google/models/${model}:fetchPredictOperation`;
+    const modelStartTime = Date.now();
+
+    while (!operation?.done && (Date.now() - modelStartTime) < animationMaxWaitMsPerModel) {
+        await new Promise(resolve => setTimeout(resolve, animationPollIntervalMs));
+        const opResponse = await fetch(fetchOperationEndpoint, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ operationName }),
+        });
+
+        const opText = await opResponse.text();
+        if (!opResponse.ok) {
+            throw new Error(`${model}: fetchPredictOperation failed (${opResponse.status}) ${opText.slice(0, 300)}`);
+        }
+
+        try {
+            operation = opText ? JSON.parse(opText) : operation;
+        } catch {
+            throw new Error(`${model}: operation poll returned non-JSON response`);
+        }
+    }
+
+    if (!operation?.done) {
+        throw new Error(`${model}: timed out after ${Math.round(animationMaxWaitMsPerModel / 1000)}s waiting for completion`);
+    }
+
+    const operationError = operation?.error?.message || operation?.error?.status;
+    if (operationError) {
+        throw new Error(`${model}: ${operationError}`);
+    }
+
+    // Try to extract URI first (for newer API versions)
+    const directUri =
+        operation?.response?.generatedVideos?.[0]?.video?.uri ||
+        operation?.response?.generatedVideos?.[0]?.videoUri ||
+        operation?.response?.generatedVideos?.[0]?.uri ||
+        operation?.response?.videos?.[0]?.video?.uri ||
+        operation?.response?.videos?.[0]?.videoUri ||
+        operation?.response?.videos?.[0]?.uri;
+
+    if (typeof directUri === 'string' && directUri.length > 0) {
+        return directUri;
+    }
+
+    // If no URI found, check for base64-encoded video bytes
+    const base64Video = operation?.response?.videos?.[0]?.bytesBase64Encoded;
+    if (typeof base64Video === 'string' && base64Video.length > 0) {
+        // Generate a unique filename for this video
+        const timestamp = Date.now();
+        const randomId = Math.random().toString(36).substring(2, 9);
+        const videoFileName = `video_${timestamp}_${randomId}.mp4`;
+        const videoPath = path.resolve(process.cwd(), 'public', videoFileName);
+
+        // Ensure the public directory exists
+        const publicDir = path.resolve(process.cwd(), 'public');
+        if (!fs.existsSync(publicDir)) {
+            fs.mkdirSync(publicDir, { recursive: true });
+        }
+
+        // Decode and save the video
+        const videoBuffer = Buffer.from(base64Video, 'base64');
+        fs.writeFileSync(videoPath, videoBuffer);
+
+        // Return a URL that can be fetched
+        return `http://localhost:3001/videos/${videoFileName}`;
+    }
+
+    const discovered = extractUriFromObject(operation);
+    if (discovered) {
+        return discovered;
+    }
+
+    console.warn(`${model}: Operation completed but no video URI found. Response structure:`, JSON.stringify({
+        operationName: operation?.name,
+        done: operation?.done,
+        responseKeys: Object.keys(operation?.response || {}),
+        responseKeysDeep: operation?.response ? Object.keys(operation.response).map(k => `${k}:${typeof operation.response[k]}`) : [],
+        fullResponse: JSON.stringify(operation?.response || {}).slice(0, 500)
+    }, null, 2));
+
+    throw new Error(`${model}: no video URI returned`);
+};
+
 const generateAnimationVideoUri = async (base64Data: string, mimeType: string): Promise<string> => {
-    const ai = createAI();
     const normalized = await normalizeAnimationImage(base64Data);
     const modelCandidates = getAnimationModelCandidates();
     const errors: string[] = [];
+    const totalStartTime = Date.now();
 
     for (const model of modelCandidates) {
+        if ((Date.now() - totalStartTime) >= animationMaxTotalWaitMs) {
+            errors.push(`global timeout reached after ${Math.round(animationMaxTotalWaitMs / 1000)}s`);
+            break;
+        }
+
         try {
-            let operation = await ai.models.generateVideos({
-                model,
-                prompt: 'Animate this exact image. Keep subject identity/background/details consistent. Add subtle natural motion only. High-definition, photorealistic.',
-                image: {
-                    imageBytes: normalized.imageBytes,
-                    mimeType: normalized.mimeType,
-                },
-                config: { numberOfVideos: 1 }
-            });
+            if (model === 'veo-2.0-generate-001' || /veo-3\.1-.*-001/.test(model) || /veo-3\.1-.*-preview/.test(model) || /veo-3\.0-.*/.test(model)) {
+                const uri = await generateVeoVertexVideoUri(model, normalized.imageBytes, normalized.mimeType);
+                if (uri) return uri;
+            } else if (model.startsWith('veo-3.1')) {
+                const uri = await generateVeo31VideoUri(model, normalized.imageBytes, normalized.mimeType);
+                if (uri) return uri;
+            } else {
+                const ai = createAI();
+                let operation = await ai.models.generateVideos({
+                    model,
+                    prompt: 'Animate this exact image. Keep subject identity/background/details consistent. Add subtle natural motion only. High-definition, photorealistic.',
+                    image: {
+                        imageBytes: normalized.imageBytes,
+                        mimeType: normalized.mimeType,
+                    },
+                    config: { numberOfVideos: 1 }
+                });
 
-            let attempts = 0;
-            while (!operation.done && attempts < 90) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                attempts += 1;
-                operation = await (ai.operations as any).getVideosOperation({ operation });
+                const modelStartTime = Date.now();
+                while (!operation.done && (Date.now() - modelStartTime) < animationMaxWaitMsPerModel) {
+                    await new Promise(resolve => setTimeout(resolve, animationPollIntervalMs));
+                    operation = await (ai.operations as any).getVideosOperation({ operation });
+                }
+
+                if (!operation.done) {
+                    errors.push(
+                        `${model}: timed out after ${Math.round(animationMaxWaitMsPerModel / 1000)}s waiting for completion`
+                    );
+                    continue;
+                }
+
+                const opErr = (operation as any)?.error?.message || (operation as any)?.response?.error?.message;
+                const videoUri = extractVideoUriFromOperation(operation);
+                if (videoUri) return videoUri;
+
+                const responseShape = {
+                    operationName: (operation as any)?.name,
+                    done: (operation as any)?.done,
+                    hasResponse: Boolean((operation as any)?.response),
+                    responseKeys: Object.keys((operation as any)?.response || {}),
+                    generatedVideosCount: ((operation as any)?.response?.generatedVideos || []).length,
+                    videosCount: ((operation as any)?.response?.videos || []).length,
+                    raiMediaFilteredCount: (operation as any)?.response?.raiMediaFilteredCount ?? null,
+                    error: opErr || null,
+                };
+                console.warn(`Video operation completed without URI for model ${model}:`, JSON.stringify(responseShape));
+
+                errors.push(`${model}: ${opErr || 'no video URI returned'}`);
             }
-
-            if (!operation.done) {
-                errors.push(`${model}: timed out waiting for completion`);
-                continue;
-            }
-
-            const opErr = (operation as any)?.error?.message || (operation as any)?.response?.error?.message;
-            const videoUri = extractVideoUriFromOperation(operation);
-            if (videoUri) return videoUri;
-
-            const responseShape = {
-                operationName: (operation as any)?.name,
-                done: (operation as any)?.done,
-                hasResponse: Boolean((operation as any)?.response),
-                responseKeys: Object.keys((operation as any)?.response || {}),
-                generatedVideosCount: ((operation as any)?.response?.generatedVideos || []).length,
-                videosCount: ((operation as any)?.response?.videos || []).length,
-                raiMediaFilteredCount: (operation as any)?.response?.raiMediaFilteredCount ?? null,
-                error: opErr || null,
-            };
-            console.warn(`Video operation completed without URI for model ${model}:`, JSON.stringify(responseShape));
-
-            errors.push(`${model}: ${opErr || 'no video URI returned'}`);
         } catch (error: any) {
             errors.push(`${model}: ${error?.message || String(error)}`);
         }
@@ -625,8 +1178,8 @@ const callColorizationAPI = async (base64Image: string) => {
 };
 
 const runColorization = async (image: string): Promise<string> => {
-    const base64Data = image.includes(',') ? image.split(',')[1] : image;
-    const result = await callColorizationAPI(base64Data);
+    const normalizedPngBase64 = await normalizeImageToPngBase64(image);
+    const result = await callColorizationAPI(normalizedPngBase64);
 
     if ((result as any).candidates) {
         const part = (result as any).candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
@@ -644,14 +1197,20 @@ const runColorization = async (image: string): Promise<string> => {
 
 app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
     try {
-        const { username, password, recoveryEmail } = req.body as {
+        const { username, password, recoveryEmail, email, name, phoneNumber } = req.body as {
             username?: string;
             password?: string;
             recoveryEmail?: string;
+            email?: string;
+            name?: string;
+            phoneNumber?: string;
         };
 
         const normalizedUsername = sanitizeUsername(username || '');
-        const normalizedRecoveryEmail = (recoveryEmail || '').trim().toLowerCase();
+        const normalizedEmail = sanitizeEmail(email || recoveryEmail || '');
+        const normalizedRecoveryEmail = normalizedEmail;
+        const normalizedName = (name || '').trim();
+        const normalizedPhoneNumber = sanitizePhoneNumber(phoneNumber || '');
 
         if (!normalizedUsername || normalizedUsername.length < 3) {
             return res.status(400).json({ error: 'Username must be at least 3 characters' });
@@ -663,7 +1222,19 @@ app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
         }
 
         if (!normalizedRecoveryEmail || !normalizedRecoveryEmail.includes('@')) {
-            return res.status(400).json({ error: 'Valid recoveryEmail is required' });
+            return res.status(400).json({ error: 'Valid email is required' });
+        }
+
+        if (!validateEmailFormat(normalizedEmail)) {
+            return res.status(400).json({ error: 'Email format is invalid' });
+        }
+
+        if (!normalizedName || normalizedName.length < 2) {
+            return res.status(400).json({ error: 'Name must be at least 2 characters' });
+        }
+
+        if (!validatePhoneNumber(normalizedPhoneNumber)) {
+            return res.status(400).json({ error: 'Phone number format is invalid' });
         }
 
         const existing = await getAuthUserByUsername(normalizedUsername);
@@ -672,15 +1243,27 @@ app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
         }
 
         const passwordHash = await bcrypt.hash(password as string, 12);
-        await createAuthUser(normalizedUsername, passwordHash, normalizedRecoveryEmail);
+        await createAuthUser(
+            normalizedUsername,
+            passwordHash,
+            normalizedRecoveryEmail,
+            normalizedName,
+            normalizedEmail,
+            normalizedPhoneNumber || undefined
+        );
         await addUsername('subscriber', normalizedUsername);
 
         const token = signAuthToken(normalizedUsername);
+        setAuthCookie(res, token);
         const account = getOrCreateUserAccount(normalizedUsername);
 
         res.status(201).json({
-            token,
-            user: { username: normalizedUsername },
+            user: {
+                username: normalizedUsername,
+                name: normalizedName,
+                email: normalizedEmail,
+                phoneNumber: normalizedPhoneNumber || null,
+            },
             account: publicAccountView(account),
         });
     } catch (error: any) {
@@ -725,11 +1308,16 @@ app.post('/api/auth/login', loginLimiter, checkLoginLock, async (req, res) => {
         if (attemptKey) await clearAuthLoginAttempts(attemptKey);
 
         const token = signAuthToken(authUser.username);
+        setAuthCookie(res, token);
         const account = getOrCreateUserAccount(authUser.username);
 
         res.json({
-            token,
-            user: { username: authUser.username },
+            user: {
+                username: authUser.username,
+                name: authUser.name,
+                email: authUser.email,
+                phoneNumber: authUser.phoneNumber || null,
+            },
             account: publicAccountView(account),
         });
     } catch (error: any) {
@@ -737,9 +1325,26 @@ app.post('/api/auth/login', loginLimiter, checkLoginLock, async (req, res) => {
     }
 });
 
-app.get('/api/auth/me', requireAuth, (req, res) => {
+app.get('/api/auth/me', requireAuth, async (req, res) => {
     const authUser = (req as BillingRequest).authUser!;
-    res.json({ user: { username: authUser.username } });
+    const userRecord = await getAuthUserByUsername(authUser.username);
+    if (!userRecord) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    res.json({
+        user: {
+            username: userRecord.username,
+            name: userRecord.name,
+            email: userRecord.email,
+            phoneNumber: userRecord.phoneNumber || null,
+        }
+    });
+});
+
+app.post('/api/auth/logout', (_req, res) => {
+    clearAuthCookie(res);
+    res.status(204).send();
 });
 
 app.post('/api/auth/recover/username', authWriteLimiter, async (req, res) => {
@@ -831,24 +1436,118 @@ app.get('/api/health', (_req, res) => {
     });
 });
 
+app.get('/healthz', (_req, res) => {
+    res.status(200).json({ ok: true });
+});
+
+app.get('/api/healthz', (_req, res) => {
+    res.status(200).json({ ok: true });
+});
+
 app.get('/api/subscription/plans', (_req, res) => {
     res.json({ plans: Object.values(PLAN_CONFIG) });
 });
 
-app.get('/api/subscription/me', (req, res) => {
-    const userId = getUserIdFromRequest(req);
+app.post('/api/billing/google-play/verify', requireAuth, async (req, res) => {
+    try {
+        const { productType, productId, purchaseToken } = req.body as {
+            productType?: GooglePlayProductType;
+            productId?: string;
+            purchaseToken?: string;
+        };
+
+        if (productType !== 'subs' && productType !== 'inapp') {
+            return res.status(400).json({ error: 'productType must be subs or inapp' });
+        }
+
+        const normalizedProductId = String(productId || '').trim();
+        const normalizedToken = String(purchaseToken || '').trim();
+        if (!normalizedProductId || !normalizedToken) {
+            return res.status(400).json({ error: 'productId and purchaseToken are required' });
+        }
+
+        if (consumedGooglePlayTokens.has(normalizedToken)) {
+            return res.status(409).json({ error: 'Purchase token already processed' });
+        }
+
+        const verification = await verifyGooglePlayPurchase(productType, normalizedProductId, normalizedToken);
+        const userId = (req as BillingRequest).authUser!.username;
+        const account = getOrCreateUserAccount(userId);
+
+        if (productType === 'subs') {
+            const tier = playSubscriptionProductToTier[normalizedProductId];
+            if (!tier) {
+                return res.status(400).json({ error: 'Unmapped Google Play subscription productId' });
+            }
+
+            const plan = PLAN_CONFIG[tier];
+            account.tier = tier;
+            account.tokenBalance = plan.monthlyTokens;
+            account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
+            account.cycleStartedAt = Date.now();
+            account.usage = [];
+        } else {
+            const topUpTokens = playTopupProductToTokens[normalizedProductId];
+            if (!topUpTokens || topUpTokens <= 0) {
+                return res.status(400).json({ error: 'Unmapped Google Play top-up productId' });
+            }
+
+            if (topUpTokens > account.monthlyRemainingTopUp) {
+                return res.status(400).json({
+                    error: 'Top-up limit exceeded for current billing cycle',
+                    remaining: account.monthlyRemainingTopUp,
+                });
+            }
+
+            account.tokenBalance += topUpTokens;
+            account.monthlyRemainingTopUp -= topUpTokens;
+            account.usage.unshift({
+                id: randomUUID(),
+                timestamp: Date.now(),
+                action: 'play_topup',
+                tokens: topUpTokens,
+            });
+            if (account.usage.length > 200) {
+                account.usage = account.usage.slice(0, 200);
+            }
+        }
+
+        consumedGooglePlayTokens.add(normalizedToken);
+
+        res.json({
+            account: publicAccountView(account),
+            verification: {
+                orderId: verification.orderId,
+                purchaseTimeMillis: verification.purchaseTimeMillis,
+                productId: normalizedProductId,
+                productType,
+            },
+        });
+    } catch (error: any) {
+        res.status(400).json({ error: error.message || 'Google Play purchase verification failed' });
+    }
+});
+
+app.get('/api/subscription/me', requireAuth, (req, res) => {
+    const userId = (req as BillingRequest).authUser!.username;
     const account = getOrCreateUserAccount(userId);
     res.json({ account: publicAccountView(account) });
 });
 
-app.post('/api/subscription/subscribe', (req, res) => {
+app.post('/api/subscription/subscribe', requireAuth, (req, res) => {
     try {
+        if (ENFORCE_GOOGLE_PLAY_FOR_ANDROID && isAndroidClient(req)) {
+            return res.status(409).json({
+                error: 'Direct subscription changes are disabled on Android. Use Google Play Billing purchase flow and /api/billing/google-play/verify.',
+            });
+        }
+
         const { tier } = req.body as { tier?: SubscriptionTier };
         if (!tier || !PLAN_CONFIG[tier]) {
             return res.status(400).json({ error: 'Valid tier is required (free, pro, enterprise)' });
         }
 
-        const userId = getUserIdFromRequest(req);
+        const userId = (req as BillingRequest).authUser!.username;
         const account = getOrCreateUserAccount(userId);
         const plan = PLAN_CONFIG[tier];
 
@@ -864,15 +1563,21 @@ app.post('/api/subscription/subscribe', (req, res) => {
     }
 });
 
-app.post('/api/subscription/topup', (req, res) => {
+app.post('/api/subscription/topup', requireAuth, (req, res) => {
     try {
+        if (ENFORCE_GOOGLE_PLAY_FOR_ANDROID && isAndroidClient(req)) {
+            return res.status(409).json({
+                error: 'Direct token top-up is disabled on Android. Use Google Play Billing purchase flow and /api/billing/google-play/verify.',
+            });
+        }
+
         const { tokens } = req.body as { tokens?: number };
         const topUp = Number(tokens);
         if (!Number.isFinite(topUp) || topUp <= 0) {
             return res.status(400).json({ error: 'tokens must be a positive number' });
         }
 
-        const userId = getUserIdFromRequest(req);
+        const userId = (req as BillingRequest).authUser!.username;
         const account = getOrCreateUserAccount(userId);
 
         if (topUp > account.monthlyRemainingTopUp) {
@@ -891,14 +1596,21 @@ app.post('/api/subscription/topup', (req, res) => {
     }
 });
 
-app.get('/api/subscription/usage', (req, res) => {
-    const userId = getUserIdFromRequest(req);
+app.get('/api/subscription/usage', requireAuth, (req, res) => {
+    const userId = (req as BillingRequest).authUser!.username;
     const account = getOrCreateUserAccount(userId);
     res.json({
         account: publicAccountView(account),
         usage: account.usage,
     });
 });
+
+const safeConstantTimeCompare = (a: string, b: string) => {
+    const left = Buffer.from(a);
+    const right = Buffer.from(b);
+    if (left.length !== right.length) return false;
+    return timingSafeEqual(left, right);
+};
 
 const requireAdminAccess = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const expectedAdminApiKey = process.env.ADMIN_API_KEY;
@@ -907,7 +1619,7 @@ const requireAdminAccess = (req: express.Request, res: express.Response, next: e
     }
 
     const providedApiKey = req.header(ADMIN_API_KEY_HEADER) || req.header(ADMIN_API_KEY_HEADER.toUpperCase());
-    if (!providedApiKey || providedApiKey !== expectedAdminApiKey) {
+    if (!providedApiKey || !safeConstantTimeCompare(providedApiKey, expectedAdminApiKey)) {
         return res.status(403).json({ error: 'Forbidden' });
     }
 
@@ -979,7 +1691,7 @@ app.post('/api/analyze/monochromatic', async (req, res) => {
         if (!image) return res.status(400).json({ error: 'Image data required' });
 
         const ai = createAI();
-        const base64Data = image.includes(',') ? image.split(',')[1] : image;
+        const base64Data = await normalizeImageToPngBase64(image);
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -1020,7 +1732,7 @@ app.post('/api/analyze/safety', async (req, res) => {
         if (!image) return res.status(400).json({ error: 'Image data required' });
 
         const ai = createAI();
-        const base64Data = image.includes(',') ? image.split(',')[1] : image;
+        const base64Data = await normalizeImageToPngBase64(image);
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -1264,6 +1976,29 @@ app.get('/api/process/animate/result/:jobId', async (req, res) => {
     }
 });
 
+app.get('/videos/:filename', (req, res) => {
+    const filename = req.params.filename;
+    // Security: only allow alphanumeric, underscore, and dot
+    if (!/^[\w\-\.]+\.mp4$/.test(filename)) {
+        return res.status(400).json({ error: 'Invalid filename' });
+    }
+    
+    const videoPath = path.resolve(process.cwd(), 'public', filename);
+    const publicDir = path.resolve(process.cwd(), 'public');
+    
+    // Security: ensure the path is within public directory
+    if (!videoPath.startsWith(publicDir)) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+    
+    if (!fs.existsSync(videoPath)) {
+        return res.status(404).json({ error: 'Video not found' });
+    }
+    
+    res.setHeader('Content-Type', 'video/mp4');
+    return res.sendFile(videoPath);
+});
+
 app.post('/api/process/animate', requireBilling('animate_start'), async (req, res) => {
     try {
         const { image } = req.body;
@@ -1313,6 +2048,17 @@ app.post('/api/animate', requireBilling('animate_start'), async (req, res) => {
         res.status(500).json({ error: error.message || 'Animation failed' });
     }
 });
+
+const frontendBuildPath = path.resolve(__dirname, '../public');
+const frontendIndexPath = path.join(frontendBuildPath, 'index.html');
+
+if (existsSync(frontendIndexPath)) {
+    app.use(express.static(frontendBuildPath));
+
+    app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+        res.sendFile(frontendIndexPath);
+    });
+}
 
 const startServer = async () => {
     await initUsernameDatabase();

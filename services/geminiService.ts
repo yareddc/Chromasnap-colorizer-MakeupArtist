@@ -8,7 +8,13 @@ import type { AuthUser, SubscriptionAccount, SubscriptionPlan, SubscriptionUsage
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const USER_ID_STORAGE_KEY = 'chromasnap_user_id';
-const AUTH_TOKEN_STORAGE_KEY = 'chromasnap_auth_token';
+
+const getClientPlatform = (): 'android' | 'ios' | 'web' => {
+  const userAgent = String(globalThis.navigator?.userAgent || '').toLowerCase();
+  if (userAgent.includes('android')) return 'android';
+  if (userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ipod')) return 'ios';
+  return 'web';
+};
 
 const getUserId = (): string => {
   const existing = localStorage.getItem(USER_ID_STORAGE_KEY);
@@ -31,23 +37,22 @@ export const setCurrentUserId = (userId: string): string => {
 };
 
 const getJsonHeaders = () => {
-  const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
   return {
     'Content-Type': 'application/json',
     'x-user-id': getUserId(),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'x-client-platform': getClientPlatform(),
   };
 };
 
-const setAuthToken = (token: string) => {
-  localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
-};
+const withAuthCredentials: RequestCredentials = 'include';
 
-export const clearAuthToken = () => {
-  localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+export const clearAuthToken = async () => {
+  await fetch(API_ENDPOINTS.AUTH_LOGOUT, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+  }).catch(() => undefined);
 };
-
-export const hasAuthToken = (): boolean => Boolean(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY));
 
 const parseJsonResponse = async (response: Response) => {
   const contentType = response.headers.get('content-type');
@@ -61,6 +66,7 @@ export const isBlackAndWhite = async (base64Image: string): Promise<boolean> => 
   try {
     const response = await fetch(API_ENDPOINTS.ANALYZE_MONOCHROMATIC, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
     });
@@ -81,6 +87,7 @@ export const colorizeImage = async (base64Image: string, theme: string = 'Natura
   try {
     const response = await fetch(API_ENDPOINTS.PROCESS_COLORIZE, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image, theme }),
     });
@@ -109,6 +116,7 @@ export const upscaleImage = async (base64Image: string): Promise<string> => {
   try {
     const response = await fetch(API_ENDPOINTS.PROCESS_UPSCALE, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
     });
@@ -136,6 +144,7 @@ export const enhanceVibrancy = async (base64Image: string): Promise<string> => {
   try {
     const response = await fetch(API_ENDPOINTS.PROCESS_VIBRANCY, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
     });
@@ -163,6 +172,7 @@ export const sharpenImage = async (base64Image: string): Promise<string> => {
   try {
     const response = await fetch(API_ENDPOINTS.PROCESS_SHARPEN, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
     });
@@ -190,6 +200,7 @@ export const checkImageSafety = async (base64Image: string): Promise<{ isSafe: b
   try {
     const response = await fetch(API_ENDPOINTS.ANALYZE_SAFETY, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
     });
@@ -213,6 +224,7 @@ export const animateImage = async (
     onProgress?.('Queueing animation job...');
     const startResponse = await fetch(API_ENDPOINTS.PROCESS_ANIMATE_START, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
     });
@@ -222,12 +234,13 @@ export const animateImage = async (
       const jobId = startData.jobId as string | undefined;
 
       if (jobId) {
-        const maxPolls = 120;
-        const pollIntervalMs = 5000;
+        const maxPolls = 90;
+        const pollIntervalMs = 3000;
 
         for (let attempt = 0; attempt < maxPolls; attempt += 1) {
           onProgress?.(`Generating animation... (${attempt + 1}/${maxPolls})`);
           const statusResponse = await fetch(`${API_ENDPOINTS.PROCESS_ANIMATE_STATUS}/${jobId}`, {
+            credentials: withAuthCredentials,
             headers: getJsonHeaders(),
           });
           if (statusResponse.ok) {
@@ -235,6 +248,7 @@ export const animateImage = async (
 
             if (statusData.status === 'done') {
               const resultResponse = await fetch(`${API_ENDPOINTS.PROCESS_ANIMATE_RESULT}/${jobId}`, {
+                credentials: withAuthCredentials,
                 headers: getJsonHeaders(),
               });
               if (resultResponse.ok) {
@@ -255,13 +269,14 @@ export const animateImage = async (
           await sleep(pollIntervalMs);
         }
 
-        throw new Error('Animation timed out. Please try again.');
+        throw new Error('Animation timed out after about 4.5 minutes. Please try again.');
       }
     }
 
     onProgress?.('Generating animation...');
     const response = await fetch(API_ENDPOINTS.PROCESS_ANIMATE, {
       method: 'POST',
+      credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
     });
@@ -292,6 +307,7 @@ export const animateImage = async (
 
 export const fetchSubscriptionPlans = async (): Promise<SubscriptionPlan[]> => {
   const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_PLANS, {
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
   });
   if (!response.ok) {
@@ -303,6 +319,7 @@ export const fetchSubscriptionPlans = async (): Promise<SubscriptionPlan[]> => {
 
 export const fetchSubscriptionMe = async (): Promise<SubscriptionAccount> => {
   const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_ME, {
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
   });
   if (!response.ok) {
@@ -314,6 +331,7 @@ export const fetchSubscriptionMe = async (): Promise<SubscriptionAccount> => {
 
 export const fetchSubscriptionUsage = async (): Promise<{ account: SubscriptionAccount; usage: SubscriptionUsageItem[] }> => {
   const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_USAGE, {
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
   });
   if (!response.ok) {
@@ -325,6 +343,7 @@ export const fetchSubscriptionUsage = async (): Promise<{ account: SubscriptionA
 export const subscribeToPlan = async (tier: SubscriptionPlan['id']): Promise<SubscriptionAccount> => {
   const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_SUBSCRIBE, {
     method: 'POST',
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
     body: JSON.stringify({ tier }),
   });
@@ -335,9 +354,10 @@ export const subscribeToPlan = async (tier: SubscriptionPlan['id']): Promise<Sub
   return data.account as SubscriptionAccount;
 };
 
-export const registerUser = async (payload: { username: string; password: string; recoveryEmail: string }): Promise<{ user: AuthUser; account: SubscriptionAccount }> => {
+export const registerUser = async (payload: { username: string; password: string; name: string; email: string; phoneNumber?: string }): Promise<{ user: AuthUser; account: SubscriptionAccount }> => {
   const response = await fetch(API_ENDPOINTS.AUTH_REGISTER, {
     method: 'POST',
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
     body: JSON.stringify(payload),
   });
@@ -346,10 +366,7 @@ export const registerUser = async (payload: { username: string; password: string
     throw new Error(data.error || 'Failed to register');
   }
 
-  if (data.token) {
-    setAuthToken(String(data.token));
-    setCurrentUserId(String(data.user?.username || payload.username));
-  }
+  setCurrentUserId(String(data.user?.username || payload.username));
 
   return {
     user: data.user as AuthUser,
@@ -360,6 +377,7 @@ export const registerUser = async (payload: { username: string; password: string
 export const loginUser = async (payload: { username: string; password: string; captchaToken?: string }): Promise<{ user: AuthUser; account: SubscriptionAccount }> => {
   const response = await fetch(API_ENDPOINTS.AUTH_LOGIN, {
     method: 'POST',
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
     body: JSON.stringify(payload),
   });
@@ -370,10 +388,7 @@ export const loginUser = async (payload: { username: string; password: string; c
     throw error;
   }
 
-  if (data.token) {
-    setAuthToken(String(data.token));
-    setCurrentUserId(String(data.user?.username || payload.username));
-  }
+  setCurrentUserId(String(data.user?.username || payload.username));
 
   return {
     user: data.user as AuthUser,
@@ -382,13 +397,11 @@ export const loginUser = async (payload: { username: string; password: string; c
 };
 
 export const fetchAuthMe = async (): Promise<AuthUser | null> => {
-  if (!hasAuthToken()) return null;
-
   const response = await fetch(API_ENDPOINTS.AUTH_ME, {
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
   });
   if (!response.ok) {
-    clearAuthToken();
     return null;
   }
 
@@ -399,6 +412,7 @@ export const fetchAuthMe = async (): Promise<AuthUser | null> => {
 export const recoverUsername = async (recoveryEmail: string): Promise<string[]> => {
   const response = await fetch(API_ENDPOINTS.AUTH_RECOVER_USERNAME, {
     method: 'POST',
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
     body: JSON.stringify({ recoveryEmail }),
   });
@@ -412,6 +426,7 @@ export const recoverUsername = async (recoveryEmail: string): Promise<string[]> 
 export const requestPasswordReset = async (payload: { username: string; recoveryEmail: string }): Promise<{ expiresAt?: number; resetToken?: string }> => {
   const response = await fetch(API_ENDPOINTS.AUTH_RECOVER_PASSWORD_REQUEST, {
     method: 'POST',
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
     body: JSON.stringify(payload),
   });
@@ -428,6 +443,7 @@ export const requestPasswordReset = async (payload: { username: string; recovery
 export const confirmPasswordReset = async (payload: { resetToken: string; newPassword: string }): Promise<void> => {
   const response = await fetch(API_ENDPOINTS.AUTH_RECOVER_PASSWORD_CONFIRM, {
     method: 'POST',
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
     body: JSON.stringify(payload),
   });
@@ -440,12 +456,33 @@ export const confirmPasswordReset = async (payload: { resetToken: string; newPas
 export const topUpTokens = async (tokens: number): Promise<SubscriptionAccount> => {
   const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_TOPUP, {
     method: 'POST',
+    credentials: withAuthCredentials,
     headers: getJsonHeaders(),
     body: JSON.stringify({ tokens }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || 'Failed to top up tokens');
+  }
+  return data.account as SubscriptionAccount;
+};
+
+export type GooglePlayProductType = 'subs' | 'inapp';
+
+export const verifyGooglePlayPurchase = async (
+  productType: GooglePlayProductType,
+  productId: string,
+  purchaseToken: string,
+): Promise<SubscriptionAccount> => {
+  const response = await fetch(API_ENDPOINTS.BILLING_GOOGLE_PLAY_VERIFY, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({ productType, productId, purchaseToken }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to verify Google Play purchase');
   }
   return data.account as SubscriptionAccount;
 };

@@ -1,0 +1,18 @@
+title = "ChromaSnap gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allow obvious fake placeholders in docs/examples"
+regexes = [
+  '''your[_-]?api[_-]?key''',
+  '''replace-with-a-long-random-secret''',
+  '''dev-only-secret-change-me''',
+  '''dev-captcha-ok'''
+]
+paths = [
+  '''server/.env.example''',
+  '''README.md''',
+  '''API_CONFIGURATION_GUIDE.md'''
+]

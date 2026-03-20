@@ -3,11 +3,13 @@
  * Centralized place to manage API base URL and endpoints
  */
 
-// Get the API base URL from environment variables
-// Falls back to http://localhost:3001 if not set
-const API_BASE_URL = (import.meta.env.REACT_APP_API_BASE_URL || 
-                      process.env.REACT_APP_API_BASE_URL || 
-                      'http://localhost:3001') as string;
+// Get the API base URL from environment variables.
+// In deployed web builds, default to same-origin so API calls target the Cloud Run host.
+const resolveDefaultApiBaseUrl = (): string => '';
+
+const API_BASE_URL = (import.meta.env.REACT_APP_API_BASE_URL ||
+  process.env.REACT_APP_API_BASE_URL ||
+  resolveDefaultApiBaseUrl()) as string;
 
 /**
  * API Endpoints
@@ -34,11 +36,13 @@ export const API_ENDPOINTS = {
   SUBSCRIPTION_SUBSCRIBE: `${API_BASE_URL}/api/subscription/subscribe`,
   SUBSCRIPTION_TOPUP: `${API_BASE_URL}/api/subscription/topup`,
   SUBSCRIPTION_USAGE: `${API_BASE_URL}/api/subscription/usage`,
+  BILLING_GOOGLE_PLAY_VERIFY: `${API_BASE_URL}/api/billing/google-play/verify`,
 
   // Auth endpoints
   AUTH_REGISTER: `${API_BASE_URL}/api/auth/register`,
   AUTH_LOGIN: `${API_BASE_URL}/api/auth/login`,
   AUTH_ME: `${API_BASE_URL}/api/auth/me`,
+  AUTH_LOGOUT: `${API_BASE_URL}/api/auth/logout`,
   AUTH_RECOVER_USERNAME: `${API_BASE_URL}/api/auth/recover/username`,
   AUTH_RECOVER_PASSWORD_REQUEST: `${API_BASE_URL}/api/auth/recover/password/request`,
   AUTH_RECOVER_PASSWORD_CONFIRM: `${API_BASE_URL}/api/auth/recover/password/confirm`,

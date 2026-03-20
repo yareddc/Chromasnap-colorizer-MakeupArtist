@@ -1,7 +1,8 @@
 import path from 'path';
-import { mkdir } from 'fs/promises';
+import { mkdir, readFile } from 'fs/promises';
 import sqlite3 from 'sqlite3';
 import { open, type Database } from 'sqlite';
+import { Storage } from '@google-cloud/storage';
 
 export type UsernameRole = 'subscriber' | 'admin';
 
@@ -9,6 +10,9 @@ export type AuthUserRecord = {
     username: string;
     passwordHash: string;
     recoveryEmail: string;
+    name: string;
+    email: string;
+    phoneNumber?: string;
 };
 
 export type AuthLoginAttemptState = {
@@ -22,7 +26,12 @@ export type AuthLoginAttemptState = {
 
 let database: Database<sqlite3.Database, sqlite3.Statement> | null = null;
 
-const dbFilePath = path.resolve(process.cwd(), 'data', 'usernames.db');
+const persistentBucket = (process.env.USER_DB_GCS_BUCKET || '').trim();
+const persistentObject = (process.env.USER_DB_GCS_OBJECT || 'usernames.db').trim();
+const dataRootPath = persistentBucket ? path.resolve('/tmp', 'chromasnap-data') : path.resolve(process.cwd(), 'data');
+const dbFilePath = path.resolve(dataRootPath, 'usernames.db');
+const storage = persistentBucket ? new Storage() : null;
+let persistQueue: Promise<void> = Promise.resolve();
 
 const normalizeUsername = (username: string) => username.trim();
 
@@ -33,10 +42,37 @@ const getDatabase = () => {
     return database;
 };
 
+const downloadDatabaseIfNeeded = async () => {
+    if (!storage || !persistentBucket) return;
+
+    const file = storage.bucket(persistentBucket).file(persistentObject);
+    const [exists] = await file.exists();
+    if (!exists) return;
+
+    await file.download({ destination: dbFilePath });
+};
+
+const persistDatabase = async () => {
+    if (!storage || !persistentBucket) return;
+
+    const fileBytes = await readFile(dbFilePath);
+    const file = storage.bucket(persistentBucket).file(persistentObject);
+    await file.save(fileBytes, {
+        resumable: false,
+        contentType: 'application/x-sqlite3',
+    });
+};
+
+const queuePersistDatabase = async () => {
+    persistQueue = persistQueue.then(() => persistDatabase());
+    await persistQueue;
+};
+
 export const initUsernameDatabase = async () => {
     if (database) return database;
 
     await mkdir(path.dirname(dbFilePath), { recursive: true });
+    await downloadDatabaseIfNeeded();
 
     const db = await open({
         filename: dbFilePath,
@@ -59,9 +95,30 @@ export const initUsernameDatabase = async () => {
             username TEXT NOT NULL UNIQUE COLLATE NOCASE,
             password_hash TEXT NOT NULL,
             recovery_email TEXT NOT NULL COLLATE NOCASE,
+            name TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '' COLLATE NOCASE,
+            phone_number TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     `);
+
+    const authUserColumns = await db.all<{ name: string }[]>(`PRAGMA table_info(auth_users)`);
+    const authUserColumnNames = new Set(authUserColumns.map((column) => String(column.name).toLowerCase()));
+
+    if (!authUserColumnNames.has('name')) {
+        await db.exec(`ALTER TABLE auth_users ADD COLUMN name TEXT NOT NULL DEFAULT ''`);
+    }
+
+    if (!authUserColumnNames.has('email')) {
+        await db.exec(`ALTER TABLE auth_users ADD COLUMN email TEXT NOT NULL DEFAULT '' COLLATE NOCASE`);
+    }
+
+    if (!authUserColumnNames.has('phone_number')) {
+        await db.exec(`ALTER TABLE auth_users ADD COLUMN phone_number TEXT`);
+    }
+
+    await db.run(`UPDATE auth_users SET email = recovery_email WHERE email IS NULL OR TRIM(email) = ''`);
+    await db.run(`UPDATE auth_users SET name = username WHERE name IS NULL OR TRIM(name) = ''`);
 
     await db.exec(`
         CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -85,6 +142,15 @@ export const initUsernameDatabase = async () => {
     `);
 
     database = db;
+
+    if (persistentBucket) {
+        try {
+            await queuePersistDatabase();
+        } catch (error) {
+            console.error('Failed to persist user database on init:', error);
+        }
+    }
+
     return db;
 };
 
@@ -100,6 +166,7 @@ export const addUsername = async (role: UsernameRole, username: string) => {
         normalized,
         role
     );
+    await queuePersistDatabase();
 };
 
 export const listUsernames = async (role: UsernameRole) => {
@@ -125,23 +192,42 @@ export const removeUsername = async (role: UsernameRole, username: string) => {
         normalized
     );
 
+    if ((result.changes || 0) > 0) {
+        await queuePersistDatabase();
+    }
+
     return (result.changes || 0) > 0;
 };
 
-export const createAuthUser = async (username: string, passwordHash: string, recoveryEmail: string) => {
+export const createAuthUser = async (
+    username: string,
+    passwordHash: string,
+    recoveryEmail: string,
+    name: string,
+    email: string,
+    phoneNumber?: string
+) => {
     const normalizedUsername = normalizeUsername(username);
     const normalizedRecoveryEmail = recoveryEmail.trim().toLowerCase();
-    if (!normalizedUsername || !passwordHash || !normalizedRecoveryEmail) {
-        throw new Error('username, passwordHash, and recoveryEmail are required');
+    const normalizedName = name.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPhoneNumber = (phoneNumber || '').trim();
+
+    if (!normalizedUsername || !passwordHash || !normalizedRecoveryEmail || !normalizedName || !normalizedEmail) {
+        throw new Error('username, passwordHash, recoveryEmail, name, and email are required');
     }
 
     const db = getDatabase();
     await db.run(
-        'INSERT INTO auth_users (username, password_hash, recovery_email) VALUES (?, ?, ?)',
+        'INSERT INTO auth_users (username, password_hash, recovery_email, name, email, phone_number) VALUES (?, ?, ?, ?, ?, ?)',
         normalizedUsername,
         passwordHash,
-        normalizedRecoveryEmail
+        normalizedRecoveryEmail,
+        normalizedName,
+        normalizedEmail,
+        normalizedPhoneNumber || null
     );
+    await queuePersistDatabase();
 };
 
 export const getAuthUserByUsername = async (username: string): Promise<AuthUserRecord | null> => {
@@ -153,8 +239,11 @@ export const getAuthUserByUsername = async (username: string): Promise<AuthUserR
         username: string;
         password_hash: string;
         recovery_email: string;
+        name: string;
+        email: string;
+        phone_number: string | null;
     }>(
-        'SELECT username, password_hash, recovery_email FROM auth_users WHERE username = ?',
+        'SELECT username, password_hash, recovery_email, name, email, phone_number FROM auth_users WHERE username = ?',
         normalizedUsername
     );
 
@@ -163,6 +252,9 @@ export const getAuthUserByUsername = async (username: string): Promise<AuthUserR
         username: row.username,
         passwordHash: row.password_hash,
         recoveryEmail: row.recovery_email,
+        name: row.name,
+        email: row.email,
+        phoneNumber: row.phone_number || undefined,
     };
 };
 
@@ -192,6 +284,7 @@ export const createPasswordResetToken = async (token: string, username: string, 
         normalizedUsername,
         expiresAt
     );
+    await queuePersistDatabase();
 };
 
 export const consumePasswordResetToken = async (token: string): Promise<string | null> => {
@@ -208,6 +301,7 @@ export const consumePasswordResetToken = async (token: string): Promise<string |
     }
 
     await db.run('UPDATE password_reset_tokens SET used = 1 WHERE token = ?', token);
+    await queuePersistDatabase();
     return row.username;
 };
 
@@ -223,6 +317,10 @@ export const updateAuthUserPassword = async (username: string, passwordHash: str
         passwordHash,
         normalizedUsername
     );
+
+    if ((result.changes || 0) > 0) {
+        await queuePersistDatabase();
+    }
 
     return (result.changes || 0) > 0;
 };
@@ -258,7 +356,10 @@ export const getAuthLoginAttemptState = async (attemptKey: string): Promise<Auth
 export const clearAuthLoginAttempts = async (attemptKey: string) => {
     if (!attemptKey) return;
     const db = getDatabase();
-    await db.run('DELETE FROM auth_login_attempts WHERE attempt_key = ?', attemptKey);
+    const result = await db.run('DELETE FROM auth_login_attempts WHERE attempt_key = ?', attemptKey);
+    if ((result.changes || 0) > 0) {
+        await queuePersistDatabase();
+    }
 };
 
 export const recordAuthLoginFailure = async (
@@ -292,6 +393,7 @@ export const recordAuthLoginFailure = async (
             null,
             captchaRequired ? 1 : 0
         );
+        await queuePersistDatabase();
         return getAuthLoginAttemptState(attemptKey);
     }
 
@@ -307,6 +409,7 @@ export const recordAuthLoginFailure = async (
         captchaRequired ? 1 : 0,
         attemptKey
     );
+    await queuePersistDatabase();
 
     return getAuthLoginAttemptState(attemptKey);
 };

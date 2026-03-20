@@ -20,13 +20,46 @@ View your app in AI Studio: https://ai.studio/apps/drive/1MD2ENi1y0WEdwjwd_Wyzmr
 4. Run the app:
    `npm run dev`
 
+## Secret Hygiene & Incident Response
+
+This repo includes automated secret scanning and local pre-commit protection.
+
+Setup (one time):
+
+```bash
+npm run git-hooks:install
+```
+
+Manual scans:
+
+```bash
+npm run secrets:scan
+npm run secrets:scan:staged
+npm run secrets:scan:all-files
+```
+
+If a secret is exposed, follow this checklist:
+
+1. Revoke/rotate the exposed secret in provider console.
+2. Remove secret from source files and move it to Secret Manager/runtime env injection.
+   - Untrack env files if needed: `git rm --cached .env server/.env`
+3. Review audit logs for suspicious use during exposure window.
+4. Restrict blast radius (least privilege IAM, API key restrictions, private service access).
+5. Invalidate active sessions/tokens if auth material was exposed.
+6. Re-run `npm run secrets:scan` before merge/deploy.
+
+For full git history purge + rollback steps, see [docs/history-secret-cleanup-runbook.md](docs/history-secret-cleanup-runbook.md).
+
 ## Authentication & Recovery API
 
 The app now supports secure login with hashed passwords and JWT sessions.
 
+Auth sessions are now transported via `HttpOnly` auth cookies (not localStorage tokens).
+
 - `POST /api/auth/register` - body: `{ "username": string, "password": string, "recoveryEmail": string }`
 - `POST /api/auth/login` - body: `{ "username": string, "password": string }`
-- `GET /api/auth/me` - requires `Authorization: Bearer <token>`
+- `GET /api/auth/me` - requires authenticated session (HttpOnly cookie or Bearer token)
+- `POST /api/auth/logout` - clears auth cookie session
 - `POST /api/auth/recover/username` - body: `{ "recoveryEmail": string }`
 - `POST /api/auth/recover/password/request` - body: `{ "username": string, "recoveryEmail": string }`
 - `POST /api/auth/recover/password/confirm` - body: `{ "resetToken": string, "newPassword": string }`
@@ -44,27 +77,35 @@ Turnstile setup (recommended):
 
 ## Subscription Management API
 
-All subscription endpoints require the `x-user-id` header to identify the account.
+All subscription endpoints except `GET /api/subscription/plans` require `Authorization: Bearer <token>`.
+
+Android billing compliance mode:
+- Direct `POST /api/subscription/subscribe` and `POST /api/subscription/topup` are blocked for Android clients.
+- Android must verify Google Play purchases via `POST /api/billing/google-play/verify`.
 
 - `GET /api/subscription/plans` - list available plans
 - `GET /api/subscription/me` - current account balance and tier
 - `POST /api/subscription/subscribe` - body: `{ "tier": "free" | "pro" | "enterprise" }`
 - `POST /api/subscription/topup` - body: `{ "tokens": number }`
 - `GET /api/subscription/usage` - usage history and account snapshot
+- `POST /api/billing/google-play/verify` - body: `{ "productType": "subs" | "inapp", "productId": string, "purchaseToken": string }`
 
 Example curl:
 
 ```bash
-curl -H "x-user-id: demo-user" http://localhost:3001/api/subscription/me
+TOKEN="your-jwt-token"
+
+curl http://localhost:3001/api/subscription/me \
+   -H "Authorization: Bearer $TOKEN"
 
 curl -X POST http://localhost:3001/api/subscription/subscribe \
    -H "Content-Type: application/json" \
-   -H "x-user-id: demo-user" \
+   -H "Authorization: Bearer $TOKEN" \
    -d '{"tier":"pro"}'
 
 curl -X POST http://localhost:3001/api/subscription/topup \
    -H "Content-Type: application/json" \
-   -H "x-user-id: demo-user" \
+   -H "Authorization: Bearer $TOKEN" \
    -d '{"tokens":50}'
 ```
 
@@ -207,4 +248,194 @@ Wrong region/project in deploy:
 
 ```bash
 gcloud builds submit --config cloudbuild.private.yaml --substitutions _SERVICE=chromasnap-server,_REGION=us-central1,_GCP_LOCATION=us-central1
+```
+
+Canonical domain behavior:
+
+- `www.chromasnap.app` is configured to permanently redirect (`308`) to `https://chromasnap.app` while preserving path and query.
+- Use `https://chromasnap.app` as the primary frontend URL.
+
+DNS go-live checklist (`chromasnap.app`):
+
+1. Apex (`@`) records:
+
+- `A` → `216.239.32.21`
+- `A` → `216.239.34.21`
+- `A` → `216.239.36.21`
+- `A` → `216.239.38.21`
+- `AAAA` → `2001:4860:4802:32::15`
+- `AAAA` → `2001:4860:4802:34::15`
+- `AAAA` → `2001:4860:4802:36::15`
+- `AAAA` → `2001:4860:4802:38::15`
+
+2. `www` record:
+
+- `CNAME` → `ghs.googlehosted.com`
+
+3. Verify propagation:
+
+```bash
+nslookup -type=A chromasnap.app 8.8.8.8
+nslookup -type=AAAA chromasnap.app 8.8.8.8
+nslookup -type=CNAME www.chromasnap.app 8.8.8.8
+```
+
+4. Verify live app/API:
+
+```bash
+curl -I https://www.chromasnap.app
+curl https://chromasnap.app/api/healthz
+```
+
+PowerShell one-liner (DNS + redirect + health):
+
+```powershell
+$a=(Resolve-DnsName chromasnap.app -Type A -ErrorAction SilentlyContinue).IPAddress; $aaaa=(Resolve-DnsName chromasnap.app -Type AAAA -ErrorAction SilentlyContinue).IPAddress; $www=(Resolve-DnsName www.chromasnap.app -Type CNAME -ErrorAction SilentlyContinue).NameHost; $redir=(Invoke-WebRequest https://www.chromasnap.app -Method GET -MaximumRedirection 0 -ErrorAction SilentlyContinue).Headers.Location; $health=(Invoke-WebRequest https://chromasnap.app/api/healthz -UseBasicParsing -ErrorAction SilentlyContinue).StatusCode; [pscustomobject]@{ A=($a -join ','); AAAA=($aaaa -join ','); WWW_CNAME=$www; WWW_Redirect=$redir; HealthStatus=$health } | Format-List
+```
+
+### Post-deploy smoke test
+
+1. Get your service URL:
+
+```bash
+gcloud run services describe chromasnap-server --region us-central1 --format='value(status.url)'
+```
+
+2. Health check:
+
+```bash
+curl https://YOUR_SERVICE_URL/api/healthz
+```
+
+Note: This service is currently validated on `/api/*` routes; use `/api/healthz` for uptime checks.
+
+3. Public service quick check:
+
+```bash
+curl https://YOUR_SERVICE_URL/api/subscription/plans
+```
+
+4. Private service quick check (identity token):
+
+```bash
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" https://YOUR_SERVICE_URL/api/subscription/plans
+```
+
+5. Optional auth endpoint check:
+
+```bash
+curl -X POST https://YOUR_SERVICE_URL/api/auth/login \
+   -H "Content-Type: application/json" \
+   -d '{"username":"demo","password":"wrong-pass"}'
+```
+
+6. Full cookie-session smoke test (private Cloud Run):
+
+PowerShell:
+
+```bash
+$env:AUTH_SMOKE_BASE_URL="https://YOUR_SERVICE_URL"
+$env:AUTH_SMOKE_ID_TOKEN="$(gcloud auth print-identity-token)"
+npm run server:smoke:auth-cookie:cloudrun
+```
+
+Bash:
+
+```bash
+AUTH_SMOKE_BASE_URL="https://YOUR_SERVICE_URL" AUTH_SMOKE_ID_TOKEN="$(gcloud auth print-identity-token)" npm run server:smoke:auth-cookie:cloudrun
+```
+
+7. One-command auto-discovery smoke test (uses `gcloud` to resolve URL + token):
+
+```bash
+npm run server:smoke:auth-cookie:cloudrun
+```
+
+Optional service/region override:
+
+```bash
+cd server
+AUTH_SMOKE_SERVICE=chromasnap-server AUTH_SMOKE_REGION=us-central1 npm run smoke:auth-cookie:cloudrun
+```
+
+## Android Test Checklist
+
+Use these commands to run Android instrumentation checks from `android/`.
+
+1. Set Java (PowerShell session):
+
+```bash
+$env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
+$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
+```
+
+2. Verify connected device:
+
+```bash
+$adb="$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+Write-Host "Using adb: $adb"; & $adb version
+& $adb devices -l
+```
+
+3. Run app instrumentation test:
+
+```bash
+cd android
+.\gradlew.bat :app:connectedDebugAndroidTest --console=plain
+```
+
+4. Run full connected checks (all modules):
+
+```bash
+cd android
+.\gradlew.bat connectedCheck --console=plain
+```
+
+Note: `:app:connectedDebugAndroidTest` validates only the app module tests. `connectedCheck` runs connected tests/checks across all Android modules (including Capacitor/Cordova plugin modules), so dependency conflicts can appear there even when app-only instrumentation passes.
+
+If the device is not detected, restart adb and re-run:
+
+```bash
+& $adb kill-server
+& $adb start-server
+& $adb devices -l
+```
+
+Bash / WSL equivalent:
+
+```bash
+export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+export PATH="$JAVA_HOME/bin:$PATH"
+
+# Resolve Windows LocalAppData from WSL/Git Bash if LOCALAPPDATA is not set
+if [ -z "$LOCALAPPDATA" ]; then
+   WIN_LOCALAPPDATA="$(powershell.exe -NoProfile -Command "[Environment]::GetFolderPath('LocalApplicationData')" 2>/dev/null | tr -d '\r')"
+   if [ -n "$WIN_LOCALAPPDATA" ]; then
+      LOCALAPPDATA="$(wslpath -u "$WIN_LOCALAPPDATA" 2>/dev/null || echo "")"
+   fi
+fi
+
+if [ -z "$LOCALAPPDATA" ]; then
+   LOCALAPPDATA="/mnt/c/Users/$USER/AppData/Local"
+fi
+
+ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
+
+if [ ! -f "$ADB" ]; then
+   echo "adb not found at: $ADB"
+   echo "Set LOCALAPPDATA or edit ADB path in this snippet."
+   exit 1
+fi
+
+echo "Using adb: $ADB"; "$ADB" version
+
+"$ADB" devices -l
+
+cd android
+./gradlew.bat :app:connectedDebugAndroidTest --console=plain
+./gradlew.bat connectedCheck --console=plain
+
+"$ADB" kill-server
+"$ADB" start-server
+"$ADB" devices -l
 ```

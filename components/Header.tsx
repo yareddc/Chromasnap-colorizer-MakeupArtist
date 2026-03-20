@@ -5,9 +5,9 @@ type HeaderProps = {
   tokenBalance?: number | null;
 };
 
-const Header: React.FC<HeaderProps> = ({ tokenBalance }) => {
+const Header: React.FC<HeaderProps> = () => {
   const handleBadgeClick = () => {
-    const target = document.getElementById('account-tokens');
+    const target = document.getElementById('account-panel');
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
@@ -27,9 +27,9 @@ const Header: React.FC<HeaderProps> = ({ tokenBalance }) => {
             type="button"
             onClick={handleBadgeClick}
             className="ml-2 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-slate-950/70 border border-slate-800 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-            aria-label="Jump to account and tokens"
+            aria-label="Jump to account details"
           >
-            {tokenBalance ?? '--'} tokens
+            Account Details
           </button>
         </div>
         <div className="text-center space-y-2">

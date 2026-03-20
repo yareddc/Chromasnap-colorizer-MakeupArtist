@@ -23,14 +23,19 @@ import {
   fetchSubscriptionPlans,
   fetchSubscriptionUsage,
   getCurrentUserId,
-  hasAuthToken,
   recoverUsername,
   registerUser,
   requestPasswordReset,
   setCurrentUserId,
   subscribeToPlan,
   topUpTokens,
+  verifyGooglePlayPurchase,
 } from './services/geminiService';
+import {
+  getGooglePlayBillingAvailability,
+  purchaseGooglePlayProduct,
+  isAndroidNativePlatform,
+} from './services/googlePlayBillingService';
 
 const PALETTES = [
   { id: 'Natural', name: 'Natural', colors: 'from-emerald-600 to-emerald-400' },
@@ -56,6 +61,31 @@ const SAMPLE_IMAGE_DATA_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
   </svg>`
 )}`;
 
+const resolveEnvProductId = (...keys: (keyof ImportMetaEnv)[]): string | undefined => {
+  for (const key of keys) {
+    const value = import.meta.env[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+};
+
+const PLAY_SUBSCRIPTION_PRODUCT_IDS: Record<'pro' | 'enterprise', string> = {
+  pro: resolveEnvProductId('VITE_PLAY_PRODUCT_SUBSCRIPTION_PRO', 'REACT_APP_PLAY_PRODUCT_SUBSCRIPTION_PRO') || 'chromasnap_pro',
+  enterprise:
+    resolveEnvProductId('VITE_PLAY_PRODUCT_SUBSCRIPTION_ENTERPRISE', 'REACT_APP_PLAY_PRODUCT_SUBSCRIPTION_ENTERPRISE') ||
+    'chromasnap_enterprise',
+};
+
+const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
+  100: resolveEnvProductId('VITE_PLAY_PRODUCT_TOPUP_100', 'REACT_APP_PLAY_PRODUCT_TOPUP_100') || 'chromasnap_topup_100',
+  500: resolveEnvProductId('VITE_PLAY_PRODUCT_TOPUP_500', 'REACT_APP_PLAY_PRODUCT_TOPUP_500') || 'chromasnap_topup_500',
+  1000:
+    resolveEnvProductId('VITE_PLAY_PRODUCT_TOPUP_1000', 'REACT_APP_PLAY_PRODUCT_TOPUP_1000') ||
+    'chromasnap_topup_1000',
+};
+
 const App: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<string>('Natural');
@@ -80,6 +110,9 @@ const App: React.FC = () => {
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'recover-username' | 'recover-password'>('login');
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPhoneNumber, setAuthPhoneNumber] = useState('');
   const [authRecoveryEmail, setAuthRecoveryEmail] = useState('');
   const [authResetToken, setAuthResetToken] = useState('');
   const [authNewPassword, setAuthNewPassword] = useState('');
@@ -91,6 +124,7 @@ const App: React.FC = () => {
   const [authCaptchaToken, setAuthCaptchaToken] = useState('');
   const [recoveredUsernames, setRecoveredUsernames] = useState<string[]>([]);
   const [issuedResetToken, setIssuedResetToken] = useState<string>('');
+  const [accountTab, setAccountTab] = useState<'overview' | 'account-details'>('overview');
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
   const isDeveloperMode = import.meta.env.DEV || import.meta.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true';
@@ -120,22 +154,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const bootstrapAuth = async () => {
-      if (!hasAuthToken()) {
+      try {
+        const currentUser = await fetchAuthMe();
+        if (currentUser) {
+          setAuthUser(currentUser);
+          const storedId = setCurrentUserId(currentUser.username);
+          setActiveUserId(storedId);
+          setUserIdInput(storedId);
+        }
+      } catch (error) {
+        console.error('Auth bootstrap failed:', error);
+      } finally {
         setAuthInitialized(true);
-        return;
       }
-
-      const currentUser = await fetchAuthMe();
-      if (currentUser) {
-        setAuthUser(currentUser);
-        const storedId = setCurrentUserId(currentUser.username);
-        setActiveUserId(storedId);
-        setUserIdInput(storedId);
-      }
-      setAuthInitialized(true);
     };
 
-    bootstrapAuth();
+    void bootstrapAuth();
   }, []);
 
   useEffect(() => {
@@ -158,7 +192,9 @@ const App: React.FC = () => {
       const { user } = await registerUser({
         username: authUsername,
         password: authPassword,
-        recoveryEmail: authRecoveryEmail,
+        name: authName,
+        email: authEmail,
+        phoneNumber: authPhoneNumber || undefined,
       });
       setAuthUser(user);
       const storedId = setCurrentUserId(user.username);
@@ -264,6 +300,28 @@ const App: React.FC = () => {
     setBillingLoading(true);
     setBillingMessage(null);
     try {
+      if (isAndroidNativePlatform()) {
+        if (tier === 'free') {
+          throw new Error('Manage free-plan downgrade or cancellation from your Google Play subscriptions page.');
+        }
+
+        const availability = await getGooglePlayBillingAvailability();
+        if (!availability.available) {
+          throw new Error(availability.message || 'Google Play Billing is unavailable on this device/build.');
+        }
+
+        const productId = PLAY_SUBSCRIPTION_PRODUCT_IDS[tier as 'pro' | 'enterprise'];
+        if (!productId) {
+          throw new Error(`Missing product mapping for tier: ${tier}`);
+        }
+
+        const purchase = await purchaseGooglePlayProduct('subs', productId);
+        const account = await verifyGooglePlayPurchase('subs', productId, purchase.purchaseToken);
+        setSubscriptionAccount(account);
+        await refreshSubscription();
+        return;
+      }
+
       const account = await subscribeToPlan(tier);
       setSubscriptionAccount(account);
       await refreshSubscription();
@@ -283,6 +341,25 @@ const App: React.FC = () => {
     setBillingLoading(true);
     setBillingMessage(null);
     try {
+      if (isAndroidNativePlatform()) {
+        const availability = await getGooglePlayBillingAvailability();
+        if (!availability.available) {
+          throw new Error(availability.message || 'Google Play Billing is unavailable on this device/build.');
+        }
+
+        const normalizedAmount = Math.floor(amount);
+        const productId = PLAY_TOPUP_PRODUCT_IDS[normalizedAmount];
+        if (!productId) {
+          throw new Error('Android top-up requires Google Play product packs (100, 500, or 1000).');
+        }
+
+        const purchase = await purchaseGooglePlayProduct('inapp', productId);
+        const account = await verifyGooglePlayPurchase('inapp', productId, purchase.purchaseToken);
+        setSubscriptionAccount(account);
+        await refreshSubscription();
+        return;
+      }
+
       const account = await topUpTokens(amount);
       setSubscriptionAccount(account);
       await refreshSubscription();
@@ -507,15 +584,6 @@ const App: React.FC = () => {
             <h2 className="text-xl font-bold text-white">Secure Login</h2>
             <p className="text-xs text-slate-400">Sign in to access colorization, billing, and account recovery tools.</p>
 
-            {isDeveloperMode && (
-              <button
-                onClick={() => setShowAdminLoginPage(true)}
-                className="w-full px-3 py-2 rounded-xl text-xs font-semibold border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white"
-              >
-                Open Developer Admin Login
-              </button>
-            )}
-
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => { setAuthMode('login'); setAuthRequireCaptcha(false); setAuthCaptchaToken(''); }}
@@ -529,25 +597,16 @@ const App: React.FC = () => {
               >
                 Register
               </button>
-              <button
-                onClick={() => { setAuthMode('recover-username'); setAuthRequireCaptcha(false); setAuthCaptchaToken(''); }}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold ${authMode === 'recover-username' ? 'bg-indigo-600 text-white' : 'bg-slate-950 border border-slate-800 text-slate-300'}`}
-              >
-                Forgot Username
-              </button>
-              <button
-                onClick={() => { setAuthMode('recover-password'); setAuthRequireCaptcha(false); setAuthCaptchaToken(''); }}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold ${authMode === 'recover-password' ? 'bg-indigo-600 text-white' : 'bg-slate-950 border border-slate-800 text-slate-300'}`}
-              >
-                Forgot Password
-              </button>
             </div>
 
             {(authMode === 'login' || authMode === 'register' || authMode === 'recover-password') && (
               <input
                 value={authUsername}
                 onChange={(event) => setAuthUsername(event.target.value)}
-                placeholder="Username"
+                placeholder=""
+                aria-label="Username"
+                autoComplete="off"
+                spellCheck={false}
                 className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
               />
             )}
@@ -558,7 +617,9 @@ const App: React.FC = () => {
                   type={showAuthPassword ? 'text' : 'password'}
                   value={authPassword}
                   onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder="Password"
+                  placeholder=""
+                  aria-label="Password"
+                  autoComplete="off"
                   className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 pr-11 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                 />
                 <button
@@ -602,7 +663,32 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {(authMode === 'register' || authMode === 'recover-username' || authMode === 'recover-password') && (
+            {authMode === 'register' && (
+              <>
+                <input
+                  value={authName}
+                  onChange={(event) => setAuthName(event.target.value)}
+                  placeholder="Full name"
+                  className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="Email"
+                  className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+                <input
+                  type="tel"
+                  value={authPhoneNumber}
+                  onChange={(event) => setAuthPhoneNumber(event.target.value)}
+                  placeholder="Phone number (optional)"
+                  className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </>
+            )}
+
+            {(authMode === 'recover-username' || authMode === 'recover-password') && (
               <input
                 type="email"
                 value={authRecoveryEmail}
@@ -668,13 +754,29 @@ const App: React.FC = () => {
 
             <div className="grid grid-cols-1 gap-2">
               {authMode === 'login' && (
-                <button
-                  onClick={handleLogin}
-                  disabled={authLoading}
-                  className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
-                >
-                  Sign In
-                </button>
+                <div className="space-y-2">
+                  <button
+                    onClick={handleLogin}
+                    disabled={authLoading}
+                    className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
+                  >
+                    Sign In
+                  </button>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => { setAuthMode('recover-username'); setAuthRequireCaptcha(false); setAuthCaptchaToken(''); }}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-950 border border-slate-800 text-slate-300 hover:border-indigo-500 hover:text-white transition-colors"
+                    >
+                      Forgot Username
+                    </button>
+                    <button
+                      onClick={() => { setAuthMode('recover-password'); setAuthRequireCaptcha(false); setAuthCaptchaToken(''); }}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-950 border border-slate-800 text-slate-300 hover:border-indigo-500 hover:text-white transition-colors"
+                    >
+                      Forgot Password
+                    </button>
+                  </div>
+                </div>
               )}
               {authMode === 'register' && (
                 <button
@@ -721,7 +823,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
-      <Header tokenBalance={subscriptionAccount?.tokenBalance ?? null} />
+      <Header />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 space-y-6 sm:space-y-8 max-w-4xl mx-auto w-full">
         {processing.isProcessing && (
@@ -732,15 +834,27 @@ const App: React.FC = () => {
         )}
 
         <div
-          id="account-tokens"
-          className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-6 space-y-4"
+          id="account-panel"
+          className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3"
         >
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account & Tokens</h3>
-              <p className="text-xs sm:text-sm leading-relaxed text-slate-400">Manage subscription, tokens, and user id for billing.</p>
+              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account</h3>
+              <p className="text-xs leading-relaxed text-slate-400">Compact summary for mobile/tablet. Expand for full billing controls.</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setAccountTab('overview')}
+                className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors"
+              >
+                Overview
+              </button>
+              <button
+                onClick={() => setAccountTab('account-details')}
+                className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors"
+              >
+                Account Details
+              </button>
               <button
                 onClick={refreshSubscription}
                 disabled={billingLoading}
@@ -757,104 +871,124 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">User Id</label>
-              <div className="flex gap-2">
-                <input
-                  value={authUser?.username || userIdInput}
-                  onChange={(event) => setUserIdInput(event.target.value)}
-                  placeholder="user-123"
-                  readOnly={Boolean(authUser)}
-                  className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                />
-                <button
-                  onClick={handleApplyUserId}
-                  disabled={Boolean(authUser)}
-                  className="px-4 py-3 rounded-xl bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                >
-                  Use
-                </button>
-              </div>
-              <div className="text-[10px] text-slate-400">Active: {activeUserId}</div>
+          {accountTab === 'overview' && (
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-300">
+              Select the <span className="font-semibold text-white">Account Details</span> tab to view user ID, token balance, cycle, usage, and billing controls.
             </div>
+          )}
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Balance</label>
-              <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3 space-y-1">
-                <div className="text-lg sm:text-xl font-semibold text-white leading-tight">{subscriptionAccount?.tokenBalance ?? '--'} tokens</div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Tier: {subscriptionAccount?.tier ?? 'free'}</div>
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Top-up left: {subscriptionAccount?.monthlyRemainingTopUp ?? '--'}</div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Top-up</label>
-              <div className="flex gap-2">
-                <input
-                  value={topUpAmount}
-                  onChange={(event) => setTopUpAmount(event.target.value)}
-                  className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                />
-                <button
-                  onClick={handleTopUp}
-                  disabled={billingLoading}
-                  className="px-4 py-3 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                >
-                  Add
-                </button>
-              </div>
-              <div className="text-[10px] text-slate-400">Cycle ends {subscriptionAccount?.cycleEndsAt ? new Date(subscriptionAccount.cycleEndsAt).toLocaleDateString() : '--'}</div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            {subscriptionPlans.map((plan) => (
-              <button
-                key={plan.id}
-                onClick={() => handleSubscribeTier(plan.id)}
-                disabled={billingLoading}
-                className={`rounded-2xl border px-4 py-4 text-left transition-all min-h-[110px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
-                  subscriptionAccount?.tier === plan.id
-                    ? 'border-indigo-500 bg-indigo-500/10 text-white'
-                    : 'border-slate-800 bg-slate-950/50 text-slate-300 hover:border-slate-600'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">{plan.name}</div>
-                  {plan.id === 'pro' && (
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-300">Most Popular</span>
-                  )}
+          {accountTab === 'account-details' && (
+            <>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">User</div>
+                  <div className="text-xs font-semibold text-slate-200 truncate">{authUser?.username || activeUserId}</div>
+                  <div className="text-[10px] text-slate-400 mt-1">Active: {activeUserId}</div>
                 </div>
-                <div className="text-[10px] uppercase tracking-wider text-slate-400">{plan.monthlyTokens} tokens / month</div>
-                <div className="text-[10px] text-slate-400">Top-up cap {plan.maxTopUpPerMonth}</div>
-              </button>
-            ))}
-          </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
-            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
-              <span>Token usage this cycle</span>
-              <span>{usagePercent}%</span>
-            </div>
-            <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
-              <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${usagePercent}%` }} />
-            </div>
-            <div className="text-[10px] text-slate-400">{usedThisCycle} used of {planMonthlyTokens} monthly tokens</div>
-          </div>
+                <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Balance</div>
+                  <div className="text-sm sm:text-base font-semibold text-white leading-tight">{subscriptionAccount?.tokenBalance ?? '--'} tokens</div>
+                  <div className="text-[10px] text-slate-400 uppercase tracking-wider mt-1">Tier: {subscriptionAccount?.tier ?? 'free'}</div>
+                </div>
 
-          <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Recent Usage</div>
-            {subscriptionUsage.slice(0, 5).map((entry) => (
-              <div key={entry.id} className="flex items-center justify-between text-xs text-slate-300">
-                <span className="uppercase tracking-wider text-slate-400">{entry.action.replace('_', ' ')}</span>
-                <span>-{entry.tokens}</span>
+                <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Cycle</div>
+                  <div className="text-xs text-slate-200">Ends {subscriptionAccount?.cycleEndsAt ? new Date(subscriptionAccount.cycleEndsAt).toLocaleDateString() : '--'}</div>
+                  <div className="text-[10px] text-slate-400 mt-1">Usage: {usagePercent}%</div>
+                </div>
               </div>
-            ))}
-            {!subscriptionUsage.length && (
-              <div className="text-xs text-slate-400">No usage yet.</div>
-            )}
-          </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">User Id</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={authUser?.username || userIdInput}
+                      onChange={(event) => setUserIdInput(event.target.value)}
+                      placeholder="user-123"
+                      readOnly={Boolean(authUser)}
+                      className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    />
+                    <button
+                      onClick={handleApplyUserId}
+                      disabled={Boolean(authUser)}
+                      className="px-4 py-3 rounded-xl bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    >
+                      Use
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-slate-400">Top-up left: {subscriptionAccount?.monthlyRemainingTopUp ?? '--'}</div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Top-up</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={topUpAmount}
+                      onChange={(event) => setTopUpAmount(event.target.value)}
+                      className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    />
+                    <button
+                      onClick={handleTopUp}
+                      disabled={billingLoading}
+                      className="px-4 py-3 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-500 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3 space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    <span>Token usage this cycle</span>
+                    <span>{usagePercent}%</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                    <div className="h-full bg-indigo-500 rounded-full transition-all duration-300" style={{ width: `${usagePercent}%` }} />
+                  </div>
+                  <div className="text-[10px] text-slate-400">{usedThisCycle} used of {planMonthlyTokens} monthly tokens</div>
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                {subscriptionPlans.map((plan) => (
+                  <button
+                    key={plan.id}
+                    onClick={() => handleSubscribeTier(plan.id)}
+                    disabled={billingLoading}
+                    className={`rounded-2xl border px-4 py-4 text-left transition-all min-h-[110px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
+                      subscriptionAccount?.tier === plan.id
+                        ? 'border-indigo-500 bg-indigo-500/10 text-white'
+                        : 'border-slate-800 bg-slate-950/50 text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold">{plan.name}</div>
+                      {plan.id === 'pro' && (
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-300">Most Popular</span>
+                      )}
+                    </div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400">{plan.monthlyTokens} tokens / month</div>
+                    <div className="text-[10px] text-slate-400">Top-up cap {plan.maxTopUpPerMonth}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Recent Usage</div>
+                {subscriptionUsage.slice(0, 5).map((entry) => (
+                  <div key={entry.id} className="flex items-center justify-between text-xs text-slate-300">
+                    <span className="uppercase tracking-wider text-slate-400">{entry.action.replace('_', ' ')}</span>
+                    <span>-{entry.tokens}</span>
+                  </div>
+                ))}
+                {!subscriptionUsage.length && (
+                  <div className="text-xs text-slate-400">No usage yet.</div>
+                )}
+              </div>
+            </>
+          )}
 
           {billingMessage && (
             <div className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-2xl px-3 py-2">

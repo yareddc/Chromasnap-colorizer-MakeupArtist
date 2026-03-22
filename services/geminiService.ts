@@ -46,8 +46,18 @@ const getJsonHeaders = () => {
 
 const withAuthCredentials: RequestCredentials = 'include';
 
+const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs: number = 60000): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  
+  return fetch(url, {
+    ...options,
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeoutId));
+};
+
 export const clearAuthToken = async () => {
-  await fetch(API_ENDPOINTS.AUTH_LOGOUT, {
+  await fetchWithTimeout(API_ENDPOINTS.AUTH_LOGOUT, {
     method: 'POST',
     credentials: withAuthCredentials,
     headers: getJsonHeaders(),
@@ -64,12 +74,12 @@ const parseJsonResponse = async (response: Response) => {
 
 export const isBlackAndWhite = async (base64Image: string): Promise<boolean> => {
   try {
-    const response = await fetch(API_ENDPOINTS.ANALYZE_MONOCHROMATIC, {
+    const response = await fetchWithTimeout(API_ENDPOINTS.ANALYZE_MONOCHROMATIC, {
       method: 'POST',
       credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image }),
-    });
+    }, 30000);
 
     if (!response.ok) {
       console.error(`Backend error (${response.status}): Is the server running?`);
@@ -85,12 +95,15 @@ export const isBlackAndWhite = async (base64Image: string): Promise<boolean> => 
 
 export const colorizeImage = async (base64Image: string, theme: string = 'Natural'): Promise<string> => {
   try {
-    const response = await fetch(API_ENDPOINTS.PROCESS_COLORIZE, {
+    const endpoint = API_ENDPOINTS.PROCESS_COLORIZE;
+    console.debug(`Colorization request to: ${endpoint}`);
+    
+    const response = await fetchWithTimeout(endpoint, {
       method: 'POST',
       credentials: withAuthCredentials,
       headers: getJsonHeaders(),
       body: JSON.stringify({ image: base64Image, theme }),
-    });
+    }, 120000);
 
     if (!response.ok) {
       let errorMessage = 'Colorization failed';
@@ -107,8 +120,17 @@ export const colorizeImage = async (base64Image: string, theme: string = 'Natura
     const data = await parseJsonResponse(response);
     return data.result;
   } catch (error: any) {
-    console.error("Colorization API Error:", error);
-    throw new Error(error.message || "Failed to colorize image.");
+    const msg = error?.message || String(error);
+    console.error("Colorization API Error:", msg);
+    
+    // Provide more helpful error messages
+    if (msg.includes('NetworkError') || msg.includes('Failed to fetch') || msg.includes('AbortError')) {
+      throw new Error('Backend unreachable. Ensure the server is running and CORS is configured correctly.');
+    }
+    if (msg.includes('Unauthorized')) {
+      throw new Error('Session expired. Please refresh the page.');
+    }
+    throw new Error(msg || "Failed to colorize image.");
   }
 };
 

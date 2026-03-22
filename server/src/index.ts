@@ -657,6 +657,7 @@ const processingLimiter = rateLimit({
 
 const cspDirectives = helmet.contentSecurityPolicy.getDefaultDirectives();
 cspDirectives['script-src'] = ["'self'", 'https://cdn.tailwindcss.com'];
+cspDirectives['media-src'] = ["'self'", 'blob:'];
 
 // Middleware
 app.use(
@@ -1008,8 +1009,8 @@ const generateVeoVertexVideoUri = async (model: string, base64Data: string, mime
         const videoBuffer = Buffer.from(base64Video, 'base64');
         fs.writeFileSync(videoPath, videoBuffer);
 
-        // Return a URL that can be fetched
-        return `http://localhost:3001/videos/${videoFileName}`;
+        // Return same-origin path so frontend CSP default-src 'self' permits playback.
+        return `/videos/${videoFileName}`;
     }
 
     const discovered = extractUriFromObject(operation);
@@ -1955,6 +1956,22 @@ app.get('/api/process/animate/result/:jobId', async (req, res) => {
     if (!job.videoUrl) return res.status(500).json({ error: 'Animation result URL missing' });
 
     try {
+        if (job.videoUrl.startsWith('/videos/')) {
+            const filename = job.videoUrl.slice('/videos/'.length);
+            if (!/^[\w\-\.]+\.mp4$/.test(filename)) {
+                return res.status(500).json({ error: 'Invalid local animation result path' });
+            }
+
+            const videoPath = path.resolve(process.cwd(), 'public', filename);
+            const publicDir = path.resolve(process.cwd(), 'public');
+            if (!videoPath.startsWith(publicDir) || !existsSync(videoPath)) {
+                return res.status(404).json({ error: 'Generated video file not found' });
+            }
+
+            res.setHeader('Content-Type', 'video/mp4');
+            return res.sendFile(videoPath);
+        }
+
         let videoResponse = await fetch(job.videoUrl);
         if (!videoResponse.ok) {
             const token = await getCloudAccessToken();

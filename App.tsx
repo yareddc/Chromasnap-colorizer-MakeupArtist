@@ -835,7 +835,7 @@ const App: React.FC = () => {
 
         <div
           id="account-panel"
-          className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3"
+          className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
@@ -1018,12 +1018,6 @@ const App: React.FC = () => {
               isLoading={processing.isProcessing}
               onSampleSelect={handleSampleImage}
             />
-
-              <div className="flex flex-wrap justify-center gap-2 sm:gap-4 text-xs font-semibold text-slate-400 uppercase tracking-widest mt-8 sm:mt-12">
-              <span className="px-3 py-1 border border-slate-800 rounded-full">Photo Colorizer</span>
-              <span className="px-3 py-1 border border-slate-800 rounded-full">Image Animation</span>
-              <span className="px-3 py-1 border border-slate-800 rounded-full">AI Powered</span>
-            </div>
           </div>
         )}
 
@@ -1269,8 +1263,6 @@ const App: React.FC = () => {
 
       <footer className="py-6 px-4 text-center border-t border-slate-900 bg-slate-900/20 space-y-3">
         <div className="flex flex-wrap justify-center gap-2 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
-          <span className="px-2.5 py-1 rounded-full border border-slate-800">No watermarks</span>
-          <span className="px-2.5 py-1 rounded-full border border-slate-800">Fast processing</span>
           <span className="px-2.5 py-1 rounded-full border border-slate-800">Transparent usage</span>
         </div>
         <p className="text-slate-400 text-[10px] uppercase tracking-widest font-bold">ChromaSnap AI • Restoration Studio</p>

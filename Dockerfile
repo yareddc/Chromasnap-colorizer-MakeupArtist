@@ -11,6 +11,9 @@ RUN npm run build
 FROM node:20-slim AS frontend-build
 WORKDIR /app
 
+ENV VITE_API_BASE_URL=
+ENV REACT_APP_API_BASE_URL=
+
 COPY package*.json ./
 COPY capacitor-plugin ./capacitor-plugin
 COPY components ./components

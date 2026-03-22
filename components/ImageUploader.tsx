@@ -157,9 +157,6 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoadin
         </button>
       </div>
 
-      <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-        Keyboard: focus the upload area and press Enter or Space to choose a file.
-      </p>
     </div>
   );
 };

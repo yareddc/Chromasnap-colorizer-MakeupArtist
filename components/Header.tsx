@@ -27,18 +27,10 @@ const Header: React.FC<HeaderProps> = () => {
             type="button"
             onClick={handleBadgeClick}
             className="ml-2 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-slate-950/70 border border-slate-800 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-            aria-label="Jump to account details"
+            aria-label="Jump to account panel"
           >
-            Account Details
+            Account
           </button>
-        </div>
-        <div className="text-center space-y-2">
-          <p className="text-white text-sm sm:text-base leading-relaxed font-semibold">Restore black-and-white memories into realistic color in seconds.</p>
-          <div className="flex flex-wrap justify-center gap-2 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
-            <span className="px-2.5 py-1 rounded-full border border-slate-800">Fast AI processing</span>
-            <span className="px-2.5 py-1 rounded-full border border-slate-800">Studio-quality results</span>
-            <span className="px-2.5 py-1 rounded-full border border-slate-800">No watermarks</span>
-          </div>
         </div>
       </div>
     </header>

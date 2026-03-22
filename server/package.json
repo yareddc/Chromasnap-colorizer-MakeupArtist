@@ -7,6 +7,8 @@
         "dev": "tsx watch src/index.ts",
         "build": "tsc",
         "start": "node dist/index.js",
+        "migrate:identity:dry-run": "node scripts/migrate-auth-users-to-identity-platform.mjs",
+        "migrate:identity:apply": "node scripts/migrate-auth-users-to-identity-platform.mjs --apply=true",
         "smoke:auth-cookie": "node scripts/smoke-auth-cookie.mjs",
         "smoke:auth-cookie:cloudrun": "node scripts/smoke-auth-cookie-cloudrun.mjs",
         "secrets:scan": "gitleaks detect --source .. --no-git --redact --config ../.gitleaks.toml"

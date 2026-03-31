@@ -375,8 +375,12 @@ export const createOrGetFirebaseSocialUser = async (params: {
     const resolvedPhone = phoneNumber.trim() || undefined;
 
     const { randomUUID } = await import('crypto');
-    const bcrypt = await import('bcryptjs');
-    const unusablePasswordHash = await bcrypt.hash(randomUUID(), 12);
+    const bcryptModule = await import('bcryptjs');
+    const hashFn = (bcryptModule as any).hash || (bcryptModule as any).default?.hash;
+    if (typeof hashFn !== 'function') {
+        throw new Error('bcrypt hash function is unavailable in runtime module format.');
+    }
+    const unusablePasswordHash = await hashFn(randomUUID(), 12);
 
     await db.run(
         `INSERT INTO auth_users

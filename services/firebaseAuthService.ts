@@ -80,11 +80,17 @@ export const signInWithGoogle = async (): Promise<string> => {
   if (Capacitor.isNativePlatform()) {
     // Native Android: use Capacitor Firebase Auth plugin
     const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-    const result = await (FirebaseAuthentication as any).signInWithGoogle();
-    if (!result?.credential?.idToken) {
-      throw new Error('Google Sign-In failed: no ID token returned from native plugin.');
+    await (FirebaseAuthentication as any).signInWithGoogle();
+
+    // Backend verifies Firebase ID tokens via Admin SDK verifyIdToken(),
+    // so fetch the Firebase token from the signed-in Firebase user.
+    const tokenResult = await (FirebaseAuthentication as any).getIdToken().catch(() => null);
+    const firebaseIdToken = tokenResult?.token;
+    if (firebaseIdToken) {
+      return firebaseIdToken as string;
     }
-    return result.credential.idToken as string;
+
+    throw new Error('Google Sign-In succeeded, but no Firebase ID token was available.');
   }
 
   // Web: use Firebase JS SDK popup

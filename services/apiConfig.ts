@@ -3,13 +3,35 @@
  * Centralized place to manage API base URL and endpoints
  */
 
+type ViteEnvShape = {
+  VITE_API_BASE_URL?: string;
+  REACT_APP_API_BASE_URL?: string;
+};
+
 // Get the API base URL from environment variables.
 // In deployed web builds, default to same-origin so API calls target the Cloud Run host.
-const resolveDefaultApiBaseUrl = (): string => '';
+const resolveDefaultApiBaseUrl = (): string => {
+  const protocol = String(globalThis.location?.protocol || '');
+  const hostname = String(globalThis.location?.hostname || '');
 
-const API_BASE_URL = (import.meta.env.REACT_APP_API_BASE_URL ||
-  process.env.REACT_APP_API_BASE_URL ||
-  resolveDefaultApiBaseUrl()) as string;
+  // Capacitor Android shell serves app at https://localhost; backend is tunneled via adb reverse.
+  if (protocol === 'https:' && hostname === 'localhost') {
+    return 'http://localhost:3001';
+  }
+
+  return '';
+};
+
+const env = (import.meta.env as unknown as ViteEnvShape) || {};
+const processEnv = (globalThis as any)?.process?.env || {};
+
+const API_BASE_URL = (
+  env.VITE_API_BASE_URL ||
+  env.REACT_APP_API_BASE_URL ||
+  processEnv.VITE_API_BASE_URL ||
+  processEnv.REACT_APP_API_BASE_URL ||
+  resolveDefaultApiBaseUrl()
+) as string;
 
 /**
  * API Endpoints

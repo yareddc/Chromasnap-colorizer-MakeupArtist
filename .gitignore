@@ -38,3 +38,12 @@ server/config/*.json
 android/key.properties
 android/*.jks
 android/*.keystore
+
+# Firebase Android config (environment-specific secret)
+android/app/google-services.json
+
+# Local runtime/test data
+server/data/usernames.db
+
+# Generated Android plugin build outputs
+capacitor-plugin/android/build/

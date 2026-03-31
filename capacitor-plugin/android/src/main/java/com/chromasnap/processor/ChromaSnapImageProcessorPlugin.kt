@@ -17,11 +17,6 @@ import java.net.URL
 class ChromaSnapImageProcessorPlugin : Plugin() {
     private val implementation = ChromaSnapImageProcessor()
     private val scope = CoroutineScope(Dispatchers.Main + Job())
-    
-    override fun handleDestroy() {
-        scope.cancel()
-        super.handleDestroy()
-    }
 
     @PluginMethod
     fun analyzeMonochromatic(call: PluginCall) {

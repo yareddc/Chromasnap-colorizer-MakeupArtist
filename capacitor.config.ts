@@ -5,7 +5,13 @@ const config: CapacitorConfig = {
   appName: 'ChromaSnap',
   webDir: 'dist',
   server: {
-    androidScheme: 'http'
+    androidScheme: 'https'
+  },
+  plugins: {
+    FirebaseAuthentication: {
+      providers: ['google.com', 'phone'],
+      skipNativeAuth: false,
+    },
   }
 };
 

@@ -1,0 +1,32 @@
+Bring black-and-white photos back to life with ChromaSnap.
+
+ChromaSnap uses AI to colorize vintage images while preserving subject identity and composition. You can then upscale, sharpen, and enhance vibrancy for a cleaner final result. For selected images, generate a short animation to make memories feel alive again.
+
+Key features:
+- AI colorization for black-and-white photos
+- One-tap enhancement tools: upscale, sharpen, vibrancy
+- Optional image animation workflow
+- Account-based token usage and subscription tiers
+- Google Play Billing integration for Android purchases
+- Secure account authentication and recovery
+- In-app account deletion support
+
+Who it is for:
+- Families restoring personal photo archives
+- Creators making social-ready historical content
+- Anyone who wants fast, high-quality AI restoration from mobile
+
+How it works:
+1. Upload a black-and-white image.
+2. Choose a style/palette.
+3. Generate colorized output.
+4. Enhance quality or animate.
+5. Save and share.
+
+Billing and subscriptions:
+- Subscriptions and token top-ups are managed through Google Play Billing on Android.
+- Token balance and usage are visible in-app.
+
+Support:
+- For support, use the contact details listed in the Play Store listing.
+- Privacy Policy and account management links should be provided in Play Console before rollout.

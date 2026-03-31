@@ -16,7 +16,9 @@ import {
   checkImageSafety,
   fetchAuthMe,
   isBlackAndWhite,
+  deleteAuthAccount,
   loginUser,
+    socialLogin,
   upscaleImage,
   enhanceVibrancy,
   sharpenImage,
@@ -31,6 +33,12 @@ import {
   topUpTokens,
   verifyGooglePlayPurchase,
 } from './services/geminiService';
+import {
+  confirmPhoneOtp,
+  isFirebaseAvailable,
+  sendPhoneOtp,
+  signInWithGoogle,
+} from './services/firebaseAuthService';
 import {
   getGooglePlayBillingAvailability,
   purchaseGooglePlayProduct,
@@ -113,6 +121,9 @@ const App: React.FC = () => {
   const [authName, setAuthName] = useState('');
   const [authEmail, setAuthEmail] = useState('');
   const [authPhoneNumber, setAuthPhoneNumber] = useState('');
+  const [socialPhoneNumber, setSocialPhoneNumber] = useState('');
+  const [socialOtpCode, setSocialOtpCode] = useState('');
+  const [socialOtpSent, setSocialOtpSent] = useState(false);
   const [authRecoveryEmail, setAuthRecoveryEmail] = useState('');
   const [authResetToken, setAuthResetToken] = useState('');
   const [authNewPassword, setAuthNewPassword] = useState('');
@@ -124,6 +135,9 @@ const App: React.FC = () => {
   const [authCaptchaToken, setAuthCaptchaToken] = useState('');
   const [recoveredUsernames, setRecoveredUsernames] = useState<string[]>([]);
   const [issuedResetToken, setIssuedResetToken] = useState<string>('');
+  const [deleteAccountPassword, setDeleteAccountPassword] = useState('');
+  const [deleteAccountConfirmUsername, setDeleteAccountConfirmUsername] = useState('');
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const [accountTab, setAccountTab] = useState<'overview' | 'account-details'>('overview');
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
@@ -185,6 +199,52 @@ const App: React.FC = () => {
     setSubscriptionUsage([]);
   };
 
+  const handleDeleteAccount = async () => {
+    if (!authUser?.username) {
+      setAuthMessage('You must be logged in to delete your account.');
+      return;
+    }
+
+    if (!deleteAccountPassword.trim()) {
+      setAuthMessage('Enter your password to delete your account.');
+      return;
+    }
+
+    if (deleteAccountConfirmUsername.trim() !== authUser.username) {
+      setAuthMessage(`Type your exact username (${authUser.username}) to confirm deletion.`);
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'This permanently deletes your account, billing history, and token data. This action cannot be undone. Continue?'
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleteAccountLoading(true);
+    setAuthMessage(null);
+    try {
+      await deleteAuthAccount({
+        password: deleteAccountPassword,
+        confirmUsername: deleteAccountConfirmUsername,
+      });
+
+      await clearAuthToken();
+      setAuthUser(null);
+      setSubscriptionAccount(null);
+      setSubscriptionUsage([]);
+      setDeleteAccountPassword('');
+      setDeleteAccountConfirmUsername('');
+      setAccountTab('overview');
+      setAuthMessage('Account deleted successfully.');
+    } catch (error: any) {
+      setAuthMessage(error.message || 'Failed to delete account');
+    } finally {
+      setDeleteAccountLoading(false);
+    }
+  };
+
   const handleRegister = async () => {
     setAuthLoading(true);
     setAuthMessage(null);
@@ -229,6 +289,76 @@ const App: React.FC = () => {
         setAuthRequireCaptcha(true);
       }
       setAuthMessage(error.message || 'Login failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      if (!isFirebaseAvailable()) {
+        throw new Error('Google login is not configured yet (missing Firebase env vars).');
+      }
+      const idToken = await signInWithGoogle();
+      const { user } = await socialLogin({ idToken, provider: 'google' });
+      setAuthUser(user);
+      const storedId = setCurrentUserId(user.username);
+      setActiveUserId(storedId);
+      setUserIdInput(storedId);
+      setAuthMessage('Signed in with Google.');
+    } catch (error: any) {
+      setAuthMessage(error.message || 'Google sign-in failed');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSendPhoneOtp = async () => {
+    setAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      if (!isFirebaseAvailable()) {
+        throw new Error('Phone login is not configured yet (missing Firebase env vars).');
+      }
+      const startResult = await sendPhoneOtp(socialPhoneNumber);
+
+      if (startResult.status === 'verified') {
+        const { user } = await socialLogin({ idToken: startResult.idToken, provider: 'phone' });
+        setAuthUser(user);
+        const storedId = setCurrentUserId(user.username);
+        setActiveUserId(storedId);
+        setUserIdInput(storedId);
+        setSocialOtpCode('');
+        setSocialOtpSent(false);
+        setAuthMessage('Phone login successful (instant verification).');
+      } else {
+        setSocialOtpSent(true);
+        setAuthMessage('OTP sent. Check your phone and enter the code.');
+      }
+    } catch (error: any) {
+      setAuthMessage(error.message || 'Failed to send OTP');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleVerifyPhoneOtp = async () => {
+    setAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      const idToken = await confirmPhoneOtp(socialOtpCode);
+      const { user } = await socialLogin({ idToken, provider: 'phone' });
+      setAuthUser(user);
+      const storedId = setCurrentUserId(user.username);
+      setActiveUserId(storedId);
+      setUserIdInput(storedId);
+      setSocialOtpCode('');
+      setSocialOtpSent(false);
+      setAuthMessage('Phone login successful.');
+    } catch (error: any) {
+      setAuthMessage(error.message || 'OTP verification failed');
     } finally {
       setAuthLoading(false);
     }
@@ -752,6 +882,55 @@ const App: React.FC = () => {
               </div>
             )}
 
+            {authMode === 'login' && (
+              <div className="space-y-2">
+                <button
+                  onClick={handleGoogleLogin}
+                  disabled={authLoading}
+                  className="w-full px-4 py-3 rounded-xl bg-white text-slate-900 text-sm font-semibold hover:bg-slate-200 transition-colors disabled:opacity-50"
+                >
+                  Continue with Google
+                </button>
+
+                <div className="grid grid-cols-1 gap-2 p-3 rounded-xl border border-slate-800 bg-slate-950/40">
+                  <input
+                    type="tel"
+                    value={socialPhoneNumber}
+                    onChange={(event) => setSocialPhoneNumber(event.target.value)}
+                    placeholder="Phone (+12025551234)"
+                    className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                  {!socialOtpSent ? (
+                    <button
+                      onClick={handleSendPhoneOtp}
+                      disabled={authLoading}
+                      className="w-full px-4 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                    >
+                      Send OTP
+                    </button>
+                  ) : (
+                    <>
+                      <input
+                        value={socialOtpCode}
+                        onChange={(event) => setSocialOtpCode(event.target.value)}
+                        placeholder="OTP code"
+                        className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                      />
+                      <button
+                        onClick={handleVerifyPhoneOtp}
+                        disabled={authLoading}
+                        className="w-full px-4 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                      >
+                        Verify OTP & Sign In
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <div id="recaptcha-container" />
+              </div>
+            )}
+
             <div className="grid grid-cols-1 gap-2">
               {authMode === 'login' && (
                 <div className="space-y-2">
@@ -986,6 +1165,31 @@ const App: React.FC = () => {
                 {!subscriptionUsage.length && (
                   <div className="text-xs text-slate-400">No usage yet.</div>
                 )}
+              </div>
+
+              <div className="rounded-2xl border border-rose-600/40 bg-rose-950/20 p-3 space-y-3">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-rose-300">Danger Zone</div>
+                <p className="text-xs text-rose-200/80">Delete this account and permanently remove billing/account data.</p>
+                <input
+                  type="password"
+                  value={deleteAccountPassword}
+                  onChange={(event) => setDeleteAccountPassword(event.target.value)}
+                  placeholder="Current password"
+                  className="w-full rounded-xl bg-slate-950/60 border border-rose-900/70 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                />
+                <input
+                  value={deleteAccountConfirmUsername}
+                  onChange={(event) => setDeleteAccountConfirmUsername(event.target.value)}
+                  placeholder={`Type ${authUser?.username || 'your username'} to confirm`}
+                  className="w-full rounded-xl bg-slate-950/60 border border-rose-900/70 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                />
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deleteAccountLoading}
+                  className="w-full px-4 py-3 rounded-xl bg-rose-700 text-xs font-semibold text-white hover:bg-rose-600 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                >
+                  {deleteAccountLoading ? 'Deleting...' : 'Delete Account Permanently'}
+                </button>
               </div>
             </>
           )}

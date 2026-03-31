@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import fs, { existsSync } from 'fs';
@@ -13,20 +13,28 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import {
     addUsername,
+    addBillingUsageEvent,
     clearAuthLoginAttempts,
     createAuthUser,
-    recordAuthLoginFailure,
+    createOrGetFirebaseSocialUser,
+    deleteAuthUserAndBillingData,
     createPasswordResetToken,
     consumePasswordResetToken,
+    getBillingAccountByUserId,
     getAuthLoginAttemptState,
     getAuthUserByUsername,
     getUsernameDatabasePath,
     initUsernameDatabase,
     listAuthUsernamesByRecoveryEmail,
+    listBillingUsageEvents,
     listUsernames,
+    markGooglePlayTokenConsumed,
+    recordAuthLoginFailure,
     removeUsername,
+    upsertBillingAccount,
     updateAuthUserPassword,
 } from './userDatabase';
+import type { App as FirebaseAdminApp } from 'firebase-admin/app';
 
 dotenv.config();
 
@@ -43,20 +51,42 @@ type PlanConfig = {
     maxTopUpPerMonth: number;
 };
 
-type UsageEvent = {
-    id: string;
-    timestamp: number;
-    action: string;
-    tokens: number;
-};
-
 type UserAccount = {
     userId: string;
     tier: SubscriptionTier;
     tokenBalance: number;
     monthlyRemainingTopUp: number;
     cycleStartedAt: number;
-    usage: UsageEvent[];
+};
+
+// Firebase Admin (lazy - only initialized when FIREBASE_PROJECT_ID is set)
+let _firebaseAdminApp: FirebaseAdminApp | null = null;
+
+const getFirebaseAdmin = async (): Promise<import('firebase-admin/auth').Auth> => {
+    if (!_firebaseAdminApp) {
+        const projectId = (process.env.FIREBASE_PROJECT_ID || process.env.GCP_PROJECT_ID || '').trim();
+        if (!projectId) {
+            throw new Error('FIREBASE_PROJECT_ID (or GCP_PROJECT_ID) is not configured on the server.');
+        }
+        const { initializeApp, cert, getApps } = await import('firebase-admin/app');
+        const { getAuth } = await import('firebase-admin/auth');
+        const existingApps = getApps();
+        if (existingApps.length) {
+            _firebaseAdminApp = existingApps[0];
+        } else {
+            const credentialJson = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
+            if (credentialJson) {
+                const serviceAccount = JSON.parse(credentialJson);
+                _firebaseAdminApp = initializeApp({ credential: cert(serviceAccount), projectId });
+            } else {
+                // Fall back to Application Default Credentials (works on Cloud Run automatically)
+                _firebaseAdminApp = initializeApp({ projectId });
+            }
+        }
+        return getAuth(_firebaseAdminApp);
+    }
+    const { getAuth } = await import('firebase-admin/auth');
+    return getAuth(_firebaseAdminApp);
 };
 
 const PLAN_CONFIG: Record<SubscriptionTier, PlanConfig> = {
@@ -87,8 +117,6 @@ const ACTION_TOKEN_COST: Record<string, number> = {
     sharpen: 2,
     animate_start: 20,
 };
-
-const userAccounts = new Map<string, UserAccount>();
 
 const BILLING_HEADER = 'x-user-id';
 const CLIENT_PLATFORM_HEADER = 'x-client-platform';
@@ -169,12 +197,15 @@ const CAPTCHA_TRIGGER_THRESHOLD = 3;
 const CAPTCHA_BYPASS_TOKEN = process.env.CAPTCHA_BYPASS_TOKEN || 'dev-captcha-ok';
 const CAPTCHA_VERIFY_URL = process.env.CAPTCHA_VERIFY_URL || 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const CAPTCHA_SECRET_KEY = process.env.CAPTCHA_SECRET_KEY || '';
+const PASSWORD_RESET_WEBHOOK_URL = (process.env.PASSWORD_RESET_WEBHOOK_URL || '').trim();
+const PASSWORD_RESET_WEBHOOK_TIMEOUT_MS = Number.parseInt(process.env.PASSWORD_RESET_WEBHOOK_TIMEOUT_MS || '10000', 10) || 10000;
+const PASSWORD_RESET_WEBHOOK_SHARED_SECRET = (process.env.PASSWORD_RESET_WEBHOOK_SHARED_SECRET || '').trim();
 
 const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 const ENFORCE_GOOGLE_PLAY_FOR_ANDROID = isProduction || process.env.ENFORCE_GOOGLE_PLAY_FOR_ANDROID === 'true';
+const DISABLE_DIRECT_BILLING_MUTATIONS = isProduction || process.env.DISABLE_DIRECT_BILLING_MUTATIONS === 'true';
 const PLAY_PACKAGE_NAME = (process.env.PLAY_PACKAGE_NAME || process.env.ANDROID_APPLICATION_ID || 'com.chromasnap.app').trim();
 const PLAY_PUBLISHER_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
-const consumedGooglePlayTokens = new Set<string>();
 
 const playSubscriptionProductToTier: Record<string, SubscriptionTier> = {
     [process.env.PLAY_PRODUCT_SUBSCRIPTION_PRO || 'chromasnap_pro']: 'pro',
@@ -280,13 +311,19 @@ const verifyGooglePlayPurchase = async (productType: GooglePlayProductType, prod
     };
 };
 
-const resetCycleIfNeeded = (account: UserAccount) => {
+const resetCycleIfNeeded = async (account: UserAccount) => {
     if (Date.now() - account.cycleStartedAt >= thirtyDaysMs) {
         const plan = PLAN_CONFIG[account.tier];
         account.cycleStartedAt = Date.now();
         account.tokenBalance = plan.monthlyTokens;
         account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
-        account.usage = [];
+        await upsertBillingAccount({
+            userId: account.userId,
+            tier: account.tier,
+            tokenBalance: account.tokenBalance,
+            monthlyRemainingTopUp: account.monthlyRemainingTopUp,
+            cycleStartedAt: account.cycleStartedAt,
+        });
     }
 };
 
@@ -302,11 +339,18 @@ const getUserIdFromRequest = (req: express.Request) => {
     return userId.length > 0 ? userId : '';
 };
 
-const getOrCreateUserAccount = (userId: string): UserAccount => {
-    const existing = userAccounts.get(userId);
+const getOrCreateUserAccount = async (userId: string): Promise<UserAccount> => {
+    const existing = await getBillingAccountByUserId(userId);
     if (existing) {
-        resetCycleIfNeeded(existing);
-        return existing;
+        const account: UserAccount = {
+            userId: existing.userId,
+            tier: existing.tier,
+            tokenBalance: existing.tokenBalance,
+            monthlyRemainingTopUp: existing.monthlyRemainingTopUp,
+            cycleStartedAt: existing.cycleStartedAt,
+        };
+        await resetCycleIfNeeded(account);
+        return account;
     }
 
     const plan = PLAN_CONFIG.free;
@@ -316,17 +360,22 @@ const getOrCreateUserAccount = (userId: string): UserAccount => {
         tokenBalance: plan.monthlyTokens,
         monthlyRemainingTopUp: plan.maxTopUpPerMonth,
         cycleStartedAt: Date.now(),
-        usage: [],
     };
-    userAccounts.set(userId, created);
+    await upsertBillingAccount({
+        userId: created.userId,
+        tier: created.tier,
+        tokenBalance: created.tokenBalance,
+        monthlyRemainingTopUp: created.monthlyRemainingTopUp,
+        cycleStartedAt: created.cycleStartedAt,
+    });
     void addUsername('subscriber', userId).catch((error) => {
         console.error('Failed to persist subscriber username:', error);
     });
     return created;
 };
 
-const chargeTokens = (account: UserAccount, action: string, cost: number) => {
-    resetCycleIfNeeded(account);
+const chargeTokens = async (account: UserAccount, action: string, cost: number) => {
+    await resetCycleIfNeeded(account);
     if (account.tokenBalance < cost) {
         const error: any = new Error('Insufficient tokens');
         error.statusCode = 402;
@@ -340,15 +389,20 @@ const chargeTokens = (account: UserAccount, action: string, cost: number) => {
     }
 
     account.tokenBalance -= cost;
-    account.usage.unshift({
+    await upsertBillingAccount({
+        userId: account.userId,
+        tier: account.tier,
+        tokenBalance: account.tokenBalance,
+        monthlyRemainingTopUp: account.monthlyRemainingTopUp,
+        cycleStartedAt: account.cycleStartedAt,
+    });
+    await addBillingUsageEvent({
         id: randomUUID(),
+        userId: account.userId,
         timestamp: Date.now(),
         action,
         tokens: cost,
     });
-    if (account.usage.length > 200) {
-        account.usage = account.usage.slice(0, 200);
-    }
 };
 
 const publicAccountView = (account: UserAccount) => ({
@@ -373,10 +427,21 @@ const handleBillingError = (res: express.Response, error: any) => {
 
 type BillingRequest = express.Request & {
     billingUserId?: string;
-    billingAccount?: UserAccount;
     authUser?: {
         username: string;
     };
+};
+
+const getAccountUsage = async (account: UserAccount) => {
+    const usage = await listBillingUsageEvents(account.userId, 200);
+    return usage
+        .filter((item) => item.timestamp >= account.cycleStartedAt)
+        .map((item) => ({
+            id: item.id,
+            timestamp: item.timestamp,
+            action: item.action,
+            tokens: item.tokens,
+        }));
 };
 
 const sanitizeUsername = (username: string) => username.trim();
@@ -528,6 +593,60 @@ const loginLimiter = rateLimit({
     message: { error: 'Too many login attempts. Please try again shortly.' },
 });
 
+const adminLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many admin requests. Please try again shortly.' },
+});
+
+const genericRecoveryMessage = 'If the account details are valid, recovery instructions have been sent.';
+
+const dispatchPasswordReset = async (payload: {
+    username: string;
+    recoveryEmail: string;
+    resetToken: string;
+    expiresAt: number;
+}) => {
+    if (!isProduction) return;
+
+    if (!PASSWORD_RESET_WEBHOOK_URL) {
+        throw new Error('PASSWORD_RESET_WEBHOOK_URL is required in production for password reset delivery');
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PASSWORD_RESET_WEBHOOK_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(PASSWORD_RESET_WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(PASSWORD_RESET_WEBHOOK_SHARED_SECRET
+                    ? { 'x-reset-webhook-secret': PASSWORD_RESET_WEBHOOK_SHARED_SECRET }
+                    : {}),
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+                event: 'password_reset_requested',
+                username: payload.username,
+                recoveryEmail: payload.recoveryEmail,
+                resetToken: payload.resetToken,
+                expiresAt: payload.expiresAt,
+                generatedAt: Date.now(),
+            }),
+        });
+
+        if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            throw new Error(`Password reset delivery webhook failed (${response.status})${body ? `: ${body.slice(0, 200)}` : ''}`);
+        }
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
 const checkLoginLock = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const { username } = req.body as { username?: string };
     const normalizedUsername = sanitizeUsername(username || '');
@@ -566,13 +685,10 @@ const attachBillingAccount = (req: express.Request, _res: express.Response, next
     const billingReq = req as BillingRequest;
     if (!userId) {
         billingReq.billingUserId = undefined;
-        billingReq.billingAccount = undefined;
         return next();
     }
 
-    const account = getOrCreateUserAccount(userId);
     billingReq.billingUserId = userId;
-    billingReq.billingAccount = account;
     next();
 };
 
@@ -581,23 +697,22 @@ const requireBilling = (action: keyof typeof ACTION_TOKEN_COST) => (
     res: express.Response,
     next: express.NextFunction
 ) => {
-    try {
+    (async () => {
         const billingReq = req as BillingRequest;
         const userId = billingReq.authUser?.username?.trim() || billingReq.billingUserId;
         if (!userId) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
-        const account = billingReq.billingAccount || getOrCreateUserAccount(userId);
+        const account = await getOrCreateUserAccount(userId);
         const cost = ACTION_TOKEN_COST[action] ?? 1;
-        chargeTokens(account, action, cost);
+        await chargeTokens(account, action, cost);
         billingReq.billingUserId = userId;
-        billingReq.billingAccount = account;
         next();
-    } catch (error: any) {
+    })().catch((error: any) => {
         if (handleBillingError(res, error)) return;
         next(error);
-    }
+    });
 };
 
 type AnimationJob = {
@@ -1256,7 +1371,7 @@ app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
 
         const token = signAuthToken(normalizedUsername);
         setAuthCookie(res, token);
-        const account = getOrCreateUserAccount(normalizedUsername);
+        const account = await getOrCreateUserAccount(normalizedUsername);
 
         res.status(201).json({
             user: {
@@ -1310,7 +1425,7 @@ app.post('/api/auth/login', loginLimiter, checkLoginLock, async (req, res) => {
 
         const token = signAuthToken(authUser.username);
         setAuthCookie(res, token);
-        const account = getOrCreateUserAccount(authUser.username);
+        const account = await getOrCreateUserAccount(authUser.username);
 
         res.json({
             user: {
@@ -1348,16 +1463,111 @@ app.post('/api/auth/logout', (_req, res) => {
     res.status(204).send();
 });
 
+app.delete('/api/auth/account', requireAuth, authWriteLimiter, async (req, res) => {
+    try {
+        const authUser = (req as BillingRequest).authUser!;
+        const { password, confirmUsername } = req.body as {
+            password?: string;
+            confirmUsername?: string;
+        };
+
+        const userRecord = await getAuthUserByUsername(authUser.username);
+        if (!userRecord) {
+            return res.status(404).json({ error: 'Account not found' });
+        }
+
+        if (!password) {
+            return res.status(400).json({ error: 'password is required' });
+        }
+
+        const validPassword = await bcrypt.compare(password, userRecord.passwordHash);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        const normalizedConfirmUsername = sanitizeUsername(confirmUsername || '');
+        if (normalizedConfirmUsername && normalizedConfirmUsername !== userRecord.username) {
+            return res.status(400).json({ error: 'confirmUsername does not match current account username' });
+        }
+
+        const deleted = await deleteAuthUserAndBillingData(userRecord.username);
+        clearAuthCookie(res);
+
+        if (!deleted) {
+            return res.status(404).json({ error: 'Account not found' });
+        }
+
+        return res.status(204).send();
+    } catch (error: any) {
+        return res.status(500).json({ error: error.message || 'Failed to delete account' });
+    }
+});
+
+
+app.post('/api/auth/social-login', authWriteLimiter, async (req, res) => {
+    try {
+        const { idToken, provider } = req.body as { idToken?: string; provider?: string };
+
+        if (!idToken || !idToken.trim()) {
+            return res.status(400).json({ error: 'idToken is required' });
+        }
+        if (provider !== 'google' && provider !== 'phone') {
+            return res.status(400).json({ error: 'provider must be "google" or "phone"' });
+        }
+
+        const adminAuth = await getFirebaseAdmin();
+        let decodedToken: import('firebase-admin/auth').DecodedIdToken;
+        try {
+            decodedToken = await adminAuth.verifyIdToken(idToken.trim());
+        } catch {
+            return res.status(401).json({ error: 'Invalid or expired social login token' });
+        }
+
+        const { uid, email, name, phone_number: phoneNumber } = decodedToken;
+
+        const userRecord = await createOrGetFirebaseSocialUser({
+            firebaseUid: uid,
+            provider: provider as 'google' | 'phone',
+            email: email || '',
+            name: (name as string | undefined) || '',
+            phoneNumber: (phoneNumber as string | undefined) || '',
+        });
+
+        const token = signAuthToken(userRecord.username);
+        setAuthCookie(res, token);
+        const account = await getOrCreateUserAccount(userRecord.username);
+
+        return res.json({
+            user: {
+                username: userRecord.username,
+                name: userRecord.name,
+                email: userRecord.email,
+                phoneNumber: userRecord.phoneNumber || null,
+            },
+            account: publicAccountView(account),
+        });
+    } catch (error: any) {
+        return res.status(500).json({ error: error.message || 'Social login failed' });
+    }
+});
 app.post('/api/auth/recover/username', authWriteLimiter, async (req, res) => {
     try {
         const { recoveryEmail } = req.body as { recoveryEmail?: string };
         const normalizedRecoveryEmail = (recoveryEmail || '').trim().toLowerCase();
 
-        if (!normalizedRecoveryEmail || !normalizedRecoveryEmail.includes('@')) {
+        if (!validateEmailFormat(normalizedRecoveryEmail)) {
             return res.status(400).json({ error: 'Valid recoveryEmail is required' });
         }
 
         const usernames = await listAuthUsernamesByRecoveryEmail(normalizedRecoveryEmail);
+
+        if (isProduction) {
+            return res.json({
+                usernames: [],
+                message: genericRecoveryMessage,
+            });
+        }
+
         res.json({
             usernames,
             message: usernames.length
@@ -1379,18 +1589,34 @@ app.post('/api/auth/recover/password/request', authWriteLimiter, async (req, res
             return res.status(400).json({ error: 'username and recoveryEmail are required' });
         }
 
+        if (!validateEmailFormat(normalizedRecoveryEmail)) {
+            return res.status(400).json({ error: 'Valid recoveryEmail is required' });
+        }
+
+        if (isProduction && !PASSWORD_RESET_WEBHOOK_URL) {
+            return res.status(503).json({ error: 'Password reset delivery is not configured' });
+        }
+
         const authUser = await getAuthUserByUsername(normalizedUsername);
-        if (!authUser || authUser.recoveryEmail !== normalizedRecoveryEmail) {
-            return res.status(404).json({ error: 'No matching account found for provided recovery information' });
+        const hasMatchingAccount = Boolean(authUser && authUser.recoveryEmail === normalizedRecoveryEmail);
+
+        if (!hasMatchingAccount) {
+            return res.json({ message: genericRecoveryMessage });
         }
 
         const resetToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
         const expiresAt = Date.now() + 15 * 60 * 1000;
-        await createPasswordResetToken(resetToken, authUser.username, expiresAt);
+        await createPasswordResetToken(resetToken, authUser!.username, expiresAt);
+        await dispatchPasswordReset({
+            username: authUser!.username,
+            recoveryEmail: authUser!.recoveryEmail,
+            resetToken,
+            expiresAt,
+        });
 
         res.json({
-            message: 'Password reset token generated. Use it to set a new password.',
-            resetToken: process.env.NODE_ENV === 'production' ? undefined : resetToken,
+            message: genericRecoveryMessage,
+            resetToken: isProduction ? undefined : resetToken,
             expiresAt,
         });
     } catch (error: any) {
@@ -1467,31 +1693,19 @@ app.post('/api/billing/google-play/verify', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'productId and purchaseToken are required' });
         }
 
-        if (consumedGooglePlayTokens.has(normalizedToken)) {
-            return res.status(409).json({ error: 'Purchase token already processed' });
-        }
-
-        const verification = await verifyGooglePlayPurchase(productType, normalizedProductId, normalizedToken);
-        const userId = (req as BillingRequest).authUser!.username;
-        const account = getOrCreateUserAccount(userId);
-
         if (productType === 'subs') {
             const tier = playSubscriptionProductToTier[normalizedProductId];
             if (!tier) {
                 return res.status(400).json({ error: 'Unmapped Google Play subscription productId' });
             }
-
-            const plan = PLAN_CONFIG[tier];
-            account.tier = tier;
-            account.tokenBalance = plan.monthlyTokens;
-            account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
-            account.cycleStartedAt = Date.now();
-            account.usage = [];
         } else {
             const topUpTokens = playTopupProductToTokens[normalizedProductId];
             if (!topUpTokens || topUpTokens <= 0) {
                 return res.status(400).json({ error: 'Unmapped Google Play top-up productId' });
             }
+
+            const userId = (req as BillingRequest).authUser!.username;
+            const account = await getOrCreateUserAccount(userId);
 
             if (topUpTokens > account.monthlyRemainingTopUp) {
                 return res.status(400).json({
@@ -1499,21 +1713,58 @@ app.post('/api/billing/google-play/verify', requireAuth, async (req, res) => {
                     remaining: account.monthlyRemainingTopUp,
                 });
             }
+        }
+
+        const verification = await verifyGooglePlayPurchase(productType, normalizedProductId, normalizedToken);
+        const userId = (req as BillingRequest).authUser!.username;
+        const account = await getOrCreateUserAccount(userId);
+
+        const marked = await markGooglePlayTokenConsumed({
+            purchaseToken: normalizedToken,
+            userId: account.userId,
+            productId: normalizedProductId,
+            productType,
+            orderId: verification.orderId,
+            purchaseTimeMillis: verification.purchaseTimeMillis,
+        });
+        if (!marked) {
+            return res.status(409).json({ error: 'Purchase token already processed' });
+        }
+
+        if (productType === 'subs') {
+            const tier = playSubscriptionProductToTier[normalizedProductId] as SubscriptionTier;
+            const plan = PLAN_CONFIG[tier];
+            account.tier = tier;
+            account.tokenBalance = plan.monthlyTokens;
+            account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
+            account.cycleStartedAt = Date.now();
+            await upsertBillingAccount({
+                userId: account.userId,
+                tier: account.tier,
+                tokenBalance: account.tokenBalance,
+                monthlyRemainingTopUp: account.monthlyRemainingTopUp,
+                cycleStartedAt: account.cycleStartedAt,
+            });
+        } else {
+            const topUpTokens = playTopupProductToTokens[normalizedProductId] as number;
 
             account.tokenBalance += topUpTokens;
             account.monthlyRemainingTopUp -= topUpTokens;
-            account.usage.unshift({
+            await upsertBillingAccount({
+                userId: account.userId,
+                tier: account.tier,
+                tokenBalance: account.tokenBalance,
+                monthlyRemainingTopUp: account.monthlyRemainingTopUp,
+                cycleStartedAt: account.cycleStartedAt,
+            });
+            await addBillingUsageEvent({
                 id: randomUUID(),
+                userId: account.userId,
                 timestamp: Date.now(),
                 action: 'play_topup',
                 tokens: topUpTokens,
             });
-            if (account.usage.length > 200) {
-                account.usage = account.usage.slice(0, 200);
-            }
         }
-
-        consumedGooglePlayTokens.add(normalizedToken);
 
         res.json({
             account: publicAccountView(account),
@@ -1529,14 +1780,20 @@ app.post('/api/billing/google-play/verify', requireAuth, async (req, res) => {
     }
 });
 
-app.get('/api/subscription/me', requireAuth, (req, res) => {
+app.get('/api/subscription/me', requireAuth, async (req, res) => {
     const userId = (req as BillingRequest).authUser!.username;
-    const account = getOrCreateUserAccount(userId);
+    const account = await getOrCreateUserAccount(userId);
     res.json({ account: publicAccountView(account) });
 });
 
-app.post('/api/subscription/subscribe', requireAuth, (req, res) => {
+app.post('/api/subscription/subscribe', requireAuth, async (req, res) => {
     try {
+        if (DISABLE_DIRECT_BILLING_MUTATIONS) {
+            return res.status(409).json({
+                error: 'Direct subscription changes are disabled in production. Complete payment via Google Play purchase flow and /api/billing/google-play/verify.',
+            });
+        }
+
         if (ENFORCE_GOOGLE_PLAY_FOR_ANDROID && isAndroidClient(req)) {
             return res.status(409).json({
                 error: 'Direct subscription changes are disabled on Android. Use Google Play Billing purchase flow and /api/billing/google-play/verify.',
@@ -1549,14 +1806,20 @@ app.post('/api/subscription/subscribe', requireAuth, (req, res) => {
         }
 
         const userId = (req as BillingRequest).authUser!.username;
-        const account = getOrCreateUserAccount(userId);
+        const account = await getOrCreateUserAccount(userId);
         const plan = PLAN_CONFIG[tier];
 
         account.tier = tier;
         account.tokenBalance = plan.monthlyTokens;
         account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
         account.cycleStartedAt = Date.now();
-        account.usage = [];
+        await upsertBillingAccount({
+            userId: account.userId,
+            tier: account.tier,
+            tokenBalance: account.tokenBalance,
+            monthlyRemainingTopUp: account.monthlyRemainingTopUp,
+            cycleStartedAt: account.cycleStartedAt,
+        });
 
         res.json({ account: publicAccountView(account), message: `Subscribed to ${plan.name}` });
     } catch (error: any) {
@@ -1564,8 +1827,14 @@ app.post('/api/subscription/subscribe', requireAuth, (req, res) => {
     }
 });
 
-app.post('/api/subscription/topup', requireAuth, (req, res) => {
+app.post('/api/subscription/topup', requireAuth, async (req, res) => {
     try {
+        if (DISABLE_DIRECT_BILLING_MUTATIONS) {
+            return res.status(409).json({
+                error: 'Direct token top-up is disabled in production. Complete payment via Google Play purchase flow and /api/billing/google-play/verify.',
+            });
+        }
+
         if (ENFORCE_GOOGLE_PLAY_FOR_ANDROID && isAndroidClient(req)) {
             return res.status(409).json({
                 error: 'Direct token top-up is disabled on Android. Use Google Play Billing purchase flow and /api/billing/google-play/verify.',
@@ -1579,7 +1848,7 @@ app.post('/api/subscription/topup', requireAuth, (req, res) => {
         }
 
         const userId = (req as BillingRequest).authUser!.username;
-        const account = getOrCreateUserAccount(userId);
+        const account = await getOrCreateUserAccount(userId);
 
         if (topUp > account.monthlyRemainingTopUp) {
             return res.status(400).json({
@@ -1590,6 +1859,20 @@ app.post('/api/subscription/topup', requireAuth, (req, res) => {
 
         account.tokenBalance += Math.floor(topUp);
         account.monthlyRemainingTopUp -= Math.floor(topUp);
+        await upsertBillingAccount({
+            userId: account.userId,
+            tier: account.tier,
+            tokenBalance: account.tokenBalance,
+            monthlyRemainingTopUp: account.monthlyRemainingTopUp,
+            cycleStartedAt: account.cycleStartedAt,
+        });
+        await addBillingUsageEvent({
+            id: randomUUID(),
+            userId: account.userId,
+            timestamp: Date.now(),
+            action: 'manual_topup',
+            tokens: Math.floor(topUp),
+        });
 
         res.json({ account: publicAccountView(account) });
     } catch (error: any) {
@@ -1597,12 +1880,13 @@ app.post('/api/subscription/topup', requireAuth, (req, res) => {
     }
 });
 
-app.get('/api/subscription/usage', requireAuth, (req, res) => {
+app.get('/api/subscription/usage', requireAuth, async (req, res) => {
     const userId = (req as BillingRequest).authUser!.username;
-    const account = getOrCreateUserAccount(userId);
+    const account = await getOrCreateUserAccount(userId);
+    const usage = await getAccountUsage(account);
     res.json({
         account: publicAccountView(account),
-        usage: account.usage,
+        usage,
     });
 });
 
@@ -1627,7 +1911,7 @@ const requireAdminAccess = (req: express.Request, res: express.Response, next: e
     next();
 };
 
-app.get('/api/admin/usernames', requireAdminAccess, async (_req, res) => {
+app.get('/api/admin/usernames', adminLimiter, requireAdminAccess, async (_req, res) => {
     try {
         const [subscribers, admins] = await Promise.all([
             listUsernames('subscriber'),
@@ -1640,7 +1924,7 @@ app.get('/api/admin/usernames', requireAdminAccess, async (_req, res) => {
     }
 });
 
-app.post('/api/admin/usernames/admins', requireAdminAccess, async (req, res) => {
+app.post('/api/admin/usernames/admins', adminLimiter, requireAdminAccess, async (req, res) => {
     try {
         const { username } = req.body as { username?: string };
         if (!username || !username.trim()) {
@@ -1655,7 +1939,7 @@ app.post('/api/admin/usernames/admins', requireAdminAccess, async (req, res) => 
     }
 });
 
-app.delete('/api/admin/usernames/:role/:username', requireAdminAccess, async (req, res) => {
+app.delete('/api/admin/usernames/:role/:username', adminLimiter, requireAdminAccess, async (req, res) => {
     try {
         const roleParam = req.params.role;
         const role = roleParam === 'admins'

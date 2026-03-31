@@ -43,9 +43,12 @@ export const API_ENDPOINTS = {
   AUTH_LOGIN: `${API_BASE_URL}/api/auth/login`,
   AUTH_ME: `${API_BASE_URL}/api/auth/me`,
   AUTH_LOGOUT: `${API_BASE_URL}/api/auth/logout`,
+  AUTH_DELETE_ACCOUNT: `${API_BASE_URL}/api/auth/account`,
   AUTH_RECOVER_USERNAME: `${API_BASE_URL}/api/auth/recover/username`,
   AUTH_RECOVER_PASSWORD_REQUEST: `${API_BASE_URL}/api/auth/recover/password/request`,
   AUTH_RECOVER_PASSWORD_CONFIRM: `${API_BASE_URL}/api/auth/recover/password/confirm`,
+
+  AUTH_SOCIAL_LOGIN: `${API_BASE_URL}/api/auth/social-login`,
 
   // Admin endpoints
   ADMIN_USERNAMES: `${API_BASE_URL}/api/admin/usernames`,

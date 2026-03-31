@@ -1,0 +1,58 @@
+name: Payment Smoke Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Cloud Run service name
+        required: false
+        default: chromasnap-server
+      region:
+        description: Cloud Run region
+        required: false
+        default: us-central1
+
+jobs:
+  smoke-billing-cloudrun:
+    if: ${{ secrets.GCP_SA_KEY != '' && secrets.GCP_PROJECT_ID != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install server dependencies
+        run: npm --prefix server ci
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Run billing smoke against Cloud Run
+        env:
+          BILLING_SMOKE_SERVICE: ${{ github.event.inputs.service || 'chromasnap-server' }}
+          BILLING_SMOKE_REGION: ${{ github.event.inputs.region || 'us-central1' }}
+          BILLING_EXPECT_DIRECT_MUTATION_BLOCKED: '1'
+        run: npm --prefix server run smoke:billing:cloudrun
+
+  skipped-missing-secrets:
+    if: ${{ !(secrets.GCP_SA_KEY != '' && secrets.GCP_PROJECT_ID != '') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Missing GCP secrets
+        run: |
+          echo "Skipping payment smoke workflow because GCP_SA_KEY or GCP_PROJECT_ID is not configured."

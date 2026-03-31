@@ -1,0 +1,5 @@
+- Added new sign-in options: Google account login and phone number OTP login.
+- Added secure in-app account deletion flow (password + username confirmation).
+- Improved Android security posture (HTTPS scheme and cleartext traffic disabled).
+- Updated app version for testing rollout (2 / 1.1.0).
+- Added stronger Android release-signing guardrails for build consistency.

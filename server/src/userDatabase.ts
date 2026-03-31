@@ -15,6 +15,8 @@ export type AuthUserRecord = {
     phoneNumber?: string;
 };
 
+export type SocialAuthProvider = 'google' | 'phone';
+
 export type AuthLoginAttemptState = {
     key: string;
     failureCount: number;
@@ -22,6 +24,24 @@ export type AuthLoginAttemptState = {
     lastFailedAt: number;
     lockedUntil?: number;
     captchaRequired: boolean;
+};
+
+export type BillingTier = 'free' | 'pro' | 'enterprise';
+
+export type BillingAccountRecord = {
+    userId: string;
+    tier: BillingTier;
+    tokenBalance: number;
+    monthlyRemainingTopUp: number;
+    cycleStartedAt: number;
+};
+
+export type BillingUsageEventRecord = {
+    id: string;
+    userId: string;
+    timestamp: number;
+    action: string;
+    tokens: number;
 };
 
 let database: Database<sqlite3.Database, sqlite3.Statement> | null = null;
@@ -118,6 +138,12 @@ export const initUsernameDatabase = async () => {
     }
 
     await db.run(`UPDATE auth_users SET email = recovery_email WHERE email IS NULL OR TRIM(email) = ''`);
+
+        if (!authUserColumnNames.has('firebase_uid')) {
+            await db.exec(`ALTER TABLE auth_users ADD COLUMN firebase_uid TEXT`);
+            await db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_users_firebase_uid ON auth_users(firebase_uid) WHERE firebase_uid IS NOT NULL`);
+        }
+
     await db.run(`UPDATE auth_users SET name = username WHERE name IS NULL OR TRIM(name) = ''`);
 
     await db.exec(`
@@ -138,6 +164,44 @@ export const initUsernameDatabase = async () => {
             last_failed_at INTEGER NOT NULL,
             locked_until INTEGER,
             captcha_required INTEGER NOT NULL DEFAULT 0
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS billing_accounts (
+            user_id TEXT PRIMARY KEY COLLATE NOCASE,
+            tier TEXT NOT NULL CHECK(tier IN ('free', 'pro', 'enterprise')),
+            token_balance INTEGER NOT NULL,
+            monthly_remaining_top_up INTEGER NOT NULL,
+            cycle_started_at INTEGER NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS billing_usage_events (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL COLLATE NOCASE,
+            timestamp INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            tokens INTEGER NOT NULL
+        );
+    `);
+
+    await db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_billing_usage_user_timestamp
+        ON billing_usage_events(user_id, timestamp DESC);
+    `);
+
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS billing_consumed_play_tokens (
+            purchase_token TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL COLLATE NOCASE,
+            product_id TEXT NOT NULL,
+            product_type TEXT NOT NULL CHECK(product_type IN ('subs', 'inapp')),
+            order_id TEXT,
+            purchase_time_millis INTEGER,
+            consumed_at INTEGER NOT NULL
         );
     `);
 
@@ -258,6 +322,80 @@ export const getAuthUserByUsername = async (username: string): Promise<AuthUserR
     };
 };
 
+export const getAuthUserByFirebaseUid = async (firebaseUid: string): Promise<AuthUserRecord | null> => {
+    if (!firebaseUid) return null;
+    const db = getDatabase();
+    const row = await db.get<{
+        username: string;
+        password_hash: string;
+        recovery_email: string;
+        name: string;
+        email: string;
+        phone_number: string | null;
+    }>(
+        'SELECT username, password_hash, recovery_email, name, email, phone_number FROM auth_users WHERE firebase_uid = ?',
+        firebaseUid
+    );
+    if (!row) return null;
+    return {
+        username: row.username,
+        passwordHash: row.password_hash,
+        recoveryEmail: row.recovery_email,
+        name: row.name,
+        email: row.email,
+        phoneNumber: row.phone_number || undefined,
+    };
+};
+
+export const createOrGetFirebaseSocialUser = async (params: {
+    firebaseUid: string;
+    provider: SocialAuthProvider;
+    email?: string;
+    name?: string;
+    phoneNumber?: string;
+}): Promise<AuthUserRecord> => {
+    const db = getDatabase();
+    const { firebaseUid, provider, email = '', name = '', phoneNumber = '' } = params;
+
+    const existing = await getAuthUserByFirebaseUid(firebaseUid);
+    if (existing) return existing;
+
+    const baseUsername = email
+        ? email.replace(/@.*$/, '').replace(/[^a-zA-Z0-9_]/g, '_').slice(0, 20)
+        : `${provider}_${firebaseUid.slice(0, 10)}`;
+
+    let username = baseUsername;
+    let suffix = 1;
+    while (await getAuthUserByUsername(username)) {
+        username = `${baseUsername}_${suffix++}`;
+    }
+
+    const resolvedName = name.trim() || username;
+    const resolvedEmail = email.trim().toLowerCase() || `${firebaseUid}@social.chromasnap.internal`;
+    const resolvedPhone = phoneNumber.trim() || undefined;
+
+    const { randomUUID } = await import('crypto');
+    const bcrypt = await import('bcryptjs');
+    const unusablePasswordHash = await bcrypt.hash(randomUUID(), 12);
+
+    await db.run(
+        `INSERT INTO auth_users
+            (username, password_hash, recovery_email, name, email, phone_number, firebase_uid)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        username,
+        unusablePasswordHash,
+        resolvedEmail,
+        resolvedName,
+        resolvedEmail,
+        resolvedPhone || null,
+        firebaseUid
+    );
+    await addUsername('subscriber', username);
+    await queuePersistDatabase();
+
+    return (await getAuthUserByUsername(username))!;
+};
+
 export const listAuthUsernamesByRecoveryEmail = async (recoveryEmail: string): Promise<string[]> => {
     const normalizedRecoveryEmail = recoveryEmail.trim().toLowerCase();
     if (!normalizedRecoveryEmail) return [];
@@ -323,6 +461,41 @@ export const updateAuthUserPassword = async (username: string, passwordHash: str
     }
 
     return (result.changes || 0) > 0;
+};
+
+export const deleteAuthUserAndBillingData = async (username: string): Promise<boolean> => {
+    const normalizedUsername = normalizeUsername(username);
+    if (!normalizedUsername) {
+        throw new Error('username is required');
+    }
+
+    const db = getDatabase();
+    const attemptKeyPrefix = `${normalizedUsername.toLowerCase()}::%`;
+    let authUserDeleted = false;
+
+    await db.exec('BEGIN IMMEDIATE TRANSACTION');
+    try {
+        const authUserDeleteResult = await db.run(
+            'DELETE FROM auth_users WHERE username = ?',
+            normalizedUsername
+        );
+        authUserDeleted = (authUserDeleteResult.changes || 0) > 0;
+
+        await db.run('DELETE FROM usernames WHERE username = ?', normalizedUsername);
+        await db.run('DELETE FROM billing_accounts WHERE user_id = ?', normalizedUsername);
+        await db.run('DELETE FROM billing_usage_events WHERE user_id = ?', normalizedUsername);
+        await db.run('DELETE FROM billing_consumed_play_tokens WHERE user_id = ?', normalizedUsername);
+        await db.run('DELETE FROM password_reset_tokens WHERE username = ?', normalizedUsername);
+        await db.run('DELETE FROM auth_login_attempts WHERE attempt_key LIKE ?', attemptKeyPrefix);
+
+        await db.exec('COMMIT');
+    } catch (error) {
+        await db.exec('ROLLBACK');
+        throw error;
+    }
+
+    await queuePersistDatabase();
+    return authUserDeleted;
 };
 
 export const getAuthLoginAttemptState = async (attemptKey: string): Promise<AuthLoginAttemptState | null> => {
@@ -415,3 +588,165 @@ export const recordAuthLoginFailure = async (
 };
 
 export const getUsernameDatabasePath = () => dbFilePath;
+
+const mapBillingAccountRow = (row: {
+    user_id: string;
+    tier: BillingTier;
+    token_balance: number;
+    monthly_remaining_top_up: number;
+    cycle_started_at: number;
+}): BillingAccountRecord => ({
+    userId: row.user_id,
+    tier: row.tier,
+    tokenBalance: Number(row.token_balance || 0),
+    monthlyRemainingTopUp: Number(row.monthly_remaining_top_up || 0),
+    cycleStartedAt: Number(row.cycle_started_at || 0),
+});
+
+export const getBillingAccountByUserId = async (userId: string): Promise<BillingAccountRecord | null> => {
+    const normalizedUserId = normalizeUsername(userId);
+    if (!normalizedUserId) return null;
+
+    const db = getDatabase();
+    const row = await db.get<{
+        user_id: string;
+        tier: BillingTier;
+        token_balance: number;
+        monthly_remaining_top_up: number;
+        cycle_started_at: number;
+    }>(
+        `SELECT user_id, tier, token_balance, monthly_remaining_top_up, cycle_started_at
+         FROM billing_accounts WHERE user_id = ?`,
+        normalizedUserId
+    );
+
+    if (!row) return null;
+    return mapBillingAccountRow(row);
+};
+
+export const upsertBillingAccount = async (account: BillingAccountRecord) => {
+    const normalizedUserId = normalizeUsername(account.userId);
+    if (!normalizedUserId) {
+        throw new Error('Billing userId is required');
+    }
+
+    const db = getDatabase();
+    await db.run(
+        `INSERT INTO billing_accounts (user_id, tier, token_balance, monthly_remaining_top_up, cycle_started_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(user_id) DO UPDATE SET
+            tier=excluded.tier,
+            token_balance=excluded.token_balance,
+            monthly_remaining_top_up=excluded.monthly_remaining_top_up,
+            cycle_started_at=excluded.cycle_started_at,
+            updated_at=CURRENT_TIMESTAMP`,
+        normalizedUserId,
+        account.tier,
+        Math.floor(account.tokenBalance),
+        Math.floor(account.monthlyRemainingTopUp),
+        Math.floor(account.cycleStartedAt)
+    );
+    await queuePersistDatabase();
+};
+
+export const listBillingUsageEvents = async (userId: string, limit: number = 200): Promise<BillingUsageEventRecord[]> => {
+    const normalizedUserId = normalizeUsername(userId);
+    if (!normalizedUserId) return [];
+
+    const db = getDatabase();
+    const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 200;
+    const rows = await db.all<{
+        id: string;
+        user_id: string;
+        timestamp: number;
+        action: string;
+        tokens: number;
+    }[]>(
+        `SELECT id, user_id, timestamp, action, tokens
+         FROM billing_usage_events
+         WHERE user_id = ?
+         ORDER BY timestamp DESC
+         LIMIT ?`,
+        normalizedUserId,
+        normalizedLimit
+    );
+
+    return rows.map((row) => ({
+        id: row.id,
+        userId: row.user_id,
+        timestamp: Number(row.timestamp || 0),
+        action: row.action,
+        tokens: Number(row.tokens || 0),
+    }));
+};
+
+export const addBillingUsageEvent = async (event: BillingUsageEventRecord) => {
+    const normalizedUserId = normalizeUsername(event.userId);
+    if (!event.id || !normalizedUserId) {
+        throw new Error('Billing usage event id and userId are required');
+    }
+
+    const db = getDatabase();
+    await db.run(
+        'INSERT INTO billing_usage_events (id, user_id, timestamp, action, tokens) VALUES (?, ?, ?, ?, ?)',
+        event.id,
+        normalizedUserId,
+        Math.floor(event.timestamp),
+        event.action,
+        Math.floor(event.tokens)
+    );
+
+    await db.run(
+        `DELETE FROM billing_usage_events
+         WHERE user_id = ?
+           AND id NOT IN (
+             SELECT id FROM billing_usage_events
+             WHERE user_id = ?
+             ORDER BY timestamp DESC
+             LIMIT 200
+           )`,
+        normalizedUserId,
+        normalizedUserId
+    );
+
+    await queuePersistDatabase();
+};
+
+export const markGooglePlayTokenConsumed = async (payload: {
+    purchaseToken: string;
+    userId: string;
+    productId: string;
+    productType: 'subs' | 'inapp';
+    orderId?: string;
+    purchaseTimeMillis?: number;
+}) => {
+    const purchaseToken = String(payload.purchaseToken || '').trim();
+    const userId = normalizeUsername(payload.userId);
+    const productId = String(payload.productId || '').trim();
+    const productType = payload.productType;
+
+    if (!purchaseToken || !userId || !productId || (productType !== 'subs' && productType !== 'inapp')) {
+        throw new Error('purchaseToken, userId, productId, and a valid productType are required');
+    }
+
+    const db = getDatabase();
+    const result = await db.run(
+        `INSERT OR IGNORE INTO billing_consumed_play_tokens
+         (purchase_token, user_id, product_id, product_type, order_id, purchase_time_millis, consumed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        purchaseToken,
+        userId,
+        productId,
+        productType,
+        payload.orderId || null,
+        Number.isFinite(payload.purchaseTimeMillis) ? Math.floor(payload.purchaseTimeMillis as number) : null,
+        Date.now()
+    );
+
+    if ((result.changes || 0) > 0) {
+        await queuePersistDatabase();
+        return true;
+    }
+
+    return false;
+};

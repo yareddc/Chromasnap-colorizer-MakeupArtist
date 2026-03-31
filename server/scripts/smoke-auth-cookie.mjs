@@ -28,6 +28,8 @@ const randomSuffix = Date.now().toString(36);
 const username = `smoke_${randomSuffix}`;
 const password = `SmokePass123${randomSuffix.slice(-2)}`;
 const recoveryEmail = `smoke_${randomSuffix}@example.com`;
+const name = `Smoke ${randomSuffix.slice(-4)}`;
+const phoneNumber = '+15555550123';
 
 const parseBody = async (response) => {
   const text = await response.text();
@@ -82,7 +84,14 @@ const run = async () => {
   const registerResult = await request(`${baseUrl}/api/auth/register`, {
     method: 'POST',
     headers: buildHeaders(),
-    body: JSON.stringify({ username, password, recoveryEmail }),
+    body: JSON.stringify({
+      username,
+      password,
+      recoveryEmail,
+      email: recoveryEmail,
+      name,
+      phoneNumber,
+    }),
   });
 
   console.log('STEP_REGISTER', registerResult.status);
@@ -129,9 +138,7 @@ const run = async () => {
   assert(logoutResult.status === 204, `Logout failed: ${logoutResult.status}`);
 
   const meAfterLogout = await request(`${baseUrl}/api/auth/me`, {
-    headers: buildHeaders({
-      Cookie: cookieHeader,
-    }),
+    headers: buildHeaders(),
   });
 
   console.log('STEP_ME_AFTER_LOGOUT', meAfterLogout.status);

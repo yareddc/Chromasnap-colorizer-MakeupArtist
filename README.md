@@ -60,11 +60,15 @@ Auth sessions are now transported via `HttpOnly` auth cookies (not localStorage 
 - `POST /api/auth/login` - body: `{ "username": string, "password": string }`
 - `GET /api/auth/me` - requires authenticated session (HttpOnly cookie or Bearer token)
 - `POST /api/auth/logout` - clears auth cookie session
+- `DELETE /api/auth/account` - body: `{ "password": string, "confirmUsername": string }` (permanently deletes account + billing data)
 - `POST /api/auth/recover/username` - body: `{ "recoveryEmail": string }`
 - `POST /api/auth/recover/password/request` - body: `{ "username": string, "recoveryEmail": string }`
 - `POST /api/auth/recover/password/confirm` - body: `{ "resetToken": string, "newPassword": string }`
 
 Note: In non-production mode, password reset request returns a `resetToken` in the API response for local testing.
+In production, password reset delivery must be configured with `PASSWORD_RESET_WEBHOOK_URL`.
+Optional hardening: set `PASSWORD_RESET_WEBHOOK_SHARED_SECRET` to send `x-reset-webhook-secret` on delivery requests.
+Reference deployment example: `docs/password-reset-webhook-receiver.md`.
 
 Security hardening included:
 - Repeated failed logins trigger temporary lockout.
@@ -77,7 +81,7 @@ Turnstile setup (recommended):
 
 ## Subscription Management API
 
-All subscription endpoints except `GET /api/subscription/plans` require `Authorization: Bearer <token>`.
+All subscription endpoints except `GET /api/subscription/plans` require an authenticated session (HttpOnly auth cookie or Bearer token).
 
 Android billing compliance mode:
 - Direct `POST /api/subscription/subscribe` and `POST /api/subscription/topup` are blocked for Android clients.
@@ -392,6 +396,46 @@ cd android
 ```
 
 Note: `:app:connectedDebugAndroidTest` validates only the app module tests. `connectedCheck` runs connected tests/checks across all Android modules (including Capacitor/Cordova plugin modules), so dependency conflicts can appear there even when app-only instrumentation passes.
+
+## Android Play Upload Checklist
+
+Use these settings before uploading to Google Play internal testing.
+
+1. Configure upload-signing credentials (PowerShell example):
+
+```bash
+$env:ANDROID_UPLOAD_STORE_FILE="C:\path\to\upload-keystore.jks"
+$env:ANDROID_UPLOAD_STORE_PASSWORD="<store-password>"
+$env:ANDROID_UPLOAD_KEY_ALIAS="<key-alias>"
+$env:ANDROID_UPLOAD_KEY_PASSWORD="<key-password>"
+```
+
+Optional local file workflow:
+
+1. Copy `android/key.properties.example` to `android/key.properties`.
+2. Fill values from your Play upload keystore.
+3. Export the same values into env vars before release build.
+
+2. Build release app bundle:
+
+```bash
+cd android
+.\gradlew.bat bundleRelease
+```
+
+3. Upload artifact:
+
+`android/app/build/outputs/bundle/release/app-release.aab`
+
+4. Security baseline now enforced in app config:
+
+- Android manifest uses `android:usesCleartextTraffic="false"`
+- Capacitor Android scheme is `https`
+- App version is now `versionCode 2`, `versionName 1.1.0`
+
+5. Policy baseline now available:
+
+- In-app account deletion flow is wired to `DELETE /api/auth/account` and removes account+billing records.
 
 If the device is not detected, restart adb and re-run:
 

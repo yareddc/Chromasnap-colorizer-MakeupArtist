@@ -33,3 +33,8 @@ dist-ssr
 server/config/*.json
 *service-account*.json
 *credentials*.json
+
+# Android signing material
+android/key.properties
+android/*.jks
+android/*.keystore

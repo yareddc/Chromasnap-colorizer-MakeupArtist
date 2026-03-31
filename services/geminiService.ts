@@ -431,6 +431,42 @@ export const fetchAuthMe = async (): Promise<AuthUser | null> => {
   return data.user as AuthUser;
 };
 
+export const deleteAuthAccount = async (payload: { password: string; confirmUsername?: string }): Promise<void> => {
+  const response = await fetch(API_ENDPOINTS.AUTH_DELETE_ACCOUNT, {
+    method: 'DELETE',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify(payload),
+  });
+
+  if (response.status === 204) {
+    return;
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to delete account');
+  }
+};
+
+export const socialLogin = async (payload: {
+  idToken: string;
+  provider: 'google' | 'phone';
+}): Promise<{ user: import('../types').AuthUser }> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.AUTH_SOCIAL_LOGIN, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify(payload),
+  }, 30000);
+
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(data.error || 'Social login failed');
+  }
+  return data as { user: import('../types').AuthUser };
+};
+
 export const recoverUsername = async (recoveryEmail: string): Promise<string[]> => {
   const response = await fetch(API_ENDPOINTS.AUTH_RECOVER_USERNAME, {
     method: 'POST',

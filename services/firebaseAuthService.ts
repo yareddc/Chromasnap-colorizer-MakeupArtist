@@ -162,22 +162,20 @@ export const sendPhoneOtp = async (
       }));
 
       listenerHandles.push(await (FirebaseAuthentication as any).addListener('phoneVerificationCompleted', async (event: any) => {
-        let idToken = event?.credential?.idToken || event?.result?.credential?.idToken || null;
-        if (!idToken) {
-          try {
-            const tokenResult = await (FirebaseAuthentication as any).getIdToken();
-            idToken = tokenResult?.token || null;
-          } catch {
-            idToken = null;
+        try {
+          // Always fetch the Firebase ID token explicitly after verification
+          const tokenResult = await (FirebaseAuthentication as any).getIdToken().catch(() => null);
+          const idToken = tokenResult?.token;
+          
+          if (!idToken) {
+            return rejectOnce(new Error('Phone verification completed but no ID token was returned.'));
           }
-        }
 
-        if (!idToken) {
-          return rejectOnce(new Error('Phone verification completed but no ID token was returned.'));
+          _nativeAutoIdToken = idToken;
+          void resolveOnce({ status: 'verified', idToken });
+        } catch (error: any) {
+          void rejectOnce(new Error(`Phone verification completed but failed to retrieve token: ${error?.message}`));
         }
-
-        _nativeAutoIdToken = idToken;
-        void resolveOnce({ status: 'verified', idToken });
       }));
 
       listenerHandles.push(await (FirebaseAuthentication as any).addListener('phoneVerificationFailed', (event: any) => {
@@ -233,15 +231,23 @@ export const confirmPhoneOtp = async (otpCode: string): Promise<string> => {
     if (!_nativeVerificationId) {
       throw new Error('No pending phone verification. Call sendPhoneOtp() first.');
     }
-    const result = await (FirebaseAuthentication as any).confirmVerificationCode({
+    
+    // Verify the OTP code
+    await (FirebaseAuthentication as any).confirmVerificationCode({
       verificationId: _nativeVerificationId,
       verificationCode: otpCode,
     });
     _nativeVerificationId = null;
-    if (!result?.credential?.idToken) {
-      throw new Error('Phone verification failed: no ID token returned.');
+
+    // Explicitly fetch the Firebase ID token (not credential token) for backend verification
+    const tokenResult = await (FirebaseAuthentication as any).getIdToken().catch(() => null);
+    const idToken = tokenResult?.token;
+    
+    if (!idToken) {
+      throw new Error('Phone verification succeeded but no Firebase ID token was returned.');
     }
-    return result.credential.idToken as string;
+    
+    return idToken as string;
   }
 
   // Web

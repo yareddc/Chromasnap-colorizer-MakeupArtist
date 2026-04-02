@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
 import ComparisonView from './components/ComparisonView';
@@ -138,8 +138,10 @@ const App: React.FC = () => {
   const [deleteAccountPassword, setDeleteAccountPassword] = useState('');
   const [deleteAccountConfirmUsername, setDeleteAccountConfirmUsername] = useState('');
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
-  const [accountTab, setAccountTab] = useState<'overview' | 'account-details'>('overview');
+  const [accountTab, setAccountTab] = useState<'overview' | 'account-details' | 'delete-account'>('overview');
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
   const isDeveloperMode = import.meta.env.DEV || import.meta.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true';
 
@@ -190,6 +192,18 @@ const App: React.FC = () => {
     if (!authUser) return;
     refreshSubscription();
   }, [activeUserId, authUser]);
+
+  useEffect(() => {
+    if (!showAccountMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (accountMenuRef.current?.contains(event.target as Node)) return;
+      setShowAccountMenu(false);
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [showAccountMenu]);
 
   const handleLogout = () => {
     clearAuthToken();
@@ -1023,26 +1037,59 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => setAccountTab('overview')}
-                className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors"
+                onClick={() => {
+                  setAccountTab('overview');
+                  setShowAccountMenu(false);
+                }}
+                className={`px-4 py-2 text-xs font-semibold rounded-full border transition-colors ${accountTab === 'overview' ? 'border-indigo-500 bg-indigo-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'}`}
               >
                 Overview
               </button>
               <button
-                onClick={() => setAccountTab('account-details')}
-                className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors"
+                onClick={() => {
+                  setAccountTab('account-details');
+                  setShowAccountMenu(false);
+                }}
+                className={`px-4 py-2 text-xs font-semibold rounded-full border transition-colors ${accountTab === 'account-details' ? 'border-indigo-500 bg-indigo-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'}`}
               >
                 Account Details
               </button>
+              <div ref={accountMenuRef} className="relative">
+                <button
+                  onClick={() => setShowAccountMenu((current) => !current)}
+                  className={`px-4 py-2 text-xs font-semibold rounded-full border transition-colors ${showAccountMenu || accountTab === 'delete-account' ? 'border-slate-500 bg-slate-800/80 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'}`}
+                >
+                  More
+                </button>
+                {showAccountMenu && (
+                  <div className="absolute right-0 top-full z-10 mt-2 min-w-[160px] rounded-2xl border border-slate-700 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
+                    <button
+                      onClick={() => {
+                        setAccountTab('delete-account');
+                        setShowAccountMenu(false);
+                      }}
+                      className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/10 hover:text-rose-200"
+                    >
+                      Delete Account
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
-                onClick={refreshSubscription}
+                onClick={() => {
+                  setShowAccountMenu(false);
+                  void refreshSubscription();
+                }}
                 disabled={billingLoading}
                 className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors disabled:opacity-50"
               >
                 Refresh
               </button>
               <button
-                onClick={handleLogout}
+                onClick={() => {
+                  setShowAccountMenu(false);
+                  handleLogout();
+                }}
                 className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-rose-300 hover:border-rose-400 hover:text-rose-200 transition-colors"
               >
                 Logout
@@ -1166,32 +1213,43 @@ const App: React.FC = () => {
                   <div className="text-xs text-slate-400">No usage yet.</div>
                 )}
               </div>
-
-              <div className="rounded-2xl border border-rose-600/40 bg-rose-950/20 p-3 space-y-3">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-rose-300">Danger Zone</div>
-                <p className="text-xs text-rose-200/80">Delete this account and permanently remove billing/account data.</p>
-                <input
-                  type="password"
-                  value={deleteAccountPassword}
-                  onChange={(event) => setDeleteAccountPassword(event.target.value)}
-                  placeholder="Current password"
-                  className="w-full rounded-xl bg-slate-950/60 border border-rose-900/70 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                />
-                <input
-                  value={deleteAccountConfirmUsername}
-                  onChange={(event) => setDeleteAccountConfirmUsername(event.target.value)}
-                  placeholder={`Type ${authUser?.username || 'your username'} to confirm`}
-                  className="w-full rounded-xl bg-slate-950/60 border border-rose-900/70 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                />
-                <button
-                  onClick={handleDeleteAccount}
-                  disabled={deleteAccountLoading}
-                  className="w-full px-4 py-3 rounded-xl bg-rose-700 text-xs font-semibold text-white hover:bg-rose-600 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                >
-                  {deleteAccountLoading ? 'Deleting...' : 'Delete Account Permanently'}
-                </button>
-              </div>
             </>
+          )}
+
+          {accountTab === 'delete-account' && (
+            <div className="rounded-2xl border border-rose-600/40 bg-rose-950/20 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-rose-300">Danger Zone</div>
+                <div className="text-[10px] uppercase tracking-wider text-rose-200/70">Permanent action</div>
+              </div>
+              <button
+                onClick={() => setAccountTab('account-details')}
+                className="text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:text-white transition-colors"
+              >
+                Back to Account Details
+              </button>
+              <p className="text-xs text-rose-200/80">Delete this account and permanently remove billing/account data.</p>
+              <input
+                type="password"
+                value={deleteAccountPassword}
+                onChange={(event) => setDeleteAccountPassword(event.target.value)}
+                placeholder="Current password"
+                className="w-full rounded-xl bg-slate-950/60 border border-rose-900/70 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              />
+              <input
+                value={deleteAccountConfirmUsername}
+                onChange={(event) => setDeleteAccountConfirmUsername(event.target.value)}
+                placeholder={`Type ${authUser?.username || 'your username'} to confirm`}
+                className="w-full rounded-xl bg-slate-950/60 border border-rose-900/70 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              />
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleteAccountLoading}
+                className="w-full px-4 py-3 rounded-xl bg-rose-700 text-xs font-semibold text-white hover:bg-rose-600 transition-colors disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              >
+                {deleteAccountLoading ? 'Deleting...' : 'Delete Account Permanently'}
+              </button>
+            </div>
           )}
 
           {billingMessage && (

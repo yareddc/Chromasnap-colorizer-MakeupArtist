@@ -8,6 +8,7 @@ import type { AuthUser, SubscriptionAccount, SubscriptionPlan, SubscriptionUsage
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const USER_ID_STORAGE_KEY = 'chromasnap_user_id';
+const AUTH_TOKEN_STORAGE_KEY = 'chromasnap_auth_token';
 
 const getClientPlatform = (): 'android' | 'ios' | 'web' => {
   const userAgent = String(globalThis.navigator?.userAgent || '').toLowerCase();
@@ -37,10 +38,12 @@ export const setCurrentUserId = (userId: string): string => {
 };
 
 const getJsonHeaders = () => {
+  const authToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
   return {
     'Content-Type': 'application/json',
     'x-user-id': getUserId(),
     'x-client-platform': getClientPlatform(),
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
   };
 };
 
@@ -57,11 +60,18 @@ const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs: num
 };
 
 export const clearAuthToken = async () => {
+  localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
   await fetchWithTimeout(API_ENDPOINTS.AUTH_LOGOUT, {
     method: 'POST',
     credentials: withAuthCredentials,
     headers: getJsonHeaders(),
   }).catch(() => undefined);
+};
+
+const persistAuthToken = (token: string | undefined) => {
+  const normalized = String(token || '').trim();
+  if (!normalized) return;
+  localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, normalized);
 };
 
 const parseJsonResponse = async (response: Response) => {
@@ -388,6 +398,7 @@ export const registerUser = async (payload: { username: string; password: string
     throw new Error(data.error || 'Failed to register');
   }
 
+  persistAuthToken(data.token);
   setCurrentUserId(String(data.user?.username || payload.username));
 
   return {
@@ -410,6 +421,7 @@ export const loginUser = async (payload: { username: string; password: string; c
     throw error;
   }
 
+  persistAuthToken(data.token);
   setCurrentUserId(String(data.user?.username || payload.username));
 
   return {
@@ -428,6 +440,7 @@ export const fetchAuthMe = async (): Promise<AuthUser | null> => {
   }
 
   const data = await parseJsonResponse(response);
+  persistAuthToken(data.token);
   return data.user as AuthUser;
 };
 
@@ -464,6 +477,7 @@ export const socialLogin = async (payload: {
   if (!response.ok) {
     throw new Error(data.error || 'Social login failed');
   }
+  persistAuthToken(data.token);
   return data as { user: import('../types').AuthUser };
 };
 

@@ -215,6 +215,7 @@ export const initUsernameDatabase = async () => {
         }
     }
 
+
     return db;
 };
 

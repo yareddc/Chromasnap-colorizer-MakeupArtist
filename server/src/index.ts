@@ -371,6 +371,7 @@ const getOrCreateUserAccount = async (userId: string): Promise<UserAccount> => {
     void addUsername('subscriber', userId).catch((error) => {
         console.error('Failed to persist subscriber username:', error);
     });
+
     return created;
 };
 
@@ -805,14 +806,12 @@ app.use('/api/colorize', processingLimiter);
  */
 const createAI = () => {
     if (process.env.GCP_PROJECT_ID && process.env.GCP_LOCATION) {
-        console.log("Initializing Vertex AI Client...");
         return new GoogleGenAI({
             vertexai: true,
             project: process.env.GCP_PROJECT_ID,
             location: process.env.GCP_LOCATION,
         });
     }
-    console.log("Initializing API Key Client...");
     return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 };
 
@@ -1142,6 +1141,7 @@ const generateVeoVertexVideoUri = async (model: string, base64Data: string, mime
     }, null, 2));
 
     throw new Error(`${model}: no video URI returned`);
+
 };
 
 const generateAnimationVideoUri = async (base64Data: string, mimeType: string): Promise<string> => {
@@ -1205,6 +1205,8 @@ const generateAnimationVideoUri = async (base64Data: string, mimeType: string): 
                 console.warn(`Video operation completed without URI for model ${model}:`, JSON.stringify(responseShape));
 
                 errors.push(`${model}: ${opErr || 'no video URI returned'}`);
+
+
             }
         } catch (error: any) {
             errors.push(`${model}: ${error?.message || String(error)}`);
@@ -1374,6 +1376,7 @@ app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
         const account = await getOrCreateUserAccount(normalizedUsername);
 
         res.status(201).json({
+            token,
             user: {
                 username: normalizedUsername,
                 name: normalizedName,
@@ -1428,6 +1431,7 @@ app.post('/api/auth/login', loginLimiter, checkLoginLock, async (req, res) => {
         const account = await getOrCreateUserAccount(authUser.username);
 
         res.json({
+            token,
             user: {
                 username: authUser.username,
                 name: authUser.name,
@@ -1448,7 +1452,11 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
         return res.status(401).json({ error: 'Unauthorized' });
     }
 
+    const token = signAuthToken(userRecord.username);
+    setAuthCookie(res, token);
+
     res.json({
+        token,
         user: {
             username: userRecord.username,
             name: userRecord.name,
@@ -1538,6 +1546,7 @@ app.post('/api/auth/social-login', authWriteLimiter, async (req, res) => {
         const account = await getOrCreateUserAccount(userRecord.username);
 
         return res.json({
+            token,
             user: {
                 username: userRecord.username,
                 name: userRecord.name,

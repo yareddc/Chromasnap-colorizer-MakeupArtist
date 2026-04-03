@@ -5,7 +5,6 @@ on:
 
 jobs:
   build-signed-aab:
-    if: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 != '' && secrets.ANDROID_UPLOAD_STORE_PASSWORD != '' && secrets.ANDROID_UPLOAD_KEY_ALIAS != '' && secrets.ANDROID_UPLOAD_KEY_PASSWORD != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,6 +26,26 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Validate Android signing secrets
+        shell: bash
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          ANDROID_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          ANDROID_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in ANDROID_UPLOAD_KEYSTORE_BASE64 ANDROID_UPLOAD_STORE_PASSWORD ANDROID_UPLOAD_KEY_ALIAS ANDROID_UPLOAD_KEY_PASSWORD; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing required secret: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Build web assets
         run: npm run build
@@ -57,12 +76,3 @@ jobs:
         with:
           name: app-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
-
-  skipped-missing-secrets:
-    if: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 == '' || secrets.ANDROID_UPLOAD_STORE_PASSWORD == '' || secrets.ANDROID_UPLOAD_KEY_ALIAS == '' || secrets.ANDROID_UPLOAD_KEY_PASSWORD == '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Missing Android signing secrets
-        run: |
-          echo "Skipping Android signed AAB workflow."
-          echo "Required secrets (new names): ANDROID_UPLOAD_KEYSTORE_BASE64, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD."

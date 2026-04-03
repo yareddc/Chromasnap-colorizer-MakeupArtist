@@ -62,6 +62,15 @@ jobs:
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
 
+      - name: Decode Firebase google-services.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
+          ls -l android/app/google-services.json
+        env:
+          ANDROID_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
+
       - name: Make Gradle wrapper executable
         run: chmod +x android/gradlew
 

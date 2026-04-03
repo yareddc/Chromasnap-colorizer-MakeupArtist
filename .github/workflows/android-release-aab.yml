@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-signed-aab:
-    if: secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 != '' && secrets.ANDROID_UPLOAD_STORE_PASSWORD != '' && secrets.ANDROID_UPLOAD_KEY_ALIAS != '' && secrets.ANDROID_UPLOAD_KEY_PASSWORD != ''
+    if: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 != '' && secrets.ANDROID_UPLOAD_STORE_PASSWORD != '' && secrets.ANDROID_UPLOAD_KEY_ALIAS != '' && secrets.ANDROID_UPLOAD_KEY_PASSWORD != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -59,7 +59,7 @@ jobs:
           path: android/app/build/outputs/bundle/release/app-release.aab
 
   skipped-missing-secrets:
-    if: secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 == '' || secrets.ANDROID_UPLOAD_STORE_PASSWORD == '' || secrets.ANDROID_UPLOAD_KEY_ALIAS == '' || secrets.ANDROID_UPLOAD_KEY_PASSWORD == ''
+    if: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 == '' || secrets.ANDROID_UPLOAD_STORE_PASSWORD == '' || secrets.ANDROID_UPLOAD_KEY_ALIAS == '' || secrets.ANDROID_UPLOAD_KEY_PASSWORD == '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Missing Android signing secrets

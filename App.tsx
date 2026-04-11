@@ -34,11 +34,13 @@ import {
   verifyGooglePlayPurchase,
 } from './services/geminiService';
 import {
+  checkGoogleRedirectResult,
   confirmPhoneOtp,
   isFirebaseAvailable,
   sendPhoneOtp,
   signInWithGoogle,
 } from './services/firebaseAuthService';
+import { friendlyError } from './services/errorMessages';
 import {
   getGooglePlayBillingAvailability,
   purchaseGooglePlayProduct,
@@ -162,7 +164,7 @@ const App: React.FC = () => {
       setSubscriptionAccount(usageData.account);
       setSubscriptionUsage(usageData.usage || []);
     } catch (error: any) {
-      setBillingMessage(error.message || 'Failed to load subscription data');
+      setBillingMessage(friendlyError(error, 'refreshSubscription'));
     } finally {
       setBillingLoading(false);
     }
@@ -186,6 +188,31 @@ const App: React.FC = () => {
     };
 
     void bootstrapAuth();
+  }, []);
+
+  // Pick up a pending Google redirect-sign-in result (mobile web flow)
+  useEffect(() => {
+    if (!isFirebaseAvailable()) return;
+    checkGoogleRedirectResult()
+      .then((idToken) => {
+        if (!idToken) return;
+        setAuthLoading(true);
+        return socialLogin({ idToken, provider: 'google' })
+          .then(({ user }) => {
+            setAuthUser(user);
+            const storedId = setCurrentUserId(user.username);
+            setActiveUserId(storedId);
+            setUserIdInput(storedId);
+            setAuthMessage('Signed in with Google.');
+          })
+          .finally(() => setAuthLoading(false));
+      })
+      .catch((err: any) => {
+        // Ignore "no pending redirect" — not an error
+        const code = err?.code || '';
+        if (code === 'auth/no-auth-event' || code === 'auth/null-user') return;
+        setAuthMessage(friendlyError(err, 'googleRedirect'));
+      });
   }, []);
 
   useEffect(() => {
@@ -253,7 +280,7 @@ const App: React.FC = () => {
       setAccountTab('overview');
       setAuthMessage('Account deleted successfully.');
     } catch (error: any) {
-      setAuthMessage(error.message || 'Failed to delete account');
+      setAuthMessage(friendlyError(error, 'deleteAccount'));
     } finally {
       setDeleteAccountLoading(false);
     }
@@ -276,7 +303,7 @@ const App: React.FC = () => {
       setUserIdInput(storedId);
       setAuthMessage('Account created and logged in.');
     } catch (error: any) {
-      setAuthMessage(error.message || 'Registration failed');
+      setAuthMessage(friendlyError(error, 'register'));
     } finally {
       setAuthLoading(false);
     }
@@ -302,7 +329,7 @@ const App: React.FC = () => {
       if (error?.data?.captchaRequired) {
         setAuthRequireCaptcha(true);
       }
-      setAuthMessage(error.message || 'Login failed');
+      setAuthMessage(friendlyError(error, 'login'));
     } finally {
       setAuthLoading(false);
     }
@@ -323,7 +350,12 @@ const App: React.FC = () => {
       setUserIdInput(storedId);
       setAuthMessage('Signed in with Google.');
     } catch (error: any) {
-      setAuthMessage(error.message || 'Google sign-in failed');
+      // Redirect flow triggered — page will navigate to Google, result handled on return
+      if (error?.message === '__redirect__') {
+        setAuthMessage('Redirecting to Google sign-in…');
+        return;
+      }
+      setAuthMessage(friendlyError(error, 'googleLogin'));
     } finally {
       setAuthLoading(false);
     }
@@ -352,7 +384,7 @@ const App: React.FC = () => {
         setAuthMessage('OTP sent. Check your phone and enter the code.');
       }
     } catch (error: any) {
-      setAuthMessage(error.message || 'Failed to send OTP');
+      setAuthMessage(friendlyError(error, 'sendOTP'));
     } finally {
       setAuthLoading(false);
     }
@@ -372,7 +404,7 @@ const App: React.FC = () => {
       setSocialOtpSent(false);
       setAuthMessage('Phone login successful.');
     } catch (error: any) {
-      setAuthMessage(error.message || 'OTP verification failed');
+      setAuthMessage(friendlyError(error, 'verifyOTP'));
     } finally {
       setAuthLoading(false);
     }
@@ -387,7 +419,7 @@ const App: React.FC = () => {
       setRecoveredUsernames(usernames);
       setAuthMessage(usernames.length ? 'Recovered usernames below.' : 'No usernames found for that recovery email.');
     } catch (error: any) {
-      setAuthMessage(error.message || 'Username recovery failed');
+      setAuthMessage(friendlyError(error, 'recoverUsername'));
     } finally {
       setAuthLoading(false);
     }
@@ -407,7 +439,7 @@ const App: React.FC = () => {
       }
       setAuthMessage('Password reset token generated. Use it below to set a new password.');
     } catch (error: any) {
-      setAuthMessage(error.message || 'Password reset request failed');
+      setAuthMessage(friendlyError(error, 'requestPasswordReset'));
     } finally {
       setAuthLoading(false);
     }
@@ -424,7 +456,7 @@ const App: React.FC = () => {
       setAuthMessage('Password reset successful. You can now log in.');
       setAuthMode('login');
     } catch (error: any) {
-      setAuthMessage(error.message || 'Password reset failed');
+      setAuthMessage(friendlyError(error, 'confirmPasswordReset'));
     } finally {
       setAuthLoading(false);
     }
@@ -470,7 +502,7 @@ const App: React.FC = () => {
       setSubscriptionAccount(account);
       await refreshSubscription();
     } catch (error: any) {
-      setBillingMessage(error.message || 'Failed to change plan');
+      setBillingMessage(friendlyError(error, 'changePlan'));
     } finally {
       setBillingLoading(false);
     }
@@ -508,7 +540,7 @@ const App: React.FC = () => {
       setSubscriptionAccount(account);
       await refreshSubscription();
     } catch (error: any) {
-      setBillingMessage(error.message || 'Failed to top up tokens');
+      setBillingMessage(friendlyError(error, 'topUp'));
     } finally {
       setBillingLoading(false);
     }
@@ -581,7 +613,7 @@ const App: React.FC = () => {
       setProcessing({
         isProcessing: false,
         statusMessage: '',
-        error: error.message || 'An unexpected error occurred.'
+        error: friendlyError(error, 'colorize')
       });
     }
   };
@@ -606,7 +638,7 @@ const App: React.FC = () => {
       updateResult(upscaled);
       setProcessing({ isProcessing: false, statusMessage: '' });
     } catch (error: any) {
-      setProcessing({ isProcessing: false, statusMessage: '', error: error.message || 'Upscaling failed.' });
+      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'upscale') });
     }
   };
 
@@ -618,7 +650,7 @@ const App: React.FC = () => {
       updateResult(vibrant);
       setProcessing({ isProcessing: false, statusMessage: '' });
     } catch (error: any) {
-      setProcessing({ isProcessing: false, statusMessage: '', error: error.message || 'Enhancement failed.' });
+      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'vibrancy') });
     }
   };
 
@@ -630,7 +662,7 @@ const App: React.FC = () => {
       updateResult(sharpened);
       setProcessing({ isProcessing: false, statusMessage: '' });
     } catch (error: any) {
-      setProcessing({ isProcessing: false, statusMessage: '', error: error.message || 'Sharpening failed.' });
+      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'sharpen') });
     }
   };
 
@@ -664,7 +696,7 @@ const App: React.FC = () => {
       setProcessing({
         isProcessing: false,
         statusMessage: '',
-        error: error.message || 'Animation failed.'
+        error: friendlyError(error, 'animate')
       });
     }
   };
@@ -745,9 +777,11 @@ const App: React.FC = () => {
 
             {(authMode === 'login' || authMode === 'register' || authMode === 'recover-password') && (
               <input
+                id="auth-username"
+                name="username"
                 value={authUsername}
                 onChange={(event) => setAuthUsername(event.target.value)}
-                placeholder=""
+                placeholder="Username"
                 aria-label="Username"
                 autoComplete="off"
                 spellCheck={false}
@@ -758,10 +792,12 @@ const App: React.FC = () => {
             {(authMode === 'login' || authMode === 'register') && (
               <div className="relative">
                 <input
+                  id="auth-password"
+                  name="password"
                   type={showAuthPassword ? 'text' : 'password'}
                   value={authPassword}
                   onChange={(event) => setAuthPassword(event.target.value)}
-                  placeholder=""
+                  placeholder="Password"
                   aria-label="Password"
                   autoComplete="off"
                   className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 pr-11 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
@@ -798,6 +834,8 @@ const App: React.FC = () => {
                   />
                 ) : (
                   <input
+                    id="auth-captcha-token"
+                    name="captchaToken"
                     value={authCaptchaToken}
                     onChange={(event) => setAuthCaptchaToken(event.target.value)}
                     placeholder="Captcha token (dev: dev-captcha-ok)"
@@ -810,12 +848,16 @@ const App: React.FC = () => {
             {authMode === 'register' && (
               <>
                 <input
+                  id="auth-full-name"
+                  name="fullName"
                   value={authName}
                   onChange={(event) => setAuthName(event.target.value)}
                   placeholder="Full name"
                   className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                 />
                 <input
+                  id="auth-email"
+                  name="email"
                   type="email"
                   value={authEmail}
                   onChange={(event) => setAuthEmail(event.target.value)}
@@ -823,6 +865,8 @@ const App: React.FC = () => {
                   className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                 />
                 <input
+                  id="auth-phone-number"
+                  name="phoneNumber"
                   type="tel"
                   value={authPhoneNumber}
                   onChange={(event) => setAuthPhoneNumber(event.target.value)}
@@ -834,6 +878,8 @@ const App: React.FC = () => {
 
             {(authMode === 'recover-username' || authMode === 'recover-password') && (
               <input
+                id="auth-recovery-email"
+                name="recoveryEmail"
                 type="email"
                 value={authRecoveryEmail}
                 onChange={(event) => setAuthRecoveryEmail(event.target.value)}
@@ -845,6 +891,8 @@ const App: React.FC = () => {
             {authMode === 'recover-password' && (
               <>
                 <input
+                  id="auth-reset-token"
+                  name="resetToken"
                   value={authResetToken}
                   onChange={(event) => setAuthResetToken(event.target.value)}
                   placeholder="Reset token"
@@ -852,6 +900,8 @@ const App: React.FC = () => {
                 />
                 <div className="relative">
                   <input
+                    id="auth-new-password"
+                    name="newPassword"
                     type={showNewPassword ? 'text' : 'password'}
                     value={authNewPassword}
                     onChange={(event) => setAuthNewPassword(event.target.value)}
@@ -908,6 +958,8 @@ const App: React.FC = () => {
 
                 <div className="grid grid-cols-1 gap-2 p-3 rounded-xl border border-slate-800 bg-slate-950/40">
                   <input
+                    id="social-phone-number"
+                    name="socialPhoneNumber"
                     type="tel"
                     value={socialPhoneNumber}
                     onChange={(event) => setSocialPhoneNumber(event.target.value)}
@@ -925,6 +977,8 @@ const App: React.FC = () => {
                   ) : (
                     <>
                       <input
+                        id="social-otp-code"
+                        name="socialOtpCode"
                         value={socialOtpCode}
                         onChange={(event) => setSocialOtpCode(event.target.value)}
                         placeholder="OTP code"
@@ -1033,74 +1087,60 @@ const App: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account</h3>
-              <p className="text-xs leading-relaxed text-slate-400">Compact summary for mobile/tablet. Expand for full billing controls.</p>
+              <p className="text-xs leading-relaxed text-slate-400">Compact summary for mobile/tablet. Expand for full billing controls and account details.</p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div ref={accountMenuRef} className="relative">
               <button
-                onClick={() => {
-                  setAccountTab('overview');
-                  setShowAccountMenu(false);
-                }}
-                className={`px-4 py-2 text-xs font-semibold rounded-full border transition-colors ${accountTab === 'overview' ? 'border-indigo-500 bg-indigo-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'}`}
+                onClick={() => setShowAccountMenu((current) => !current)}
+                className={`w-10 h-10 flex items-center justify-center rounded-full border transition-colors ${showAccountMenu ? 'border-indigo-500 bg-indigo-500/20 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'}`}
+                title="Account menu"
               >
-                Overview
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                </svg>
               </button>
-              <button
-                onClick={() => {
-                  setAccountTab('account-details');
-                  setShowAccountMenu(false);
-                }}
-                className={`px-4 py-2 text-xs font-semibold rounded-full border transition-colors ${accountTab === 'account-details' ? 'border-indigo-500 bg-indigo-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'}`}
-              >
-                Account Details
-              </button>
-              <div ref={accountMenuRef} className="relative">
-                <button
-                  onClick={() => setShowAccountMenu((current) => !current)}
-                  className={`px-4 py-2 text-xs font-semibold rounded-full border transition-colors ${showAccountMenu || accountTab === 'delete-account' ? 'border-slate-500 bg-slate-800/80 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500 hover:text-white'}`}
-                >
-                  More
-                </button>
-                {showAccountMenu && (
-                  <div className="absolute right-0 top-full z-10 mt-2 min-w-[160px] rounded-2xl border border-slate-700 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
-                    <button
-                      onClick={() => {
-                        setAccountTab('delete-account');
-                        setShowAccountMenu(false);
-                      }}
-                      className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-300 transition-colors hover:bg-rose-500/10 hover:text-rose-200"
-                    >
-                      Delete Account
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => {
-                  setShowAccountMenu(false);
-                  void refreshSubscription();
-                }}
-                disabled={billingLoading}
-                className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors disabled:opacity-50"
-              >
-                Refresh
-              </button>
-              <button
-                onClick={() => {
-                  setShowAccountMenu(false);
-                  handleLogout();
-                }}
-                className="px-4 py-2 text-xs font-semibold rounded-full border border-slate-700 text-rose-300 hover:border-rose-400 hover:text-rose-200 transition-colors"
-              >
-                Logout
-              </button>
+              {showAccountMenu && (
+                <div className="absolute right-0 top-full z-10 mt-2 min-w-[180px] rounded-2xl border border-slate-700 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
+                  <button
+                    onClick={() => { setAccountTab('overview'); setShowAccountMenu(false); }}
+                    className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${accountTab === 'overview' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                  >
+                    Overview
+                  </button>
+                  <button
+                    onClick={() => { setAccountTab('account-details'); setShowAccountMenu(false); }}
+                    className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${accountTab === 'account-details' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+                  >
+                    Account Details
+                  </button>
+                  <button
+                    onClick={() => { setShowAccountMenu(false); void refreshSubscription(); }}
+                    disabled={billingLoading}
+                    className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
+                  >
+                    Refresh
+                  </button>
+                  <div className="my-1 border-t border-slate-800" />
+                  <button
+                    onClick={() => { setAccountTab('delete-account'); setShowAccountMenu(false); }}
+                    className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${accountTab === 'delete-account' ? 'bg-rose-500/10 text-rose-300' : 'text-rose-400 hover:bg-rose-500/10 hover:text-rose-300'}`}
+                  >
+                    Delete Account
+                  </button>
+                  <button
+                    onClick={() => { setShowAccountMenu(false); handleLogout(); }}
+                    className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+                  >
+                    Logout
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
           {accountTab === 'overview' && (
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-300">
-              Select the <span className="font-semibold text-white">Account Details</span> tab to view user ID, token balance, cycle, usage, and billing controls.
-            </div>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-300" />
           )}
 
           {accountTab === 'account-details' && (
@@ -1130,6 +1170,8 @@ const App: React.FC = () => {
                   <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">User Id</label>
                   <div className="flex gap-2">
                     <input
+                      id="billing-user-id"
+                      name="userId"
                       value={authUser?.username || userIdInput}
                       onChange={(event) => setUserIdInput(event.target.value)}
                       placeholder="user-123"
@@ -1151,6 +1193,8 @@ const App: React.FC = () => {
                   <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Top-up</label>
                   <div className="flex gap-2">
                     <input
+                      id="billing-top-up-amount"
+                      name="topUpAmount"
                       value={topUpAmount}
                       onChange={(event) => setTopUpAmount(event.target.value)}
                       className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
@@ -1230,6 +1274,8 @@ const App: React.FC = () => {
               </button>
               <p className="text-xs text-rose-200/80">Delete this account and permanently remove billing/account data.</p>
               <input
+                id="delete-account-password"
+                name="deleteAccountPassword"
                 type="password"
                 value={deleteAccountPassword}
                 onChange={(event) => setDeleteAccountPassword(event.target.value)}
@@ -1237,6 +1283,8 @@ const App: React.FC = () => {
                 className="w-full rounded-xl bg-slate-950/60 border border-rose-900/70 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
               />
               <input
+                id="delete-account-confirm-username"
+                name="deleteAccountConfirmUsername"
                 value={deleteAccountConfirmUsername}
                 onChange={(event) => setDeleteAccountConfirmUsername(event.target.value)}
                 placeholder={`Type ${authUser?.username || 'your username'} to confirm`}

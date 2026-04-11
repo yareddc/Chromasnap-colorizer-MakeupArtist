@@ -15,7 +15,9 @@ import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
-  signInWithPopup,
+  onAuthStateChanged,
+  signInWithRedirect,
+  getRedirectResult,
   RecaptchaVerifier,
   signInWithPhoneNumber,
   type ConfirmationResult,
@@ -67,14 +69,29 @@ const getFirebaseAuth = (): Auth => {
 export const isFirebaseAvailable = (): boolean => isFirebaseConfigured();
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** sessionStorage key set before a redirect so we know to pick up the result on return */
+const REDIRECT_PENDING_KEY = '_cs_google_redirect_pending';
+
+/** True when running in a mobile browser (not native Capacitor). */
+const isMobileWeb = (): boolean =>
+  !Capacitor.isNativePlatform() &&
+  typeof navigator !== 'undefined' &&
+  /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+
+// ---------------------------------------------------------------------------
 // Google Sign-In
 // ---------------------------------------------------------------------------
 
 /**
  * Sign in with Google.
- * - On native Android (Capacitor): delegates to @capacitor-firebase/authentication.
- * - On web: uses Firebase popup flow.
- * Returns a Firebase ID token that can be sent to the backend.
+ * - Native Android: delegates to @capacitor-firebase/authentication.
+ * - Mobile web: uses signInWithRedirect (popups are blocked on mobile browsers).
+ *               Throws a special '__redirect__' signal — caller must show
+ *               "Redirecting…" and wait; result comes back via checkGoogleRedirectResult().
+ * - Desktop web: uses signInWithPopup.
  */
 export const signInWithGoogle = async (): Promise<string> => {
   if (Capacitor.isNativePlatform()) {
@@ -82,8 +99,6 @@ export const signInWithGoogle = async (): Promise<string> => {
     const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
     await (FirebaseAuthentication as any).signInWithGoogle();
 
-    // Backend verifies Firebase ID tokens via Admin SDK verifyIdToken(),
-    // so fetch the Firebase token from the signed-in Firebase user.
     const tokenResult = await (FirebaseAuthentication as any).getIdToken().catch(() => null);
     const firebaseIdToken = tokenResult?.token;
     if (firebaseIdToken) {
@@ -93,14 +108,58 @@ export const signInWithGoogle = async (): Promise<string> => {
     throw new Error('Google Sign-In succeeded, but no Firebase ID token was available.');
   }
 
-  // Web: use Firebase JS SDK popup
   const auth = getFirebaseAuth();
   const provider = new GoogleAuthProvider();
   provider.addScope('email');
   provider.addScope('profile');
-  const credential = await signInWithPopup(auth, provider);
-  const idToken = await credential.user.getIdToken();
-  return idToken;
+
+  // Use redirect for all web browsers (popups are unreliable: blocked by browsers,
+  // affected by cross-site storage restrictions, and fail silently on some setups)
+  sessionStorage.setItem(REDIRECT_PENDING_KEY, '1');
+  await signInWithRedirect(auth, provider);
+  // signInWithRedirect navigates away; this line is never reached
+  throw new Error('__redirect__');
+};
+
+/**
+ * Call once on app load to pick up a pending Google redirect result.
+ * Returns a Firebase ID token if the user just completed a redirect sign-in,
+ * or null if there is no pending result.
+ */
+export const checkGoogleRedirectResult = async (): Promise<string | null> => {
+  if (Capacitor.isNativePlatform() || !isFirebaseConfigured()) return null;
+
+  const auth = getFirebaseAuth();
+
+  // Always try getRedirectResult first — safe to call on every page load;
+  // returns null immediately if no redirect was pending.
+  const result = await getRedirectResult(auth);
+  if (result) {
+    sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+    return await result.user.getIdToken();
+  }
+
+  // Only use the slower fallbacks if we know a redirect was initiated
+  // (sessionStorage key set before signInWithRedirect was called)
+  const isRedirectPending = sessionStorage.getItem(REDIRECT_PENDING_KEY);
+  if (!isRedirectPending) return null;
+  sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+
+  // Fallback: Firebase may have updated auth.currentUser synchronously
+  if (auth.currentUser) return await auth.currentUser.getIdToken();
+
+  // Final fallback: wait for onAuthStateChanged (handles cases where
+  // getRedirectResult returns null but the browser still sets the user)
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => { unsubscribe(); resolve(null); }, 8000);
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve(await user.getIdToken());
+      }
+    });
+  });
 };
 
 // ---------------------------------------------------------------------------

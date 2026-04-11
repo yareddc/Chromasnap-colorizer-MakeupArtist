@@ -75,6 +75,7 @@ const ComparisonView: React.FC<ComparisonViewProps> = ({ original, colorized }) 
         <label htmlFor="comparison-slider" className="sr-only">Adjust before and after comparison</label>
         <input
           id="comparison-slider"
+          name="comparisonSlider"
           type="range"
           min={0}
           max={100}

@@ -89,7 +89,6 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoadin
         onDrop={handleDrop}
         role="button"
         tabIndex={isLoading ? -1 : 0}
-        onClick={openFilePicker}
         onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
@@ -107,6 +106,8 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoadin
             <p className="text-xs text-slate-400">JPG, PNG, WEBP • up to 20MB</p>
           </div>
           <input
+            id="image-upload-input"
+            name="imageUpload"
             ref={fileInputRef}
             type="file"
             className="hidden"

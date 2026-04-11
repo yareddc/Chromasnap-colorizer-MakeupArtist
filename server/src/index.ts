@@ -202,6 +202,20 @@ const PASSWORD_RESET_WEBHOOK_TIMEOUT_MS = Number.parseInt(process.env.PASSWORD_R
 const PASSWORD_RESET_WEBHOOK_SHARED_SECRET = (process.env.PASSWORD_RESET_WEBHOOK_SHARED_SECRET || '').trim();
 
 const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+const parsePositiveIntEnv = (raw: string | undefined, fallback: number) => {
+    const parsed = Number.parseInt(String(raw || '').trim(), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const FREE_TIER_TESTING_ENABLED = process.env.FREE_TIER_TESTING_ENABLED === 'true';
+const FREE_TIER_REFRESH_INTERVAL_MS = FREE_TIER_TESTING_ENABLED
+    ? parsePositiveIntEnv(process.env.FREE_TIER_REFRESH_INTERVAL_MINUTES, 60) * 60 * 1000
+    : thirtyDaysMs;
+const FREE_TIER_MONTHLY_TOKENS_OVERRIDE = FREE_TIER_TESTING_ENABLED
+    ? parsePositiveIntEnv(process.env.FREE_TIER_MONTHLY_TOKENS, PLAN_CONFIG.free.monthlyTokens)
+    : PLAN_CONFIG.free.monthlyTokens;
+const FREE_TIER_MAX_TOPUP_OVERRIDE = FREE_TIER_TESTING_ENABLED
+    ? parsePositiveIntEnv(process.env.FREE_TIER_MAX_TOPUP_PER_MONTH, PLAN_CONFIG.free.maxTopUpPerMonth)
+    : PLAN_CONFIG.free.maxTopUpPerMonth;
 const ENFORCE_GOOGLE_PLAY_FOR_ANDROID = isProduction || process.env.ENFORCE_GOOGLE_PLAY_FOR_ANDROID === 'true';
 const DISABLE_DIRECT_BILLING_MUTATIONS = isProduction || process.env.DISABLE_DIRECT_BILLING_MUTATIONS === 'true';
 const PLAY_PACKAGE_NAME = (process.env.PLAY_PACKAGE_NAME || process.env.ANDROID_APPLICATION_ID || 'com.chromasnap.app').trim();
@@ -312,11 +326,14 @@ const verifyGooglePlayPurchase = async (productType: GooglePlayProductType, prod
 };
 
 const resetCycleIfNeeded = async (account: UserAccount) => {
-    if (Date.now() - account.cycleStartedAt >= thirtyDaysMs) {
-        const plan = PLAN_CONFIG[account.tier];
+    const plan = PLAN_CONFIG[account.tier];
+    const cycleIntervalMs = account.tier === 'free' ? FREE_TIER_REFRESH_INTERVAL_MS : thirtyDaysMs;
+    if (Date.now() - account.cycleStartedAt >= cycleIntervalMs) {
+        const monthlyTokens = account.tier === 'free' ? FREE_TIER_MONTHLY_TOKENS_OVERRIDE : plan.monthlyTokens;
+        const maxTopUp = account.tier === 'free' ? FREE_TIER_MAX_TOPUP_OVERRIDE : plan.maxTopUpPerMonth;
         account.cycleStartedAt = Date.now();
-        account.tokenBalance = plan.monthlyTokens;
-        account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
+        account.tokenBalance = monthlyTokens;
+        account.monthlyRemainingTopUp = maxTopUp;
         await upsertBillingAccount({
             userId: account.userId,
             tier: account.tier,
@@ -353,12 +370,13 @@ const getOrCreateUserAccount = async (userId: string): Promise<UserAccount> => {
         return account;
     }
 
-    const plan = PLAN_CONFIG.free;
+    const freeMonthlyTokens = FREE_TIER_MONTHLY_TOKENS_OVERRIDE;
+    const freeMaxTopUp = FREE_TIER_MAX_TOPUP_OVERRIDE;
     const created: UserAccount = {
         userId,
         tier: 'free',
-        tokenBalance: plan.monthlyTokens,
-        monthlyRemainingTopUp: plan.maxTopUpPerMonth,
+        tokenBalance: freeMonthlyTokens,
+        monthlyRemainingTopUp: freeMaxTopUp,
         cycleStartedAt: Date.now(),
     };
     await upsertBillingAccount({
@@ -731,7 +749,12 @@ const configuredCorsOrigins = (process.env.CORS_ORIGINS || '')
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-const canonicalWebOrigins = ['https://chromasnap.app', 'https://www.chromasnap.app'];
+const canonicalWebOrigins = [
+    'https://chromasnap.app',
+    'https://www.chromasnap.app',
+    'https://localhost',       // Capacitor Android WebView (androidScheme: 'https')
+    'capacitor://localhost',   // Capacitor alternate scheme
+];
 
 const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
@@ -772,8 +795,45 @@ const processingLimiter = rateLimit({
 });
 
 const cspDirectives = helmet.contentSecurityPolicy.getDefaultDirectives();
-cspDirectives['script-src'] = ["'self'", 'https://cdn.tailwindcss.com'];
+cspDirectives['script-src'] = [
+    "'self'",
+    'https://cdn.tailwindcss.com',
+    'https://www.gstatic.com',
+    'https://apis.google.com',
+    'https://accounts.google.com',
+    'https://www.google.com',
+    'https://www.recaptcha.net',
+    "'unsafe-inline'", // required for Firebase reCAPTCHA widget
+];
+cspDirectives['script-src-attr'] = ["'unsafe-inline'"]; // reCAPTCHA inline handlers
 cspDirectives['media-src'] = ["'self'", 'blob:'];
+cspDirectives['connect-src'] = [
+    "'self'",
+    'https://identitytoolkit.googleapis.com',
+    'https://securetoken.googleapis.com',
+    'https://www.googleapis.com',
+    'https://firebaseinstallations.googleapis.com',
+    'https://chrommasnap-vertex-ai-use.firebaseio.com',
+    'https://*.firebaseio.com',
+    'https://www.google.com',
+    'https://www.recaptcha.net',
+    'https://accounts.google.com',
+];
+cspDirectives['frame-src'] = [
+    "'self'",
+    'https://accounts.google.com',
+    'https://chrommasnap-vertex-ai-use.firebaseapp.com',
+    'https://www.google.com',
+    'https://www.recaptcha.net',
+];
+cspDirectives['img-src'] = [
+    "'self'",
+    'data:',
+    'blob:',
+    'https://*.googleusercontent.com',
+    'https://lh3.googleusercontent.com',
+    'https://www.gstatic.com',
+];
 
 // Middleware
 app.use(
@@ -977,12 +1037,13 @@ const extractUriFromObject = (input: any): string | undefined => {
 };
 
 const generateVeo31VideoUri = async (model: string, base64Data: string, mimeType: string): Promise<string> => {
+    const hasVertex = Boolean(process.env.GCP_PROJECT_ID && process.env.GCP_LOCATION);
     const geminiApiKey = (process.env.GEMINI_API_KEY || '').trim();
-    if (!geminiApiKey) {
-        throw new Error(`${model}: GEMINI_API_KEY is required for Gemini inlineData flow`);
+    if (!hasVertex && !geminiApiKey) {
+        throw new Error(`${model}: GEMINI_API_KEY is required for Gemini inlineData flow when Vertex AI is not configured`);
     }
 
-    const geminiClient = new GoogleGenAI({ apiKey: geminiApiKey });
+    const geminiClient = createAI();
     const response = await geminiClient.models.generateContent({
         model,
         contents: [{
@@ -2359,6 +2420,32 @@ app.post('/api/animate', requireBilling('animate_start'), async (req, res) => {
     }
 });
 
+// Privacy policy — must be registered before the SPA catch-all
+app.get('/privacy', (_req, res) => {
+    const privacyPath = path.resolve(process.cwd(), 'public', 'privacy.html');
+    res.sendFile(privacyPath);
+});
+
+// Account deletion request page — publicly accessible, required by Google Play Console
+app.get('/delete-account', (_req, res) => {
+    const deletePage = path.resolve(process.cwd(), 'public', 'delete-account.html');
+    res.sendFile(deletePage);
+});
+
+// Unauthenticated deletion request form submission (logs request; manual processing within 7 days)
+app.post('/api/delete-account-request', async (req, res) => {
+    const { username, email, reason } = req.body || {};
+    if (!username || typeof username !== 'string' || !email || typeof email !== 'string') {
+        return res.status(400).json({ error: 'username and email are required' });
+    }
+    // Sanitize inputs before logging
+    const safeUsername = String(username).slice(0, 64).replace(/[^\w\-\.@]/g, '');
+    const safeEmail = String(email).slice(0, 254);
+    const safeReason = reason ? String(reason).slice(0, 500) : '';
+    console.log(`[DELETE-ACCOUNT-REQUEST] username=${safeUsername} email=${safeEmail} reason=${safeReason} ip=${req.ip} ts=${new Date().toISOString()}`);
+    return res.status(200).json({ ok: true });
+});
+
 const frontendBuildPath = path.resolve(__dirname, '../public');
 const frontendIndexPath = path.join(frontendBuildPath, 'index.html');
 
@@ -2375,6 +2462,37 @@ const startServer = async () => {
     console.log(`Username database initialized at ${getUsernameDatabasePath()}`);
 
     app.listen(Number(PORT), HOST, () => console.log(`ChromaSnap Production Server running on http://${HOST}:${PORT}`));
+
+    // Clean up fallback video files written to public/ that are older than 1 hour.
+    const VIDEO_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+    const cleanupVideoFiles = () => {
+        const publicDir = path.resolve(process.cwd(), 'public');
+        if (!fs.existsSync(publicDir)) return;
+        const now = Date.now();
+        let removed = 0;
+        try {
+            for (const file of fs.readdirSync(publicDir)) {
+                if (!/^video_\d+_[\w]+\.mp4$/.test(file)) continue;
+                const filePath = path.join(publicDir, file);
+                try {
+                    const stat = fs.statSync(filePath);
+                    if (now - stat.mtimeMs > VIDEO_MAX_AGE_MS) {
+                        fs.unlinkSync(filePath);
+                        removed++;
+                    }
+                } catch {
+                    // file may have already been removed — ignore
+                }
+            }
+            if (removed > 0) console.log(`[video-cleanup] Removed ${removed} expired video file(s)`);
+        } catch (err) {
+            console.warn('[video-cleanup] Error during cleanup:', err);
+        }
+    };
+
+    // Run once at startup, then every 30 minutes
+    cleanupVideoFiles();
+    setInterval(cleanupVideoFiles, 30 * 60 * 1000).unref();
 };
 
 startServer().catch((error) => {

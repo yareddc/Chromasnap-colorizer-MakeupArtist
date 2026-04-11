@@ -55,6 +55,8 @@ const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onBack }) => {
 
           <div className="flex gap-2">
             <input
+              id="admin-api-key"
+              name="adminApiKey"
               type="password"
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}

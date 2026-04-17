@@ -1,0 +1,51 @@
+{
+    "name": "chromasnap-server",
+    "version": "1.0.0",
+    "description": "Backend for ChromaSnap AI Colorizer",
+    "main": "src/index.ts",
+    "scripts": {
+        "dev": "tsx watch src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "migrate:identity:dry-run": "node scripts/migrate-auth-users-to-identity-platform.mjs",
+        "migrate:identity:apply": "node scripts/migrate-auth-users-to-identity-platform.mjs --apply=true",
+        "smoke:auth-cookie": "node scripts/smoke-auth-cookie.mjs",
+        "smoke:auth-security": "node scripts/smoke-auth-security.mjs",
+        "smoke:auth-cleanup": "node scripts/cleanup-auth-smoke-users.mjs",
+        "smoke:auth-cleanup:dry-run": "node scripts/cleanup-auth-smoke-users.mjs --dryRun=true",
+        "smoke:webhook-receiver": "node scripts/smoke-password-reset-webhook-receiver.mjs",
+        "smoke:auth-cookie:cloudrun": "node scripts/smoke-auth-cookie-cloudrun.mjs",
+        "smoke:billing": "node scripts/smoke-billing.mjs",
+        "smoke:billing:cloudrun": "node scripts/smoke-billing-cloudrun.mjs",
+        "secrets:scan": "gitleaks detect --source .. --no-git --redact --config ../.gitleaks.toml"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "@google-cloud/storage": "^7.13.0",
+        "@google/genai": "^1.38.0",
+        "bcryptjs": "^2.4.3",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^4.19.2",
+        "express-rate-limit": "^7.5.0",
+        "firebase-admin": "^13.7.0",
+        "google-auth-library": "^10.5.0",
+        "helmet": "^8.1.0",
+        "jsonwebtoken": "^9.0.2",
+        "sharp": "^0.34.5",
+        "sqlite": "^5.1.1",
+        "sqlite3": "^5.1.7"
+    },
+    "devDependencies": {
+        "@types/bcryptjs": "^2.4.6",
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/jsonwebtoken": "^9.0.10",
+        "@types/node": "^20.12.7",
+        "@types/sharp": "^0.31.1",
+        "tsx": "^4.7.2",
+        "typescript": "^5.4.5"
+    }
+}

@@ -1,0 +1,11 @@
+# Copy to key.properties (ignored by git) and fill with your Google Play upload keystore values.
+storeFile=C:/path/to/upload-keystore.jks
+storePassword=your-store-password
+keyAlias=your-key-alias
+keyPassword=your-key-password
+
+# Alternative variable names used by the release build environment.
+ANDROID_UPLOAD_STORE_FILE=C:/path/to/upload-keystore.jks
+ANDROID_UPLOAD_STORE_PASSWORD=your-store-password
+ANDROID_UPLOAD_KEY_ALIAS=your-key-alias
+ANDROID_UPLOAD_KEY_PASSWORD=your-key-password

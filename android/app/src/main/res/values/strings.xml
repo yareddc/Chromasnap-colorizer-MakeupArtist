@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ChromaSnap</string>
+    <string name="title_activity_main">ChromaSnap</string>
+    <string name="package_name">com.chromasnap.app</string>
+    <string name="custom_url_scheme">com.chromasnap.app</string>
+</resources>

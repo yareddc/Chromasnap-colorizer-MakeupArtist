@@ -1,0 +1,51 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+!server/.env.example
+
+# Service account / key material
+server/config/*.json
+*service-account*.json
+*credentials*.json
+
+# Android signing material
+android/key.properties
+android/*.jks
+android/*.keystore
+*.jks
+*.keystore
+
+# Firebase Android config (environment-specific secret)
+android/app/google-services.json
+
+# Local runtime/test data
+server/data/usernames.db
+
+# Generated Android plugin build outputs
+capacitor-plugin/android/build/

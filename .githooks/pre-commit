@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+set -eu
+
+if git ls-files --error-unmatch .env >/dev/null 2>&1 || git ls-files --error-unmatch server/.env >/dev/null 2>&1; then
+  echo ".env files are tracked in git. Untrack them before committing."
+  echo "Run: git rm --cached .env server/.env"
+  exit 1
+fi
+
+if git ls-files 'server/config/*.json' | grep -q .; then
+  echo "Service-account JSON files are tracked in server/config/."
+  echo "Run: git rm --cached server/config/*.json"
+  exit 1
+fi
+
+echo "Running gitleaks staged scan..."
+node scripts/run-gitleaks.mjs protect --staged --redact --verbose --config .gitleaks.toml

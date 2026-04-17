@@ -1,0 +1,7 @@
+{
+  "name": "ChromaSnap: AI Colorizer Ver_003",
+  "description": "Transform vintage black and white photos into vibrant, lifelike color images using Gemini's advanced image-to-image AI capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

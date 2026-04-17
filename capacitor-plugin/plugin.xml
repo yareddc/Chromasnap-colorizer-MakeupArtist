@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        id="@chromasnap/image-processor"
+        version="1.0.0">
+    <name>ChromaSnap Image Processor</name>
+    <description>Native image processing plugin for ChromaSnap AI colorizer</description>
+    <license>MIT</license>
+    <keywords>capacitor,plugin,native,image,colorization</keywords>
+    <repo>https://github.com/chromasnap/image-processor</repo>
+    <issue>https://github.com/chromasnap/image-processor/issues</issue>
+
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="ChromaSnapImageProcessor">
+                <param name="ios-package" value="ChromaSnapImageProcessorPlugin" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+        <source-file src="ios/Plugin/ChromaSnapImageProcessorPlugin.swift" />
+        <source-file src="ios/Plugin/ChromaSnapImageProcessor.swift" />
+    </platform>
+
+    <platform name="android">
+        <config-file target="config.xml" parent="/*">
+            <feature name="ChromaSnapImageProcessor">
+                <param name="android-package" value="com.chromasnap.processor.ChromaSnapImageProcessorPlugin" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+        <source-file src="android/src/main/java/com/chromasnap/processor/ChromaSnapImageProcessorPlugin.kt" />
+        <source-file src="android/src/main/java/com/chromasnap/processor/ChromaSnapImageProcessor.kt" />
+    </platform>
+</plugin>

@@ -1,0 +1,47 @@
+{
+  "name": "chromasnap:-ai-colorizer-ver_003",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "setup:native": "node scripts/setup-native-plugin.js",
+    "server": "cd server && npm run dev",
+    "plugin:build": "cd capacitor-plugin && npm run build",
+    "gcp:secrets:sh": "bash scripts/setup-gcp-secrets.sh",
+    "gcp:secrets:ps1": "powershell -ExecutionPolicy Bypass -File scripts/setup-gcp-secrets.ps1",
+    "gcp:deploy:public": "gcloud builds submit --config cloudbuild.yaml",
+    "gcp:deploy:private": "gcloud builds submit --config cloudbuild.private.yaml",
+    "server:smoke:auth-cookie": "cd server && npm run smoke:auth-cookie",
+    "server:smoke:auth-cookie:cloudrun": "cd server && npm run smoke:auth-cookie:cloudrun",
+    "server:smoke:billing": "cd server && npm run smoke:billing",
+    "server:smoke:billing:cloudrun": "cd server && npm run smoke:billing:cloudrun",
+    "git-hooks:install": "node scripts/install-git-hooks.mjs",
+    "secrets:scan": "node scripts/run-gitleaks.mjs detect --source . --redact --config .gitleaks.toml",
+    "secrets:scan:all-files": "node scripts/run-gitleaks.mjs detect --source . --no-git --redact --config .gitleaks.toml",
+    "secrets:scan:staged": "node scripts/run-gitleaks.mjs protect --staged --redact --verbose --config .gitleaks.toml",
+    "generate:icons": "node scripts/generate-android-icons.js"
+  },
+  "dependencies": {
+    "@capacitor-firebase/authentication": "^8.1.0",
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/camera": "^8.0.0",
+    "@capacitor/cli": "^8.0.2",
+    "@capacitor/core": "^8.0.2",
+    "@capacitor/ios": "^8.0.2",
+    "@chromasnap/image-processor": "file:./capacitor-plugin",
+    "@google/genai": "^1.38.0",
+    "firebase": "^12.11.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "sharp": "^0.32.1",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}

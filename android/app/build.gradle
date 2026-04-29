@@ -3,11 +3,46 @@ plugins {
     id 'com.google.gms.google-services'
 }
 
-def releaseStoreFile = (System.getenv('ANDROID_UPLOAD_STORE_FILE') ?: project.findProperty('ANDROID_UPLOAD_STORE_FILE') ?: '').toString().trim()
-def releaseStorePassword = (System.getenv('ANDROID_UPLOAD_STORE_PASSWORD') ?: project.findProperty('ANDROID_UPLOAD_STORE_PASSWORD') ?: '').toString().trim()
-def releaseKeyAlias = (System.getenv('ANDROID_UPLOAD_KEY_ALIAS') ?: project.findProperty('ANDROID_UPLOAD_KEY_ALIAS') ?: '').toString().trim()
-def releaseKeyPassword = (System.getenv('ANDROID_UPLOAD_KEY_PASSWORD') ?: project.findProperty('ANDROID_UPLOAD_KEY_PASSWORD') ?: '').toString().trim()
+def firstNonEmpty = { List<String> values ->
+    def match = values.find { value ->
+        value != null && value.toString().trim()
+    }
+    return match == null ? '' : match.toString().trim()
+}
+
+def releaseStoreFile = firstNonEmpty([
+    System.getenv('KEYSTORE_PATH'),
+    System.getenv('ANDROID_UPLOAD_STORE_FILE'),
+    project.findProperty('KEYSTORE_PATH')?.toString(),
+    project.findProperty('ANDROID_UPLOAD_STORE_FILE')?.toString(),
+])
+def releaseStorePassword = firstNonEmpty([
+    System.getenv('KEYSTORE_PASSWORD'),
+    System.getenv('ANDROID_UPLOAD_STORE_PASSWORD'),
+    project.findProperty('KEYSTORE_PASSWORD')?.toString(),
+    project.findProperty('ANDROID_UPLOAD_STORE_PASSWORD')?.toString(),
+])
+def releaseKeyAlias = firstNonEmpty([
+    System.getenv('KEY_ALIAS'),
+    System.getenv('ANDROID_UPLOAD_KEY_ALIAS'),
+    project.findProperty('KEY_ALIAS')?.toString(),
+    project.findProperty('ANDROID_UPLOAD_KEY_ALIAS')?.toString(),
+])
+def releaseKeyPassword = firstNonEmpty([
+    System.getenv('KEY_PASSWORD'),
+    System.getenv('ANDROID_UPLOAD_KEY_PASSWORD'),
+    project.findProperty('KEY_PASSWORD')?.toString(),
+    project.findProperty('ANDROID_UPLOAD_KEY_PASSWORD')?.toString(),
+])
 def hasReleaseSigningConfig = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+def releaseVersionCode = firstNonEmpty([
+    System.getenv('ANDROID_VERSION_CODE'),
+    project.findProperty('ANDROID_VERSION_CODE')?.toString(),
+])
+def releaseVersionName = firstNonEmpty([
+    System.getenv('ANDROID_VERSION_NAME'),
+    project.findProperty('ANDROID_VERSION_NAME')?.toString(),
+])
 
 android {
     namespace = "com.chromasnap.app"
@@ -16,8 +51,8 @@ android {
         applicationId "com.chromasnap.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.1.0"
+        versionCode ((releaseVersionCode?.isInteger() ? releaseVersionCode.toInteger() : 5))
+        versionName (releaseVersionName ?: "1.2.1")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -39,7 +74,8 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             if (hasReleaseSigningConfig) {
                 signingConfig signingConfigs.release
@@ -54,7 +90,7 @@ gradle.taskGraph.whenReady { graph ->
     }
 
     if (needsReleaseSigning && !hasReleaseSigningConfig) {
-        throw new GradleException('Missing Android upload signing config. Set ANDROID_UPLOAD_STORE_FILE, ANDROID_UPLOAD_STORE_PASSWORD, ANDROID_UPLOAD_KEY_ALIAS, ANDROID_UPLOAD_KEY_PASSWORD (env var or Gradle property).')
+        throw new GradleException('Missing Android upload signing config. Set KEYSTORE_PATH/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD (or ANDROID_UPLOAD_STORE_FILE/ANDROID_UPLOAD_STORE_PASSWORD/ANDROID_UPLOAD_KEY_ALIAS/ANDROID_UPLOAD_KEY_PASSWORD) as env vars or Gradle properties.')
     }
 }
 

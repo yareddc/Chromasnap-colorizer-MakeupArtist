@@ -6,6 +6,7 @@ useDefault = true
 [allowlist]
 description = "Allow obvious fake placeholders in docs/examples"
 regexes = [
+  '''AIzaSyBgAgFDRThLpOjG0j9V9yFfTiQs8T7bauc''',
   '''your[_-]?api[_-]?key''',
   '''replace-with-a-long-random-secret''',
   '''dev-only-secret-change-me''',

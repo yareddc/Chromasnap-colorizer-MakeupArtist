@@ -97,7 +97,23 @@ export const signInWithGoogle = async (): Promise<string> => {
   if (Capacitor.isNativePlatform()) {
     // Native Android: use Capacitor Firebase Auth plugin
     const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
-    await (FirebaseAuthentication as any).signInWithGoogle();
+
+    try {
+      await (FirebaseAuthentication as any).signInWithGoogle({
+        useCredentialManager: true,
+      });
+    } catch (error: any) {
+      const message = String(error?.message || '').toLowerCase();
+      // Some emulator/device setups return "No credentials available" with
+      // Credential Manager even when Google accounts exist.
+      if (message.includes('no credentials available')) {
+        await (FirebaseAuthentication as any).signInWithGoogle({
+          useCredentialManager: false,
+        });
+      } else {
+        throw error;
+      }
+    }
 
     const tokenResult = await (FirebaseAuthentication as any).getIdToken().catch(() => null);
     const firebaseIdToken = tokenResult?.token;

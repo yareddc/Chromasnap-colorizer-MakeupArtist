@@ -14,9 +14,11 @@ const resolveDefaultApiBaseUrl = (): string => {
   const protocol = String(globalThis.location?.protocol || '');
   const hostname = String(globalThis.location?.hostname || '');
 
-  // Capacitor Android shell serves app at https://localhost; backend is tunneled via adb reverse.
+  // Capacitor Android shell serves app at https://localhost.
+  // On real devices there is no adb reverse tunnel, so localhost is unreachable.
+  // Use the production backend unless an explicit env var override is provided.
   if (protocol === 'https:' && hostname === 'localhost') {
-    return 'http://localhost:3001';
+    return 'https://chromasnap.app';
   }
 
   return '';

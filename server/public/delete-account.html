@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delete Account – ChromaSnap</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      line-height: 1.75;
+      padding: 2rem 1rem 4rem;
+    }
+    .container { max-width: 620px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 2.5rem; }
+    .logo { font-size: 2rem; font-weight: 700; color: #c084fc; letter-spacing: -0.5px; }
+    .tagline { font-size: 0.9rem; color: #888; margin-top: 0.25rem; }
+    h1 { font-size: 1.6rem; font-weight: 700; color: #f0f0f0; margin-bottom: 0.4rem; }
+    .subtitle { font-size: 0.95rem; color: #999; margin-bottom: 2rem; }
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2e2e2e;
+      border-radius: 10px;
+      padding: 1.75rem;
+      margin-bottom: 1.25rem;
+    }
+    h2 { font-size: 1rem; font-weight: 600; color: #c084fc; margin-bottom: 0.75rem; }
+    p { font-size: 0.93rem; color: #ccc; margin-bottom: 0.75rem; }
+    ul { margin: 0.25rem 0 0.75rem 1.4rem; }
+    li { font-size: 0.93rem; color: #ccc; margin-bottom: 0.3rem; }
+    label { display: block; font-size: 0.88rem; color: #aaa; margin-bottom: 0.35rem; }
+    input, textarea {
+      width: 100%;
+      background: #111;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      color: #e0e0e0;
+      font-size: 0.95rem;
+      padding: 0.65rem 0.85rem;
+      margin-bottom: 1rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus, textarea:focus { border-color: #c084fc; }
+    textarea { resize: vertical; min-height: 90px; }
+    .btn {
+      display: inline-block;
+      background: #7c3aed;
+      color: #fff;
+      border: none;
+      border-radius: 7px;
+      padding: 0.7rem 1.6rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn:hover { background: #6d28d9; }
+    .btn:disabled { background: #444; cursor: not-allowed; }
+    .warning {
+      background: #2a1515;
+      border: 1px solid #5a2020;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      font-size: 0.88rem;
+      color: #f87171;
+      margin-bottom: 1.25rem;
+    }
+    .success-msg {
+      display: none;
+      background: #0f2a1a;
+      border: 1px solid #1a5c35;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      font-size: 0.93rem;
+      color: #4ade80;
+      margin-top: 1rem;
+    }
+    a { color: #a78bfa; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    footer { text-align: center; margin-top: 3rem; font-size: 0.8rem; color: #555; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">ChromaSnap</div>
+      <div class="tagline">AI Photo &amp; Video Colorizer</div>
+    </header>
+
+    <h1>Request Account Deletion</h1>
+    <p class="subtitle">You can delete your account directly in the app, or submit a request below.</p>
+
+    <div class="card">
+      <h2>Delete from the App (Fastest)</h2>
+      <p>If you still have access to the app, the quickest way is:</p>
+      <ul>
+        <li>Open ChromaSnap</li>
+        <li>Go to <strong>Account</strong> tab</li>
+        <li>Scroll to <strong>Danger Zone</strong></li>
+        <li>Tap <strong>Delete Account</strong> and confirm</li>
+      </ul>
+      <p>This immediately and permanently deletes your account, all usage data, and any stored credentials.</p>
+    </div>
+
+    <div class="warning">
+      ⚠ Account deletion is permanent and cannot be undone. All your data will be erased.
+    </div>
+
+    <div class="card">
+      <h2>Submit a Deletion Request</h2>
+      <p>
+        If you no longer have access to the app, fill out the form below and we will manually delete
+        your account within <strong>7 days</strong>.
+      </p>
+
+      <form id="deleteForm">
+        <label for="username">ChromaSnap username</label>
+        <input type="text" id="username" name="username" placeholder="Your username" required autocomplete="off" />
+
+        <label for="email">Email address (for confirmation)</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" required />
+
+        <label for="reason">Reason for deletion (optional)</label>
+        <textarea id="reason" name="reason" placeholder="e.g. No longer using the app"></textarea>
+
+        <button type="submit" class="btn" id="submitBtn">Submit Deletion Request</button>
+      </form>
+
+      <div class="success-msg" id="successMsg">
+        ✓ Request received. We will delete your account and email <span id="confirmedEmail"></span> within 7 days.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>What gets deleted</h2>
+      <ul>
+        <li>Your username and password hash</li>
+        <li>Your recovery email address</li>
+        <li>Your usage credits and subscription records</li>
+        <li>All account activity logs associated with your account</li>
+      </ul>
+      <p>
+        For questions, email us at <a href="mailto:yareddc@gmail.com">yareddc@gmail.com</a> or
+        see our <a href="/privacy">Privacy Policy</a>.
+      </p>
+    </div>
+
+    <footer>
+      <p>&copy; 2025 ChromaSnap. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <script>
+    document.getElementById('deleteForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const username = document.getElementById('username').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const reason = document.getElementById('reason').value.trim();
+
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+
+      try {
+        const res = await fetch('/api/delete-account-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, email, reason })
+        });
+
+        if (res.ok) {
+          document.getElementById('deleteForm').style.display = 'none';
+          const msg = document.getElementById('successMsg');
+          document.getElementById('confirmedEmail').textContent = email;
+          msg.style.display = 'block';
+        } else {
+          const data = await res.json().catch(() => ({}));
+          btn.disabled = false;
+          btn.textContent = 'Submit Deletion Request';
+          alert(data.error || 'Submission failed. Please email yareddc@gmail.com directly.');
+        }
+      } catch {
+        btn.disabled = false;
+        btn.textContent = 'Submit Deletion Request';
+        alert('Network error. Please email yareddc@gmail.com directly.');
+      }
+    });
+  </script>
+</body>
+</html>

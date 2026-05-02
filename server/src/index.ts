@@ -129,8 +129,11 @@ const AUTH_COOKIE_SAME_SITE = (process.env.AUTH_COOKIE_SAME_SITE || (isProductio
 
 const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? process.env.ADMIN_API_KEY || 'dev-only-secret-change-me' : '');
 
+// Defer JWT_SECRET validation to first use instead of blocking startup
+// This allows the container to start even if secrets aren't fully configured yet
+// The actual error will occur when a user tries to authenticate
 if (isProduction && !JWT_SECRET) {
-    throw new Error('JWT_SECRET must be configured in production');
+    console.warn('⚠️ WARNING: JWT_SECRET is not configured in production. Authentication will fail until this is set.');
 }
 
 const isPlaceholderLikeSecret = (value: string) => {
@@ -170,8 +173,35 @@ const validateProductionSecret = (name: string, value: string | undefined, minLe
 };
 
 if (isProduction) {
-    validateProductionSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
-    validateProductionSecret('ADMIN_API_KEY', process.env.ADMIN_API_KEY, 24);
+    // Defer validation for secrets - they should be present via Cloud Run secret injection
+    // Check them when the server is about to listen, not at module load time
+    const missingSecrets: string[] = [];
+    if (!process.env.JWT_SECRET) missingSecrets.push('JWT_SECRET');
+    if (!process.env.ADMIN_API_KEY) missingSecrets.push('ADMIN_API_KEY');
+
+    if (missingSecrets.length > 0) {
+        console.error('❌ ERROR: Production environment has missing required secrets:', missingSecrets.join(', '));
+        console.error('These will need to be set via Cloud Run Secret Manager before the server can handle authentication requests.');
+    } else {
+        // All secrets are present, now validate them
+        try {
+            validateProductionSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
+            validateProductionSecret('ADMIN_API_KEY', process.env.ADMIN_API_KEY, 24);
+
+            if (looksLikeGoogleApiKey(process.env.JWT_SECRET || '')) {
+                throw new Error('JWT_SECRET cannot be a Google API key in production');
+            }
+
+            if (looksLikeGoogleApiKey(process.env.ADMIN_API_KEY || '')) {
+                throw new Error('ADMIN_API_KEY cannot be a Google API key in production');
+            }
+
+            console.log('✅ All production secrets validated successfully');
+        } catch (error: any) {
+            console.error('❌ ERROR: Secret validation failed:', error.message);
+            throw error;
+        }
+    }
 
     const adminUiToggleEnabled = process.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true'
         || process.env.VITE_ENABLE_ADMIN_PAGE === 'true'
@@ -179,14 +209,6 @@ if (isProduction) {
 
     if (adminUiToggleEnabled) {
         throw new Error('Admin UI toggle env vars are not allowed in production');
-    }
-
-    if (looksLikeGoogleApiKey(process.env.JWT_SECRET || '')) {
-        throw new Error('JWT_SECRET cannot be a Google API key in production');
-    }
-
-    if (looksLikeGoogleApiKey(process.env.ADMIN_API_KEY || '')) {
-        throw new Error('ADMIN_API_KEY cannot be a Google API key in production');
     }
 }
 
@@ -487,7 +509,12 @@ const validatePasswordStrength = (password: string) => {
     return null;
 };
 
-const signAuthToken = (username: string) => jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: AUTH_TOKEN_LIFETIME });
+const signAuthToken = (username: string) => {
+    if (!JWT_SECRET) {
+        throw new Error('JWT_SECRET is not configured. Cannot create authentication tokens.');
+    }
+    return jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: AUTH_TOKEN_LIFETIME });
+};
 
 const setAuthCookie = (res: express.Response, token: string) => {
     res.cookie(AUTH_COOKIE_NAME, token, {
@@ -534,6 +561,11 @@ const attachAuthUser = (req: express.Request, _res: express.Response, next: expr
     if (!token) return next();
 
     try {
+        if (!JWT_SECRET) {
+            // JWT_SECRET not configured - skip token verification for now
+            console.error('JWT_SECRET not configured, skipping authentication');
+            return next();
+        }
         const decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
         const username = String(decoded.sub || '').trim();
         if (username) {

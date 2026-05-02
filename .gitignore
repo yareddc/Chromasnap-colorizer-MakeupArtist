@@ -38,6 +38,8 @@ server/config/*.json
 android/key.properties
 android/*.jks
 android/*.keystore
+*.jks
+*.keystore
 
 # Firebase Android config (environment-specific secret)
 android/app/google-services.json

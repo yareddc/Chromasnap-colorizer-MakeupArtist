@@ -10,7 +10,7 @@
 ## Store listing / policy fields
 - [ ] App category selected (Photography recommended)
 - [ ] Contact email added
-- [ ] Privacy Policy URL added (public URL, not localhost)
+- [x] Privacy Policy URL added: https://chromasnap.app/privacy
 - [ ] Data Safety form completed using `play-data-safety-template.md`
 - [ ] Content rating completed using `play-content-rating-notes.md`
 

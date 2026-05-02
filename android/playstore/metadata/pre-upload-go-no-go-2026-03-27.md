@@ -5,7 +5,7 @@ NO-GO until all unresolved items below are completed in Play Console.
 
 ## Unresolved blockers (complete all)
 
-1. Privacy Policy URL not yet confirmed in Play Console.
+1. ✅ Privacy Policy URL confirmed: https://chromasnap.app/privacy
 - Requirement: Publicly accessible URL (not localhost) that matches current app behavior.
 
 2. Store listing contact email not yet confirmed in Play Console.

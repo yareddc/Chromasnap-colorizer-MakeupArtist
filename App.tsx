@@ -14,6 +14,10 @@ import {
   confirmPasswordReset,
   animateImage,
   checkImageSafety,
+  analyzeBeautyProfile,
+  consultBeautyAdvisor,
+  generateVirtualMakeup,
+  recommendOccasionLook,
   fetchAuthMe,
   isBlackAndWhite,
   deleteAuthAccount,
@@ -33,6 +37,7 @@ import {
   topUpTokens,
   verifyGooglePlayPurchase,
 } from './services/geminiService';
+import type { BeautyProfileAnalysis } from './services/geminiService';
 import {
   checkGoogleRedirectResult,
   confirmPhoneOtp,
@@ -96,6 +101,17 @@ const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
     'chromasnap_topup_1000',
 };
 
+type WorkspaceTab = 'colorizer' | 'beauty-lab';
+type Hair360Angle = 'front' | 'left' | 'right' | 'back';
+
+const BEAUTY_SERVICES = [
+  { id: 'bridal-glam', label: 'Bridal Glam', description: 'Premium full-face glam workflow for bridal clients.' },
+  { id: 'soft-day', label: 'Soft Day Look', description: 'Natural finish with skin-tone preserving enhancement.' },
+  { id: 'editorial', label: 'Editorial Style', description: 'High-contrast, runway-inspired beauty direction.' },
+] as const;
+
+type BeautyServiceId = (typeof BEAUTY_SERVICES)[number]['id'];
+
 const App: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedTheme, setSelectedTheme] = useState<string>('Natural');
@@ -141,6 +157,34 @@ const App: React.FC = () => {
   const [deleteAccountConfirmUsername, setDeleteAccountConfirmUsername] = useState('');
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const [accountTab, setAccountTab] = useState<'overview' | 'account-details' | 'delete-account'>('overview');
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('colorizer');
+  const [beautyService, setBeautyService] = useState<BeautyServiceId>('bridal-glam');
+  const [beautyClientName, setBeautyClientName] = useState('');
+  const [beautyNotes, setBeautyNotes] = useState('');
+  const [beautyConsultationResult, setBeautyConsultationResult] = useState<{ advice: string; recommendations: string[] } | null>(null);
+  const [beautyConsultationLoading, setBeautyConsultationLoading] = useState(false);
+  const [beautyConsultationMessage, setBeautyConsultationMessage] = useState<string | null>(null);
+  const [trySelfie, setTrySelfie] = useState<string | null>(null);
+  const [tryOccasion, setTryOccasion] = useState('barbershop');
+  const [tryMakeupStyle, setTryMakeupStyle] = useState('bold');
+  const [tryHairStyle, setTryHairStyle] = useState('taper-fade');
+  const [tryAfterImage, setTryAfterImage] = useState<string | null>(null);
+  const [tryResults, setTryResults] = useState<Array<{ style: string; makeup: string; hair: string; description: string }> | null>(null);
+  const [tryLoading, setTryLoading] = useState(false);
+  const [tryMessage, setTryMessage] = useState<string | null>(null);
+  const [hair360Length, setHair360Length] = useState<'short' | 'medium' | 'long'>('medium');
+  const [hair360Volume, setHair360Volume] = useState<'low' | 'balanced' | 'high'>('balanced');
+  const [hair360Fringe, setHair360Fringe] = useState<'none' | 'curtain' | 'side-swept' | 'full'>('none');
+  const [hair360Texture, setHair360Texture] = useState<'soft' | 'defined' | 'sleek'>('soft');
+  const [hair360ActiveAngle, setHair360ActiveAngle] = useState<Hair360Angle>('front');
+  const [hair360Loading, setHair360Loading] = useState(false);
+  const [hair360Message, setHair360Message] = useState<string | null>(null);
+  const [hair360Previews, setHair360Previews] = useState<Array<{ angle: Hair360Angle; title: string; summary: string; editHint: string }> | null>(null);
+  const [profileAnalysisResult, setProfileAnalysisResult] = useState<BeautyProfileAnalysis | null>(null);
+  const [profileAnalysisLoading, setProfileAnalysisLoading] = useState(false);
+  const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
+  const [guestBeautyAccess, setGuestBeautyAccess] = useState(false);
+  const [guestBeautyMessage, setGuestBeautyMessage] = useState<string | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
@@ -556,6 +600,155 @@ const App: React.FC = () => {
     }
   };
 
+  const ensureFreshPreviewUrl = (imageUrl: string): string => {
+    if (!imageUrl || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) {
+      return imageUrl;
+    }
+    const separator = imageUrl.includes('?') ? '&' : '?';
+    return `${imageUrl}${separator}cb=${Date.now().toString(36)}`;
+  };
+
+  const buildGuestTryOnPreview = async (
+    sourceImage: string,
+    makeupStyle: string,
+    hairStyle: string,
+    occasion: string,
+  ): Promise<string> => {
+    const styleProfile: Record<string, {
+      filter: string;
+      faceTint: string;
+      blendMode: GlobalCompositeOperation;
+      eyeAccent: string;
+      lipAccent: string;
+    }> = {
+      natural: {
+        filter: 'saturate(1.08) contrast(1.02) brightness(1.03)',
+        faceTint: 'rgba(244, 198, 160, 0.12)',
+        blendMode: 'soft-light',
+        eyeAccent: 'rgba(178, 128, 94, 0.1)',
+        lipAccent: 'rgba(198, 120, 107, 0.1)',
+      },
+      bold: {
+        filter: 'saturate(1.38) contrast(1.17) brightness(1.01)',
+        faceTint: 'rgba(214, 66, 126, 0.2)',
+        blendMode: 'overlay',
+        eyeAccent: 'rgba(105, 33, 82, 0.18)',
+        lipAccent: 'rgba(180, 42, 92, 0.18)',
+      },
+      'smokey-eye': {
+        filter: 'saturate(1.08) contrast(1.24) brightness(0.93)',
+        faceTint: 'rgba(88, 92, 136, 0.2)',
+        blendMode: 'multiply',
+        eyeAccent: 'rgba(49, 54, 82, 0.24)',
+        lipAccent: 'rgba(126, 76, 98, 0.14)',
+      },
+      glam: {
+        filter: 'saturate(1.3) contrast(1.18) brightness(1.08)',
+        faceTint: 'rgba(226, 146, 189, 0.2)',
+        blendMode: 'screen',
+        eyeAccent: 'rgba(173, 84, 144, 0.14)',
+        lipAccent: 'rgba(205, 88, 132, 0.2)',
+      },
+      editorial: {
+        filter: 'saturate(1.02) contrast(1.3) brightness(0.98) hue-rotate(-10deg)',
+        faceTint: 'rgba(90, 62, 176, 0.16)',
+        blendMode: 'hard-light',
+        eyeAccent: 'rgba(56, 33, 119, 0.18)',
+        lipAccent: 'rgba(132, 53, 183, 0.14)',
+      },
+      dewy: {
+        filter: 'saturate(1.16) contrast(1.01) brightness(1.12)',
+        faceTint: 'rgba(246, 215, 174, 0.2)',
+        blendMode: 'lighten',
+        eyeAccent: 'rgba(201, 153, 111, 0.08)',
+        lipAccent: 'rgba(226, 152, 133, 0.12)',
+      },
+    };
+
+    const hairByStyle: Record<string, string> = {
+      wavy: 'rgba(138, 103, 74, 0.14)',
+      sleek: 'rgba(80, 68, 60, 0.16)',
+      curly: 'rgba(108, 80, 52, 0.18)',
+      updo: 'rgba(90, 73, 63, 0.16)',
+      braid: 'rgba(112, 85, 60, 0.14)',
+      bob: 'rgba(99, 77, 66, 0.15)',
+      'half-up': 'rgba(118, 93, 70, 0.14)',
+      braided: 'rgba(114, 86, 62, 0.15)',
+      volume: 'rgba(126, 92, 63, 0.16)',
+      'taper-fade': 'rgba(72, 63, 58, 0.18)',
+      'skin-fade': 'rgba(62, 56, 52, 0.2)',
+      'buzz-cut': 'rgba(58, 52, 49, 0.2)',
+      'crew-cut': 'rgba(70, 60, 54, 0.18)',
+      pompadour: 'rgba(86, 68, 56, 0.18)',
+      'textured-crop': 'rgba(78, 64, 56, 0.17)',
+      quiff: 'rgba(92, 73, 59, 0.17)',
+    };
+
+    const occasionPunch: Record<string, number> = {
+      wedding: 1.12,
+      celebration: 1.08,
+      party: 1.14,
+      business: 1.02,
+      casual: 1,
+      photoshoot: 1.16,
+      festival: 1.18,
+      barbershop: 1.06,
+    };
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width;
+          canvas.height = img.naturalHeight || img.height;
+          const ctx = canvas.getContext('2d');
+
+          if (!ctx || !canvas.width || !canvas.height) {
+            resolve(sourceImage);
+            return;
+          }
+
+          const profile = styleProfile[makeupStyle] || styleProfile.natural;
+          const punch = occasionPunch[occasion] || 1;
+          ctx.filter = `${profile.filter} saturate(${punch.toFixed(2)})`;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          ctx.filter = 'none';
+
+          ctx.globalCompositeOperation = profile.blendMode;
+          ctx.fillStyle = profile.faceTint;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          const eyeGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.38);
+          eyeGradient.addColorStop(0, profile.eyeAccent);
+          eyeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = eyeGradient;
+          ctx.fillRect(0, 0, canvas.width, canvas.height * 0.38);
+
+          const lipGradient = ctx.createLinearGradient(0, canvas.height * 0.62, 0, canvas.height);
+          lipGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+          lipGradient.addColorStop(1, profile.lipAccent);
+          ctx.fillStyle = lipGradient;
+          ctx.fillRect(0, canvas.height * 0.62, canvas.width, canvas.height * 0.38);
+
+          const hairTint = hairByStyle[hairStyle] || hairByStyle.wavy;
+          const hairGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.45);
+          hairGradient.addColorStop(0, hairTint);
+          hairGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = hairGradient;
+          ctx.fillRect(0, 0, canvas.width, canvas.height * 0.45);
+
+          ctx.globalCompositeOperation = 'source-over';
+          resolve(canvas.toDataURL('image/jpeg', 0.92));
+        } catch {
+          resolve(sourceImage);
+        }
+      };
+      img.onerror = () => resolve(sourceImage);
+      img.src = sourceImage;
+    });
+  };
+
   const handleSampleImage = () => {
     handleImageSelected(SAMPLE_IMAGE_DATA_URL);
   };
@@ -601,7 +794,7 @@ const App: React.FC = () => {
       const newResult: ColorizedImage = {
         id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36),
         original: selectedImage,
-        colorized: colorized,
+        colorized: ensureFreshPreviewUrl(colorized),
         timestamp: Date.now(),
         safetyCheck: postSafety
       };
@@ -623,7 +816,7 @@ const App: React.FC = () => {
     const newVersion: ColorizedImage = {
       ...result,
       id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36),
-      colorized: newImage,
+      colorized: ensureFreshPreviewUrl(newImage),
       timestamp: Date.now()
     };
     setResult(newVersion);
@@ -733,13 +926,328 @@ const App: React.FC = () => {
     }
   };
 
+  const handleWorkspaceTabChange = (tab: WorkspaceTab) => {
+    if (guestBeautyAccess && tab === 'colorizer') {
+      setGuestBeautyMessage('Guest mode is temporarily limited to Beauty Lab while production wiring is in progress.');
+      setActiveWorkspaceTab('beauty-lab');
+      window.requestAnimationFrame(() => {
+        document.getElementById('beauty-lab-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      return;
+    }
+    setActiveWorkspaceTab(tab);
+    const targetId = tab === 'beauty-lab' ? 'beauty-lab-panel' : 'colorizer-panel';
+    window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const handleBeautyConsultation = async () => {
+    if (!trySelfie) {
+      setBeautyConsultationMessage('Please upload a selfie in Virtual Try-On Studio first');
+      return;
+    }
+    if (!beautyNotes.trim()) {
+      setBeautyConsultationMessage('Please add consultation notes');
+      return;
+    }
+
+    setBeautyConsultationLoading(true);
+    setBeautyConsultationMessage(null);
+    setBeautyConsultationResult(null);
+
+    try {
+      if (guestBeautyAccess) {
+        const normalizedNotes = beautyNotes.trim().replace(/\s+/g, ' ');
+        const notesExcerpt = normalizedNotes.length > 180
+          ? `${normalizedNotes.slice(0, 180)}...`
+          : normalizedNotes;
+        const sampleAdvice = `Absolutely gorgeous base to work with. For a ${beautyService.replace('-', ' ')} direction, keep the complexion luminous, softly sculpt the cheeks, and focus your statement on eyes or lips (not both at full intensity).`;
+        const sampleRecommendations = [
+          'Skin prep: hydrating primer on high points for a lit-from-within finish.',
+          'Eyes: diffuse matte transition shade first, then add shimmer only at center lid.',
+          'Lips: pair neutral liner with a tone-matching lipstick for polished balance.',
+        ];
+        const adviceWithNotes = notesExcerpt
+          ? `${sampleAdvice}\n\nYour notes detected: ${notesExcerpt}\n\nBased on those notes, prioritize longevity and keep layering thin so the look stays clean in photos.`
+          : sampleAdvice;
+        setBeautyConsultationResult({ advice: adviceWithNotes, recommendations: sampleRecommendations });
+        setBeautyConsultationMessage('Guest preview: consultation generated with local demo data.');
+        return;
+      }
+      const result = await consultBeautyAdvisor(
+        trySelfie,
+        beautyNotes,
+        beautyService
+      );
+      setBeautyConsultationResult(result);
+      setBeautyConsultationMessage('Consultation complete! Review the advice below.');
+    } catch (error: any) {
+      setBeautyConsultationMessage(friendlyError(error, 'consultation'));
+    } finally {
+      setBeautyConsultationLoading(false);
+    }
+  };
+
+  const handleTrySelfieCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64String = e.target?.result as string;
+      setTrySelfie(base64String);
+      setTryAfterImage(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleGetOccasionRecommendations = async () => {
+    if (!trySelfie) {
+      setTryMessage('Please upload a selfie first');
+      return;
+    }
+
+    setTryLoading(true);
+    setTryMessage(null);
+    setTryResults(null);
+
+    try {
+      if (guestBeautyAccess) {
+        const demoRecs = [
+          {
+            style: 'Soft Radiance',
+            makeup: 'Sheer base, peach cream blush, subtle brown liner, satin nude lip.',
+            hair: 'Loose polished waves with face-framing movement',
+            description: `Great for ${tryOccasion}: balanced glow, flattering depth at lash line, and a photo-friendly finish.`,
+          },
+          {
+            style: 'Defined Elegance',
+            makeup: 'Medium coverage base, lifted bronzer placement, rose-mauve lip.',
+            hair: 'Low textured ponytail with crown volume',
+            description: 'Adds structure while staying wearable and modern for day-to-night transitions.',
+          },
+          {
+            style: 'Glam Focus',
+            makeup: 'Soft glam eye gradient, strategic highlighter, statement lip option.',
+            hair: 'Side-part blowout with smooth ends',
+            description: 'A polished, event-ready profile with camera-friendly contrast and dimension.',
+          },
+        ];
+        setTryResults(demoRecs);
+        setTryMessage(`Guest preview: ${demoRecs.length} demo looks generated for ${tryOccasion}.`);
+        return;
+      }
+      const result = await recommendOccasionLook(trySelfie, tryOccasion);
+      setTryResults(result.recommendations);
+      setTryMessage(`Found ${result.recommendations.length} looks perfect for ${tryOccasion}!`);
+    } catch (error: any) {
+      setTryMessage(friendlyError(error, 'try-on-recommendations'));
+    } finally {
+      setTryLoading(false);
+    }
+  };
+
+  const handleGenerateVirtualMakeup = async () => {
+    if (!trySelfie) {
+      setTryMessage('Please upload a selfie first');
+      return;
+    }
+
+    setTryLoading(true);
+    setTryMessage(null);
+
+    try {
+      if (guestBeautyAccess) {
+        const guestPreview = await buildGuestTryOnPreview(
+          trySelfie,
+          tryMakeupStyle,
+          tryHairStyle,
+          tryOccasion,
+        );
+        const singleRec = [{
+          style: `${tryMakeupStyle.charAt(0).toUpperCase() + tryMakeupStyle.slice(1)} Look`,
+          makeup: `Demo ${tryMakeupStyle} profile with complexion balancing and lip harmony for ${tryOccasion}.`,
+          hair: tryHairStyle,
+          description: `Guest preview style: ${tryMakeupStyle} makeup paired with ${tryHairStyle} hair for ${tryOccasion}. Ask your stylist to tailor intensity to venue lighting and dress color.`
+        }];
+        setTryResults(singleRec);
+        setTryAfterImage(ensureFreshPreviewUrl(guestPreview));
+        setTryMessage('Guest preview: virtual look generated with local demo data.');
+        return;
+      }
+      const result = await generateVirtualMakeup(
+        trySelfie,
+        tryMakeupStyle,
+        tryHairStyle,
+        tryOccasion
+      );
+      const singleRec = [{
+        style: `${tryMakeupStyle.charAt(0).toUpperCase() + tryMakeupStyle.slice(1)} Look`,
+        makeup: result.description.substring(0, 200),
+        hair: tryHairStyle,
+        description: result.description
+      }];
+      setTryResults(singleRec);
+      setTryAfterImage(ensureFreshPreviewUrl(result.editedImage || trySelfie));
+      setTryMessage('Virtual look generated! Review the description below.');
+    } catch (error: any) {
+      setTryMessage(friendlyError(error, 'virtual-makeup'));
+    } finally {
+      setTryLoading(false);
+    }
+  };
+
+  const handleDownloadTryOn = () => {
+    const imageToDownload = tryAfterImage || trySelfie;
+    if (!imageToDownload) return;
+    const link = document.createElement('a');
+    link.href = imageToDownload;
+    link.download = `chromasnap-virutal-try-on-${Date.now()}.jpg`;
+    link.click();
+  };
+
+  const handleGenerateHair360Preview = async () => {
+    if (!trySelfie) {
+      setHair360Message('Please upload a selfie first');
+      return;
+    }
+
+    setHair360Loading(true);
+    setHair360Message(null);
+    setHair360Previews(null);
+
+    try {
+      const angleOrder: Hair360Angle[] = ['front', 'left', 'right', 'back'];
+      const titleByAngle: Record<Hair360Angle, string> = {
+        front: 'Front View',
+        left: 'Left Profile',
+        right: 'Right Profile',
+        back: 'Back View',
+      };
+
+      const angleHints: Record<Hair360Angle, string> = {
+        front: 'Refine fringe density, face-framing pieces, and temple softness.',
+        left: 'Adjust layering around cheekbone and ear line for cleaner profile balance.',
+        right: 'Tune volume symmetry and perimeter weight against jawline.',
+        back: 'Rebalance crown fullness and hemline shape for movement and polish.',
+      };
+
+      let baseDescription = `Hair preview for ${tryHairStyle} on ${tryOccasion}.`;
+      if (!guestBeautyAccess) {
+        const result = await generateVirtualMakeup(
+          trySelfie,
+          tryMakeupStyle,
+          `${tryHairStyle}, length:${hair360Length}, volume:${hair360Volume}, fringe:${hair360Fringe}, texture:${hair360Texture}`,
+          `${tryOccasion} 360 hairstyle preview`
+        );
+        baseDescription = result.description || baseDescription;
+      }
+
+      const previews = angleOrder.map((angle) => ({
+        angle,
+        title: titleByAngle[angle],
+        summary: `${titleByAngle[angle]}: ${tryHairStyle} style with ${hair360Length} length, ${hair360Volume} volume, ${hair360Fringe} fringe, and ${hair360Texture} finish. ${baseDescription.substring(0, 130)}${baseDescription.length > 130 ? '...' : ''}`,
+        editHint: angleHints[angle],
+      }));
+
+      setHair360Previews(previews);
+      setHair360Message(guestBeautyAccess
+        ? 'Guest preview: 360 hairstyle simulation generated from local styling logic.'
+        : '360 hairstyle preview generated. Switch angles and fine-tune your settings.');
+    } catch (error: any) {
+      setHair360Message(friendlyError(error, 'hair-360-preview'));
+    } finally {
+      setHair360Loading(false);
+    }
+  };
+
+  const handleAnalyzeBeautyProfile = async () => {
+    if (!trySelfie) {
+      setProfileAnalysisMessage('Please upload a selfie first');
+      return;
+    }
+    setProfileAnalysisLoading(true);
+    setProfileAnalysisMessage(null);
+    setProfileAnalysisResult(null);
+    try {
+      if (guestBeautyAccess) {
+        setProfileAnalysisResult({
+          skinTone: {
+            undertone: 'Neutral',
+            overtone: 'Medium',
+            description: 'Balanced skin tone that supports both warm and cool accent colors.',
+          },
+          faceShape: {
+            shape: 'Oval',
+            characteristics: ['Gently rounded jawline', 'Balanced forehead-to-jaw proportion', 'Versatile symmetry for multiple styles'],
+          },
+          eyes: {
+            color: 'Brown',
+            shape: 'Almond',
+            techniques: ['Lift outer corners with a soft wing', 'Place shimmer at center lid for dimension', 'Smudge deeper tone along outer third for elongation'],
+          },
+          hair: {
+            length: 'Long',
+            texture: 'Wavy',
+            color: 'Dark Brown',
+            condition: 'Healthy density with light dryness at ends.',
+          },
+          makeupRecommendation: {
+            foundationShades: ['Neutral beige', 'Golden neutral', 'Soft olive-beige'],
+            blushShades: ['Peach rose', 'Warm apricot', 'Muted berry'],
+            lipstickShades: ['Rose nude', 'Terracotta rose', 'Classic blue-red'],
+            colorTheory: ['Peach-apricot tones brighten under-eye shadows and soften cool cast.', 'Rose-nude lips balance medium-neutral skin without overpowering features.', 'Blue-red lipstick enhances tooth brightness and gives high-contrast glam definition.'],
+            dailyLook: ['Apply thin, skin-like base with spot concealing.', 'Tap peach-rose blush high on cheeks for lift.', 'Use soft brown liner and mascara for eye definition.', 'Finish with rose-nude lipstick and diffused liner.'],
+            glamLook: ['Use medium-coverage satin foundation.', 'Sculpt temples and cheekbones with neutral bronzer.', 'Build almond-eye gradient with deeper outer corner.', 'Add half-lash for lift and camera-ready shape.', 'Finish with terracotta rose or blue-red lip.'],
+          },
+          hairTransformation: {
+            styles: [
+              {
+                name: 'Long Layered Butterfly Cut',
+                whyItWorks: 'Adds airy movement and frames oval proportions without adding width.',
+                cutDescription: 'Request long internal layers, cheekbone face-framing, and soft U-shaped perimeter with weight removal through mid-lengths.',
+              },
+              {
+                name: 'Collarbone Textured Lob',
+                whyItWorks: 'Keeps structure while maintaining softness around the jaw and neck.',
+                cutDescription: 'Ask for a collarbone lob with blunt baseline, invisible internal texturizing, and slight forward angle in front.',
+              },
+              {
+                name: 'Soft Curtain Layers',
+                whyItWorks: 'Creates vertical lines and eye focus while preserving balance.',
+                cutDescription: 'Ask for curtain fringe starting at cheekbone, blended into long layers with slide-cut detailing around the face.',
+              },
+            ],
+            colorSuggestions: ['Neutral mocha brunette', 'Soft chestnut brown', 'Espresso with neutral reflect'],
+            highlightSuggestions: ['Fine caramel babylights around hairline', 'Subtle mocha ribbon highlights through mid-lengths', 'Money-piece kept one level lighter for brightness'],
+          },
+          safety: {
+            disclaimer: 'AI photo lighting can vary. Please confirm final shade and color placement in person with your professional stylist.',
+            dermatologistNote: 'For acne, irritation, rashes, or persistent skin concerns, consult a licensed dermatologist.',
+          },
+          recommendations: ['Keep two lipstick options: one daily neutral, one event bold.', 'Match foundation on jawline and check in natural light before purchase.', 'Use a gloss topper only at center lip for fuller glam effect.'],
+        });
+        setProfileAnalysisMessage('Guest preview: beauty profile generated with local demo data.');
+        return;
+      }
+      const result = await analyzeBeautyProfile(trySelfie);
+      setProfileAnalysisResult(result);
+      setProfileAnalysisMessage('Beauty profile analysis complete!');
+    } catch (error: any) {
+      setProfileAnalysisMessage(friendlyError(error, 'analyzeBeautyProfile'));
+    } finally {
+      setProfileAnalysisLoading(false);
+    }
+  };
+
   const isRestricted = result && result.safetyCheck && !result.safetyCheck.isSafe;
   const containsMinors = result && result.safetyCheck?.containsMinors;
 
   if (!authInitialized) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
-        <Header tokenBalance={null} />
+        <Header tokenBalance={null} activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
         <main className="flex-1 flex items-center justify-center p-6">
           <div className="text-sm text-slate-300">Initializing secure session...</div>
         </main>
@@ -751,14 +1259,86 @@ const App: React.FC = () => {
     return <AdminLoginPage onBack={() => setShowAdminLoginPage(false)} />;
   }
 
-  if (!authUser) {
+  if (!authUser && !guestBeautyAccess) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
-        <Header tokenBalance={null} />
-        <main className="flex-1 flex items-center justify-center p-6">
-          <div className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-6 space-y-4">
-            <h2 className="text-xl font-bold text-white">Secure Login</h2>
-            <p className="text-xs text-slate-400">Sign in to access colorization, billing, and account recovery tools.</p>
+        <Header tokenBalance={null} activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
+        <main className="flex-1 flex items-center justify-center p-4">
+          <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-6 items-center lg:items-stretch">
+
+            {/* ── Product Preview Panel ── */}
+            <div className="hidden lg:flex flex-col flex-1 gap-4 justify-center">
+              <div className="text-center mb-2">
+                <h1 className="text-2xl font-extrabold text-white tracking-tight">ChromaSnap <span className="text-indigo-400">AI</span></h1>
+                <p className="text-sm text-slate-400 mt-1">Transform your photos with the power of AI</p>
+              </div>
+
+              {/* Feature cards */}
+              <div className="rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-900/30 to-slate-900/60 p-4 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-white">AI Photo Colorizer</p>
+                    <p className="text-xs text-slate-400">Bring black &amp; white photos to life with intelligent colorization</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <div className="flex-1 rounded-xl overflow-hidden h-20 bg-slate-800 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M6 8h.01" /></svg>
+                  </div>
+                  <div className="w-6 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                  </div>
+                  <div className="flex-1 rounded-xl overflow-hidden h-20 bg-gradient-to-br from-amber-700/40 via-sky-600/30 to-emerald-600/30 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-amber-300/60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M6 8h.01" /></svg>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-rose-500/20 bg-gradient-to-br from-rose-900/20 to-slate-900/60 p-4 space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-500/20 flex items-center justify-center shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-white">Beauty Lab &amp; Virtual Try-On</p>
+                    <p className="text-xs text-slate-400">Try hairstyles, makeup looks, and get AI beauty advice</p>
+                  </div>
+                </div>
+                <div className="flex gap-1 mt-2">
+                  {['Taper Fade', 'Natural Glam', 'Bold Lip', 'Smoky Eye'].map(label => (
+                    <div key={label} className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700/40 px-1 py-1.5 text-center">
+                      <p className="text-[10px] text-slate-300 leading-tight">{label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-900/20 to-slate-900/60 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-white">Animate &amp; Upscale</p>
+                    <p className="text-xs text-slate-400">Turn photos into short videos and enhance resolution with AI</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Login Form ── */}
+          <div className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-5 space-y-3">
+            <h2 className="text-base font-bold text-white">Secure Login</h2>
+            <p className="text-xs text-slate-400">Sign in to continue.</p>
 
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -951,7 +1531,7 @@ const App: React.FC = () => {
                 <button
                   onClick={handleGoogleLogin}
                   disabled={authLoading}
-                  className="w-full px-4 py-3 rounded-xl bg-white text-slate-900 text-sm font-semibold hover:bg-slate-200 transition-colors disabled:opacity-50"
+                  className="w-full px-4 py-2 rounded-xl bg-white text-slate-900 text-sm font-semibold hover:bg-slate-200 transition-colors disabled:opacity-50"
                 >
                   Continue with Google
                 </button>
@@ -964,13 +1544,13 @@ const App: React.FC = () => {
                     value={socialPhoneNumber}
                     onChange={(event) => setSocialPhoneNumber(event.target.value)}
                     placeholder="Phone (+12025551234)"
-                    className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                    className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                   />
                   {!socialOtpSent ? (
                     <button
                       onClick={handleSendPhoneOtp}
                       disabled={authLoading}
-                      className="w-full px-4 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                      className="w-full px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
                     >
                       Send OTP
                     </button>
@@ -982,12 +1562,12 @@ const App: React.FC = () => {
                         value={socialOtpCode}
                         onChange={(event) => setSocialOtpCode(event.target.value)}
                         placeholder="OTP code"
-                        className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                        className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                       />
                       <button
                         onClick={handleVerifyPhoneOtp}
                         disabled={authLoading}
-                        className="w-full px-4 py-3 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
+                        className="w-full px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
                       >
                         Verify OTP & Sign In
                       </button>
@@ -1005,7 +1585,7 @@ const App: React.FC = () => {
                   <button
                     onClick={handleLogin}
                     disabled={authLoading}
-                    className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
+                    className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
                   >
                     Sign In
                   </button>
@@ -1029,7 +1609,7 @@ const App: React.FC = () => {
                 <button
                   onClick={handleRegister}
                   disabled={authLoading}
-                  className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
+                  className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
                 >
                   Create Account
                 </button>
@@ -1038,7 +1618,7 @@ const App: React.FC = () => {
                 <button
                   onClick={handleRecoverUsername}
                   disabled={authLoading}
-                  className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
+                  className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
                 >
                   Recover Username
                 </button>
@@ -1048,20 +1628,37 @@ const App: React.FC = () => {
                   <button
                     onClick={handleRequestPasswordReset}
                     disabled={authLoading}
-                    className="w-full px-4 py-3 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-500 transition-colors disabled:opacity-50"
+                    className="w-full px-4 py-2 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-500 transition-colors disabled:opacity-50"
                   >
                     Request Reset Token
                   </button>
                   <button
                     onClick={handleConfirmPasswordReset}
                     disabled={authLoading}
-                    className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
+                    className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
                   >
                     Confirm New Password
                   </button>
                 </>
               )}
             </div>
+
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <button
+                onClick={() => {
+                  setGuestBeautyAccess(true);
+                  setActiveWorkspaceTab('beauty-lab');
+                  setGuestBeautyMessage('Temporary guest access enabled for Beauty Lab preview mode.');
+                }}
+                className="w-full px-4 py-2 rounded-xl bg-cyan-600 text-white text-sm font-semibold hover:bg-cyan-500 transition-colors"
+              >
+                Continue As Guest (Beauty Lab Preview)
+              </button>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Temporary access for Beauty Lab while production auth wiring is in progress.
+              </p>
+            </div>
+          </div>
           </div>
         </main>
       </div>
@@ -1070,9 +1667,29 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
-      <Header />
+      <Header activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 space-y-6 sm:space-y-8 max-w-4xl mx-auto w-full">
+        {guestBeautyAccess && (
+          <div className="w-full rounded-2xl border border-cyan-500/40 bg-cyan-500/10 p-3 text-xs text-cyan-100">
+            <div className="font-semibold uppercase tracking-wider mb-1">Guest Beauty Lab Preview</div>
+            <div>Temporary mode is active. Beauty Lab uses demo responses until production wiring is complete.</div>
+            {guestBeautyMessage && <div className="mt-2 text-cyan-200">{guestBeautyMessage}</div>}
+            <div className="mt-3">
+              <button
+                onClick={() => {
+                  setGuestBeautyAccess(false);
+                  setGuestBeautyMessage(null);
+                  setActiveWorkspaceTab('colorizer');
+                }}
+                className="px-3 py-2 rounded-lg bg-slate-900/80 border border-cyan-400/40 text-cyan-100 hover:bg-slate-900 text-[11px] font-semibold uppercase tracking-wider transition-colors"
+              >
+                Exit Guest Mode
+              </button>
+            </div>
+          </div>
+        )}
+
         {processing.isProcessing && (
           <LoadingOverlay
             message={processing.statusMessage}
@@ -1082,7 +1699,7 @@ const App: React.FC = () => {
 
         <div
           id="account-panel"
-          className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto"
+          className={`w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto ${guestBeautyAccess ? 'hidden' : ''}`}
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
@@ -1307,7 +1924,674 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {!selectedImage && !result && (
+        <div
+          id="beauty-lab-panel"
+          className={`w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all ${
+            activeWorkspaceTab === 'beauty-lab'
+              ? 'border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10'
+              : 'border-slate-800 bg-slate-900/50'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Beauty Lab</h3>
+              <p className="text-xs leading-relaxed text-slate-400">Salon workflow tab for makeup and beauty service planning.</p>
+            </div>
+            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-rose-400/40 bg-rose-500/10 text-rose-200">
+              New Tab
+            </span>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            {BEAUTY_SERVICES.map((service) => (
+              <button
+                key={service.id}
+                type="button"
+                onClick={() => setBeautyService(service.id)}
+                className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
+                  beautyService === service.id
+                    ? 'border-rose-400/60 bg-rose-500/10 text-rose-50'
+                    : 'border-slate-800 bg-slate-950/50 text-slate-300 hover:border-rose-400/40 hover:text-white'
+                }`}
+              >
+                <div className="text-xs font-semibold uppercase tracking-wider">{service.label}</div>
+                <div className="text-[11px] mt-1 text-slate-300">{service.description}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Client Name</label>
+              <input
+                value={beautyClientName}
+                onChange={(event) => setBeautyClientName(event.target.value)}
+                placeholder="Client profile name"
+                className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Selected Service</label>
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3 text-xs text-slate-200">
+                {BEAUTY_SERVICES.find((service) => service.id === beautyService)?.label}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-300">
+            {beautyClientName.trim()
+              ? `Ready for ${beautyClientName.trim()}. Use Color Studio tab to upload a reference image and apply the ${BEAUTY_SERVICES.find((service) => service.id === beautyService)?.label} workflow.`
+              : 'Add a client name, select a service, and capture notes before switching to Color Studio for image processing.'}
+          </div>
+
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs sm:text-sm font-bold text-amber-100 uppercase tracking-[0.15em]">Virtual Try-On Studio</h4>
+                <p className="text-[10px] text-amber-200/70 leading-relaxed">Preview makeup & hairstyles for occasions</p>
+              </div>
+              {trySelfie && (
+                <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200">
+                  Photo Ready
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Upload Photo</label>
+              {trySelfie && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-amber-300 border-b border-amber-500/20">Before</div>
+                    <img src={trySelfie} alt="Before selfie" className="w-full h-40 object-cover" />
+                  </div>
+                  <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-amber-300 border-b border-amber-500/20">After</div>
+                    {tryAfterImage ? (
+                      <img src={tryAfterImage} alt="After virtual try-on" className="w-full h-40 object-cover" />
+                    ) : (
+                      <div className="h-40 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                        Generate a look to preview your after result here.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleTrySelfieCapture}
+                  className="hidden"
+                  id="try-on-upload-input"
+                />
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleTrySelfieCapture}
+                  className="hidden"
+                  id="try-on-camera-input"
+                />
+                <label
+                  htmlFor="try-on-upload-input"
+                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border-2 border-dashed border-amber-400/40 bg-amber-500/5 text-amber-300 hover:border-amber-400/60 hover:bg-amber-500/10 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
+                >
+                  {trySelfie ? 'Upload New Photo' : 'Upload Photo'}
+                </label>
+                <label
+                  htmlFor="try-on-camera-input"
+                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border border-amber-400/40 bg-slate-950/50 text-amber-200 hover:border-amber-300/60 hover:text-amber-100 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
+                >
+                  Use Camera
+                </label>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Session Notes</label>
+              <textarea
+                value={beautyNotes}
+                onChange={(event) => setBeautyNotes(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                    event.preventDefault();
+                    if (!beautyConsultationLoading && trySelfie && beautyNotes.trim()) {
+                      void handleBeautyConsultation();
+                    }
+                  }
+                }}
+                placeholder="Skin tone goals, finish preference, timing, and product notes"
+                rows={4}
+                className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              />
+              <div className="flex justify-end">
+                <button
+                  onClick={() => void handleBeautyConsultation()}
+                  disabled={beautyConsultationLoading || !trySelfie || !beautyNotes.trim()}
+                  aria-label="Send notes for beauty advice"
+                  className="inline-flex items-center justify-center h-9 w-9 rounded-full bg-rose-600 text-white hover:bg-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14m0 0l-6-6m6 6l-6 6" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {beautyConsultationMessage && (
+              <div className={`p-3 rounded-xl text-xs ${
+                beautyConsultationMessage.toLowerCase().includes('error') || beautyConsultationMessage.toLowerCase().includes('failed')
+                  ? 'bg-red-500/10 border border-red-500/30 text-red-200'
+                  : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
+              }`}>
+                {beautyConsultationMessage}
+              </div>
+            )}
+
+            {beautyConsultationResult && (
+              <div className="space-y-3 p-3 rounded-xl border border-rose-400/30 bg-slate-950/50">
+                <div className="space-y-2">
+                  <h5 className="text-xs font-bold text-rose-200 uppercase tracking-wider">Professional Advice</h5>
+                  <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
+                    {beautyConsultationResult.advice}
+                  </div>
+                </div>
+
+                {beautyConsultationResult.recommendations.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-slate-800">
+                    <h5 className="text-xs font-bold text-rose-200 uppercase tracking-wider">Recommendations</h5>
+                    <ul className="space-y-1">
+                      {beautyConsultationResult.recommendations.map((rec, idx) => (
+                        <li key={idx} className="text-xs text-slate-300 flex gap-2">
+                          <span className="text-rose-400 font-bold flex-shrink-0">•</span>
+                          <span>{rec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {trySelfie && (
+              <>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Occasion</label>
+                    <select
+                      value={tryOccasion}
+                      onChange={(e) => setTryOccasion(e.target.value)}
+                      className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    >
+                      <option value="wedding">Wedding</option>
+                      <option value="celebration">Celebration</option>
+                      <option value="party">Party/Night Out</option>
+                      <option value="business">Business Event</option>
+                      <option value="casual">Casual Everyday</option>
+                      <option value="barbershop">Barbershop Visit</option>
+                      <option value="photoshoot">Photoshoot</option>
+                      <option value="festival">Festival/Concert</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Makeup Style</label>
+                    <select
+                      value={tryMakeupStyle}
+                      onChange={(e) => setTryMakeupStyle(e.target.value)}
+                      className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                    >
+                      <option value="natural">Natural/Minimal</option>
+                      <option value="bold">Bold/Dramatic</option>
+                      <option value="smokey-eye">Smokey Eye</option>
+                      <option value="glam">Glamorous</option>
+                      <option value="editorial">Editorial/Artistic</option>
+                      <option value="dewy">Dewy/Fresh</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Hairstyle / Haircut</label>
+                  <select
+                    value={tryHairStyle}
+                    onChange={(e) => setTryHairStyle(e.target.value)}
+                    className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                  >
+                    <optgroup label="General Styles">
+                    <option value="wavy">Loose Waves</option>
+                    <option value="sleek">Sleek/Straight</option>
+                    <option value="curly">Curls/Coils</option>
+                    <option value="updo">Updo/Bun</option>
+                    <option value="half-up">Half-Up Half-Down</option>
+                    <option value="braided">Braided</option>
+                    <option value="volume">High-Volume</option>
+                    </optgroup>
+                    <optgroup label="Barbershop Haircuts">
+                    <option value="taper-fade">Taper Fade</option>
+                    <option value="skin-fade">Skin Fade</option>
+                    <option value="buzz-cut">Buzz Cut</option>
+                    <option value="crew-cut">Crew Cut</option>
+                    <option value="textured-crop">Textured Crop</option>
+                    <option value="pompadour">Pompadour</option>
+                    <option value="quiff">Quiff</option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    onClick={handleGetOccasionRecommendations}
+                    disabled={tryLoading}
+                    className="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5h.01" />
+                    </svg>
+                    {tryLoading ? 'Getting...' : 'Get Ideas'}
+                  </button>
+                  <button
+                    onClick={handleGenerateVirtualMakeup}
+                    disabled={tryLoading}
+                    className="px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    {tryLoading ? 'Making...' : 'Try This Look'}
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h5 className="text-xs font-bold text-violet-200 uppercase tracking-wider">360 Hairstyle Preview (Beta)</h5>
+                    <span className="text-[10px] px-2 py-1 rounded-full border border-violet-400/40 bg-violet-500/10 text-violet-200 uppercase tracking-wider font-bold">Phase 1</span>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Length</label>
+                      <select
+                        value={hair360Length}
+                        onChange={(e) => setHair360Length(e.target.value as 'short' | 'medium' | 'long')}
+                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
+                      >
+                        <option value="short">Short</option>
+                        <option value="medium">Medium</option>
+                        <option value="long">Long</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Volume</label>
+                      <select
+                        value={hair360Volume}
+                        onChange={(e) => setHair360Volume(e.target.value as 'low' | 'balanced' | 'high')}
+                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
+                      >
+                        <option value="low">Low</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Fringe</label>
+                      <select
+                        value={hair360Fringe}
+                        onChange={(e) => setHair360Fringe(e.target.value as 'none' | 'curtain' | 'side-swept' | 'full')}
+                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
+                      >
+                        <option value="none">None</option>
+                        <option value="curtain">Curtain</option>
+                        <option value="side-swept">Side-swept</option>
+                        <option value="full">Full</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Texture Finish</label>
+                      <select
+                        value={hair360Texture}
+                        onChange={(e) => setHair360Texture(e.target.value as 'soft' | 'defined' | 'sleek')}
+                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
+                      >
+                        <option value="soft">Soft</option>
+                        <option value="defined">Defined</option>
+                        <option value="sleek">Sleek</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleGenerateHair360Preview}
+                    disabled={hair360Loading || !trySelfie}
+                    className="w-full px-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                  >
+                    {hair360Loading ? 'Generating 360...' : 'Generate 360 Preview'}
+                  </button>
+
+                  {hair360Message && (
+                    <div className={`p-3 rounded-xl text-xs ${
+                      hair360Message.toLowerCase().includes('error') || hair360Message.toLowerCase().includes('failed')
+                        ? 'bg-red-500/10 border border-red-500/30 text-red-200'
+                        : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
+                    }`}>
+                      {hair360Message}
+                    </div>
+                  )}
+
+                  {hair360Previews && hair360Previews.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {(['front', 'left', 'right', 'back'] as Hair360Angle[]).map((angle) => (
+                          <button
+                            key={angle}
+                            onClick={() => setHair360ActiveAngle(angle)}
+                            className={`px-2 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                              hair360ActiveAngle === angle
+                                ? 'bg-violet-500/20 border border-violet-400/50 text-violet-100'
+                                : 'bg-slate-900/70 border border-slate-700 text-slate-300 hover:border-violet-400/40'
+                            }`}
+                          >
+                            {angle}
+                          </button>
+                        ))}
+                      </div>
+
+                      {hair360Previews
+                        .filter((item) => item.angle === hair360ActiveAngle)
+                        .map((item) => (
+                          <div key={item.angle} className="rounded-xl border border-violet-400/30 bg-slate-950/60 p-3 space-y-2">
+                            <div className="text-xs font-bold text-violet-200 uppercase tracking-wider">{item.title}</div>
+                            <div className="text-[10px] text-slate-300 leading-relaxed">{item.summary}</div>
+                            <div className="text-[10px] text-violet-200/90">
+                              <span className="font-semibold text-violet-300">Edit suggestion: </span>
+                              {item.editHint}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
+                {tryMessage && (
+                  <div className={`p-3 rounded-xl text-xs ${
+                    tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed')
+                      ? 'bg-red-500/10 border border-red-500/30 text-red-200'
+                      : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
+                  }`}>
+                    {tryMessage}
+                  </div>
+                )}
+
+                {tryResults && tryResults.length > 0 && (
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {tryResults.map((rec, idx) => (
+                      <div key={idx} className="rounded-xl border border-amber-400/30 bg-slate-950/50 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <h5 className="text-xs font-bold text-amber-200 uppercase tracking-wider">{rec.style}</h5>
+                          {idx === 0 && (
+                            <button
+                              onClick={handleDownloadTryOn}
+                              className="text-[10px] font-bold text-amber-400 hover:text-amber-300 transition-colors"
+                            >
+                              Download
+                            </button>
+                          )}
+                        </div>
+
+                        {rec.makeup && (
+                          <div className="text-[10px] text-slate-300">
+                            <span className="font-semibold text-amber-300">Makeup: </span>
+                            {rec.makeup.substring(0, 150)}{rec.makeup.length > 150 ? '...' : ''}
+                          </div>
+                        )}
+                        {rec.hair && (
+                          <div className="text-[10px] text-slate-300">
+                            <span className="font-semibold text-amber-300">Hair: </span>
+                            {rec.hair}
+                          </div>
+                        )}
+                        {rec.description && (
+                          <details className="text-[10px] text-slate-300 cursor-pointer">
+                            <summary className="font-semibold text-amber-300 hover:text-amber-200">Full Details</summary>
+                            <div className="mt-2 whitespace-pre-wrap text-slate-400">{rec.description}</div>
+                          </details>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Beauty Profile Analysis Section */}
+                <div className="border-t border-slate-700 pt-4 mt-4">
+                  <h4 className="text-xs font-bold text-cyan-300 uppercase tracking-wider mb-3">Beauty Profile Analysis</h4>
+                  
+                  <button
+                    onClick={handleAnalyzeBeautyProfile}
+                    disabled={profileAnalysisLoading || !trySelfie}
+                    className="w-full px-4 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 mb-3"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                    {profileAnalysisLoading ? 'Analyzing...' : 'Analyze My Profile'}
+                  </button>
+
+                  {profileAnalysisMessage && (
+                    <div className={`p-3 rounded-xl text-xs mb-3 ${
+                      profileAnalysisMessage.toLowerCase().includes('error') || profileAnalysisMessage.toLowerCase().includes('failed')
+                        ? 'bg-red-500/10 border border-red-500/30 text-red-200'
+                        : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
+                    }`}>
+                      {profileAnalysisMessage}
+                    </div>
+                  )}
+
+                  {profileAnalysisResult && (
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {/* Skin Tone Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Skin Tone</h5>
+                        <div className="text-[10px] text-slate-300 space-y-1">
+                          <div><span className="font-semibold text-cyan-300">Undertone: </span>{profileAnalysisResult.skinTone.undertone}</div>
+                          <div><span className="font-semibold text-cyan-300">Overtone: </span>{profileAnalysisResult.skinTone.overtone}</div>
+                          <div><span className="font-semibold text-cyan-300">Description: </span>{profileAnalysisResult.skinTone.description}</div>
+                        </div>
+                      </div>
+
+                      {/* Face Shape Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Face Shape</h5>
+                        <div className="text-[10px] text-slate-300 space-y-1">
+                          <div><span className="font-semibold text-cyan-300">Shape: </span>{profileAnalysisResult.faceShape.shape}</div>
+                          <div className="font-semibold text-cyan-300 mb-1">Key Characteristics:</div>
+                          <ul className="list-disc list-inside text-slate-400">
+                            {profileAnalysisResult.faceShape.characteristics.map((char, idx) => (
+                              <li key={idx}>{char}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+
+                      {/* Eyes Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Eyes</h5>
+                        <div className="text-[10px] text-slate-300 space-y-1">
+                          <div><span className="font-semibold text-cyan-300">Color: </span>{profileAnalysisResult.eyes.color}</div>
+                          <div><span className="font-semibold text-cyan-300">Shape: </span>{profileAnalysisResult.eyes.shape}</div>
+                          <div className="font-semibold text-cyan-300 mb-1">Eyeshadow Techniques:</div>
+                          <ul className="list-disc list-inside text-slate-400">
+                            {profileAnalysisResult.eyes.techniques.map((tech, idx) => (
+                              <li key={idx}>{tech}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+
+                      {/* Hair Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Hair</h5>
+                        <div className="text-[10px] text-slate-300 space-y-1">
+                          <div><span className="font-semibold text-cyan-300">Length: </span>{profileAnalysisResult.hair.length}</div>
+                          <div><span className="font-semibold text-cyan-300">Texture: </span>{profileAnalysisResult.hair.texture}</div>
+                          <div><span className="font-semibold text-cyan-300">Color: </span>{profileAnalysisResult.hair.color}</div>
+                          <div><span className="font-semibold text-cyan-300">Condition: </span>{profileAnalysisResult.hair.condition}</div>
+                        </div>
+                      </div>
+
+                      {/* Makeup Recommendation Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Makeup Recommendation</h5>
+                        <div className="text-[10px] text-slate-300 space-y-2">
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Foundation Shades</div>
+                            <ul className="list-disc list-inside text-slate-400">
+                              {profileAnalysisResult.makeupRecommendation.foundationShades.map((shade, idx) => (
+                                <li key={idx}>{shade}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Blush Shades</div>
+                            <ul className="list-disc list-inside text-slate-400">
+                              {profileAnalysisResult.makeupRecommendation.blushShades.map((shade, idx) => (
+                                <li key={idx}>{shade}</li>
+                              ))}
+                            </ul>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Lipstick Shades</div>
+                            <ul className="list-disc list-inside text-slate-400">
+                              {profileAnalysisResult.makeupRecommendation.lipstickShades.map((shade, idx) => (
+                                <li key={idx}>{shade}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Color Theory Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Color Theory</h5>
+                        <ul className="list-disc list-inside text-[10px] text-slate-300 space-y-1">
+                          {profileAnalysisResult.makeupRecommendation.colorTheory.map((note, idx) => (
+                            <li key={idx}>{note}</li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Daily And Glam Looks Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-3">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Daily & Glam Looks</h5>
+                        <div className="text-[10px] text-slate-300 space-y-2">
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1 flex items-center gap-2">
+                              <span>Daily Look</span>
+                              <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-200">Daily</span>
+                            </div>
+                            <ol className="list-decimal list-inside text-slate-400 space-y-1">
+                              {profileAnalysisResult.makeupRecommendation.dailyLook.map((step, idx) => (
+                                <li key={idx}>{step}</li>
+                              ))}
+                            </ol>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1 flex items-center gap-2">
+                              <span>Glam Look</span>
+                              <span className="inline-flex items-center rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-fuchsia-200">Glam</span>
+                            </div>
+                            <ol className="list-decimal list-inside text-slate-400 space-y-1">
+                              {profileAnalysisResult.makeupRecommendation.glamLook.map((step, idx) => (
+                                <li key={idx}>{step}</li>
+                              ))}
+                            </ol>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Hair Transformation Card */}
+                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-3">
+                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Hair Transformation</h5>
+                        <div className="space-y-2 text-[10px] text-slate-300">
+                          <div className="font-semibold text-cyan-300">Recommended Hairstyles</div>
+                          {profileAnalysisResult.hairTransformation.styles.map((style, idx) => (
+                            <div key={idx} className="rounded-lg border border-cyan-500/20 p-2 bg-slate-900/60 space-y-1">
+                              <div className="font-semibold text-cyan-200">{style.name}</div>
+                              <div><span className="font-semibold text-cyan-300">Why it works: </span>{style.whyItWorks}</div>
+                              <div>
+                                <span className="font-semibold text-cyan-300">Salon cut language: </span>
+                                <span>{style.cutDescription}</span>
+                                <span className="ml-2 inline-flex items-center rounded-full border border-amber-400/40 bg-amber-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-200">Stylist Script</span>
+                              </div>
+                            </div>
+                          ))}
+
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Undertone-Complementary Hair Colors</div>
+                            <ul className="list-disc list-inside text-slate-400">
+                              {profileAnalysisResult.hairTransformation.colorSuggestions.map((item, idx) => (
+                                <li key={idx}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+
+                          <div>
+                            <div className="font-semibold text-cyan-300 mb-1">Highlight Ideas</div>
+                            <ul className="list-disc list-inside text-slate-400">
+                              {profileAnalysisResult.hairTransformation.highlightSuggestions.map((item, idx) => (
+                                <li key={idx}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Safety Note Card */}
+                      <div className="rounded-xl border border-amber-400/30 bg-amber-500/5 p-3 space-y-1">
+                        <h5 className="text-xs font-bold text-amber-200 uppercase tracking-wider">Stylist Note</h5>
+                        <div className="text-[10px] text-amber-100/90">{profileAnalysisResult.safety.disclaimer}</div>
+                        <div className="text-[10px] text-amber-100/90">{profileAnalysisResult.safety.dermatologistNote}</div>
+                      </div>
+
+                      {/* Recommendations Card */}
+                      {profileAnalysisResult.recommendations && profileAnalysisResult.recommendations.length > 0 && (
+                        <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
+                          <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Personalized Recommendations</h5>
+                          <ul className="list-disc list-inside text-[10px] text-slate-300 space-y-1">
+                            {profileAnalysisResult.recommendations.map((rec, idx) => (
+                              <li key={idx}>{rec}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => {
+                    setTrySelfie(null);
+                    setTryAfterImage(null);
+                    setTryResults(null);
+                    setTryMessage(null);
+                    setHair360Previews(null);
+                    setHair360Message(null);
+                  }}
+                  className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-400 hover:text-slate-300 transition-colors border border-slate-700 hover:border-slate-600"
+                >
+                  Clear & Upload New Photo
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div id="colorizer-panel" className="w-full" />
+
+        {activeWorkspaceTab === 'colorizer' && !selectedImage && !result && (
           <div className="w-full text-center space-y-6">
             <div className="space-y-2">
               <h2 className="text-3xl sm:text-4xl md:text-5xl leading-tight font-black tracking-tight text-white">
@@ -1331,7 +2615,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {selectedImage && !result && (
+        {activeWorkspaceTab === 'colorizer' && selectedImage && !result && (
           <div className="w-full flex flex-col items-center gap-6 animate-in slide-in-from-bottom-4 duration-500">
             <div className="relative w-full max-w-lg rounded-3xl overflow-hidden border border-slate-800 shadow-2xl group bg-slate-900">
               <img
@@ -1396,7 +2680,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {result && (
+        {activeWorkspaceTab === 'colorizer' && result && (
           <div className="w-full flex flex-col items-center gap-8 animate-in fade-in zoom-in-95 duration-700">
             <ComparisonView
               original={result.original}

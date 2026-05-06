@@ -525,6 +525,125 @@ export const confirmPasswordReset = async (payload: { resetToken: string; newPas
   }
 };
 
+export const consultBeautyAdvisor = async (
+  selfieBase64: string,
+  consultationNotes: string,
+  selectedService: string
+): Promise<{ advice: string; recommendations: string[] }> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.CONSULT_BEAUTY_ADVISOR, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({
+      selfie: selfieBase64,
+      notes: consultationNotes,
+      service: selectedService,
+    }),
+  }, 120000);
+
+  if (!response.ok) {
+    console.error(`Beauty consultant error (${response.status})`);
+    throw new Error('Beauty advisor consultation failed');
+  }
+  const result = await parseJsonResponse(response);
+  return result;
+};
+
+export const generateVirtualMakeup = async (
+  selfieBase64: string,
+  makeupStyle: string,
+  hairStyle: string,
+  occasion: string
+): Promise<{ editedImage: string; description: string }> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.GENERATE_VIRTUAL_MAKEUP, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({
+      selfie: selfieBase64,
+      makeupStyle,
+      hairStyle,
+      occasion,
+    }),
+  }, 120000);
+
+  if (!response.ok) {
+    console.error(`Virtual makeup generation error (${response.status})`);
+    throw new Error('Virtual makeup generation failed');
+  }
+  const result = await parseJsonResponse(response);
+  return result;
+};
+
+export const recommendOccasionLook = async (
+  selfieBase64: string,
+  occasion: string
+): Promise<{ recommendations: Array<{ style: string; makeup: string; hair: string; description: string }> }> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.RECOMMEND_OCCASION_LOOK, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({
+      selfie: selfieBase64,
+      occasion,
+    }),
+  }, 120000);
+
+  if (!response.ok) {
+    console.error(`Occasion recommendation error (${response.status})`);
+    throw new Error('Occasion recommendation failed');
+  }
+  const result = await parseJsonResponse(response);
+  return result;
+};
+
+export const analyzeBeautyProfile = async (
+  selfieBase64: string
+): Promise<BeautyProfileAnalysis> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.ANALYZE_BEAUTY_PROFILE, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({ selfie: selfieBase64 }),
+  }, 120000);
+
+  if (!response.ok) {
+    console.error(`Beauty profile analysis error (${response.status})`);
+    throw new Error('Beauty profile analysis failed');
+  }
+  const result = await parseJsonResponse(response);
+  return result;
+};
+
+export type BeautyProfileAnalysis = {
+  skinTone: { undertone: string; overtone: string; description: string };
+  faceShape: { shape: string; characteristics: string[] };
+  eyes: { color: string; shape: string; techniques: string[] };
+  hair: { length: string; texture: string; color: string; condition: string };
+  makeupRecommendation: {
+    foundationShades: string[];
+    blushShades: string[];
+    lipstickShades: string[];
+    colorTheory: string[];
+    dailyLook: string[];
+    glamLook: string[];
+  };
+  hairTransformation: {
+    styles: Array<{
+      name: string;
+      whyItWorks: string;
+      cutDescription: string;
+    }>;
+    colorSuggestions: string[];
+    highlightSuggestions: string[];
+  };
+  safety: {
+    disclaimer: string;
+    dermatologistNote: string;
+  };
+  recommendations: string[];
+};
+
 export const topUpTokens = async (tokens: number): Promise<SubscriptionAccount> => {
   const response = await fetch(API_ENDPOINTS.SUBSCRIPTION_TOPUP, {
     method: 'POST',

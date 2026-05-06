@@ -42,6 +42,30 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || '0.0.0.0';
 
+const parseTrustProxySetting = (value: string): boolean | number | string | string[] => {
+    const normalized = value.trim();
+    if (!normalized) return false;
+    if (/^(true|yes|on)$/i.test(normalized)) return true;
+    if (/^(false|no|off)$/i.test(normalized)) return false;
+    if (/^\d+$/.test(normalized)) return Number(normalized);
+    if (normalized.includes(',')) {
+        return normalized
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+    }
+    return normalized;
+};
+
+// Required for accurate req.ip behind proxies/load balancers (used by express-rate-limit).
+// Configure TRUST_PROXY explicitly in env; default to 1 in production.
+const configuredTrustProxy = process.env.TRUST_PROXY;
+if (typeof configuredTrustProxy === 'string' && configuredTrustProxy.trim().length > 0) {
+    app.set('trust proxy', parseTrustProxySetting(configuredTrustProxy));
+} else if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+}
+
 type SubscriptionTier = 'free' | 'pro' | 'enterprise';
 
 type PlanConfig = {
@@ -116,6 +140,10 @@ const ACTION_TOKEN_COST: Record<string, number> = {
     vibrancy: 2,
     sharpen: 2,
     animate_start: 20,
+    beauty_consult: 3,
+    virtual_makeup: 5,
+    occasion_recommend: 3,
+    beauty_profile_analysis: 2,
 };
 
 const BILLING_HEADER = 'x-user-id';
@@ -129,11 +157,8 @@ const AUTH_COOKIE_SAME_SITE = (process.env.AUTH_COOKIE_SAME_SITE || (isProductio
 
 const JWT_SECRET = process.env.JWT_SECRET || (!isProduction ? process.env.ADMIN_API_KEY || 'dev-only-secret-change-me' : '');
 
-// Defer JWT_SECRET validation to first use instead of blocking startup
-// This allows the container to start even if secrets aren't fully configured yet
-// The actual error will occur when a user tries to authenticate
 if (isProduction && !JWT_SECRET) {
-    console.warn('⚠️ WARNING: JWT_SECRET is not configured in production. Authentication will fail until this is set.');
+    throw new Error('JWT_SECRET must be configured in production');
 }
 
 const isPlaceholderLikeSecret = (value: string) => {
@@ -173,35 +198,8 @@ const validateProductionSecret = (name: string, value: string | undefined, minLe
 };
 
 if (isProduction) {
-    // Defer validation for secrets - they should be present via Cloud Run secret injection
-    // Check them when the server is about to listen, not at module load time
-    const missingSecrets: string[] = [];
-    if (!process.env.JWT_SECRET) missingSecrets.push('JWT_SECRET');
-    if (!process.env.ADMIN_API_KEY) missingSecrets.push('ADMIN_API_KEY');
-
-    if (missingSecrets.length > 0) {
-        console.error('❌ ERROR: Production environment has missing required secrets:', missingSecrets.join(', '));
-        console.error('These will need to be set via Cloud Run Secret Manager before the server can handle authentication requests.');
-    } else {
-        // All secrets are present, now validate them
-        try {
-            validateProductionSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
-            validateProductionSecret('ADMIN_API_KEY', process.env.ADMIN_API_KEY, 24);
-
-            if (looksLikeGoogleApiKey(process.env.JWT_SECRET || '')) {
-                throw new Error('JWT_SECRET cannot be a Google API key in production');
-            }
-
-            if (looksLikeGoogleApiKey(process.env.ADMIN_API_KEY || '')) {
-                throw new Error('ADMIN_API_KEY cannot be a Google API key in production');
-            }
-
-            console.log('✅ All production secrets validated successfully');
-        } catch (error: any) {
-            console.error('❌ ERROR: Secret validation failed:', error.message);
-            throw error;
-        }
-    }
+    validateProductionSecret('JWT_SECRET', process.env.JWT_SECRET, 32);
+    validateProductionSecret('ADMIN_API_KEY', process.env.ADMIN_API_KEY, 24);
 
     const adminUiToggleEnabled = process.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true'
         || process.env.VITE_ENABLE_ADMIN_PAGE === 'true'
@@ -209,6 +207,14 @@ if (isProduction) {
 
     if (adminUiToggleEnabled) {
         throw new Error('Admin UI toggle env vars are not allowed in production');
+    }
+
+    if (looksLikeGoogleApiKey(process.env.JWT_SECRET || '')) {
+        throw new Error('JWT_SECRET cannot be a Google API key in production');
+    }
+
+    if (looksLikeGoogleApiKey(process.env.ADMIN_API_KEY || '')) {
+        throw new Error('ADMIN_API_KEY cannot be a Google API key in production');
     }
 }
 
@@ -509,12 +515,7 @@ const validatePasswordStrength = (password: string) => {
     return null;
 };
 
-const signAuthToken = (username: string) => {
-    if (!JWT_SECRET) {
-        throw new Error('JWT_SECRET is not configured. Cannot create authentication tokens.');
-    }
-    return jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: AUTH_TOKEN_LIFETIME });
-};
+const signAuthToken = (username: string) => jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: AUTH_TOKEN_LIFETIME });
 
 const setAuthCookie = (res: express.Response, token: string) => {
     res.cookie(AUTH_COOKIE_NAME, token, {
@@ -561,11 +562,6 @@ const attachAuthUser = (req: express.Request, _res: express.Response, next: expr
     if (!token) return next();
 
     try {
-        if (!JWT_SECRET) {
-            // JWT_SECRET not configured - skip token verification for now
-            console.error('JWT_SECRET not configured, skipping authentication');
-            return next();
-        }
         const decoded = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
         const username = String(decoded.sub || '').trim();
         if (username) {
@@ -2257,6 +2253,370 @@ app.post('/api/process/vibrancy', requireBilling('vibrancy'), async (req, res) =
     } catch (error: any) {
         console.error('Vibrancy enhancement failed:', error);
         res.status(500).json({ error: error.message || 'Vibrancy failed' });
+    }
+});
+
+app.post('/api/consult/beauty-advisor', requireBilling('beauty_consult'), async (req, res) => {
+    try {
+        const { selfie, notes, service } = req.body;
+        if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+        if (!notes) return res.status(400).json({ error: 'Consultation notes required' });
+        if (!service) return res.status(400).json({ error: 'Service selection required' });
+
+        const hasPrefix = typeof selfie === 'string' && selfie.includes(',');
+        const base64Data = hasPrefix ? selfie.split(',')[1] : selfie;
+        const mimeType = hasPrefix
+            ? selfie.split(';')[0].split(':')[1] || 'image/jpeg'
+            : 'image/jpeg';
+
+        const ai = createAI();
+
+        const serviceDescriptions: Record<string, string> = {
+            'bridal-glam': 'Bridal Glam - Premium full-face glam workflow for bridal clients',
+            'soft-day': 'Soft Day Look - Natural finish with skin-tone preserving enhancement',
+            'editorial': 'Editorial Style - High-contrast, runway-inspired beauty direction',
+        };
+
+        const serviceDesc = serviceDescriptions[service as string] || service;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                parts: [
+                    {
+                        text: `You are a professional makeup artist and salon consultant. Analyze this client selfie and provide expert, salon-ready beauty advice.\n\nService requested: ${serviceDesc}\n\nClient consultation notes: ${notes}\n\nBased on the client\'s facial features, skin tone, and their consultation notes, provide:\n1. A brief professional analysis of their current complexion and features\n2. 3-5 specific product recommendations (with price range if applicable)\n3. Step-by-step application techniques tailored to their face shape and features\n4. Timing and maintenance tips\n5. Alternative looks within the same service category\n\nBe specific, professional, and actionable. Use proper makeup artist terminology.`
+                    },
+                    {
+                        inlineData: { data: base64Data, mimeType }
+                    }
+                ]
+            }],
+        });
+
+        const adviceText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        if (!adviceText) {
+            return res.status(500).json({ error: 'Failed to generate beauty advice' });
+        }
+
+        const recommendations = extractRecommendations(adviceText);
+
+        res.json({
+            advice: adviceText,
+            recommendations: recommendations,
+        });
+    } catch (error: any) {
+        console.error('Beauty consultant failed:', error);
+        res.status(500).json({ error: error.message || 'Beauty consultant failed' });
+    }
+});
+
+const extractRecommendations = (text: string): string[] => {
+    const recommendations: string[] = [];
+    const lines = (text || '').split('\n');
+    let inRecommendationsSection = false;
+
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.toLowerCase().includes('product recommendation')) {
+            inRecommendationsSection = true;
+            continue;
+        }
+        if (inRecommendationsSection && trimmed.match(/^\d+\.|^[-*]/)) {
+            const cleaned = trimmed.replace(/^[\d]+\.\s*|^[-*]\s*/, '').trim();
+            if (cleaned) recommendations.push(cleaned);
+        }
+        if (inRecommendationsSection && trimmed === '') {
+            inRecommendationsSection = false;
+        }
+    }
+
+    return recommendations.slice(0, 5);
+};
+
+app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async (req, res) => {
+    try {
+        const { selfie, makeupStyle, hairStyle, occasion } = req.body;
+        if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+        if (!makeupStyle) return res.status(400).json({ error: 'Makeup style required' });
+
+        const hasPrefix = typeof selfie === 'string' && selfie.includes(',');
+        const base64Data = hasPrefix ? selfie.split(',')[1] : selfie;
+        const mimeType = hasPrefix
+            ? selfie.split(';')[0].split(':')[1] || 'image/jpeg'
+            : 'image/jpeg';
+
+        const ai = createAI();
+
+        const prompt = `You are a professional makeup artist and hairstylist AI. Using your expertise, provide a detailed visual description of how this person would look with:\n\nMakeup Style: ${makeupStyle}\nHairstyle: ${hairStyle || 'Natural/Current'}\nOccasion: ${occasion || 'Everyday'}\n\nProvide:\n1. A vivid description of the makeup application (colors, placement, intensity)\n2. Description of the hairstyle changes (texture, volume, color, styling)\n3. Overall look assessment and how it suits their facial features\n4. Specific product recommendations\n5. Application tips for achieving this look\n\nBe detailed and specific, as if describing a before/after makeover.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [
+                {
+                    parts: [
+                        { text: prompt },
+                        { inlineData: { data: base64Data, mimeType } }
+                    ]
+                }
+            ],
+        });
+
+        const description = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        if (!description) {
+            return res.status(500).json({ error: 'Failed to generate virtual makeup description' });
+        }
+
+        res.json({
+            editedImage: selfie,
+            description: description,
+        });
+    } catch (error: any) {
+        console.error('Virtual makeup generation failed:', error);
+        res.status(500).json({ error: error.message || 'Virtual makeup generation failed' });
+    }
+});
+
+app.post('/api/recommend/occasion-look', requireBilling('occasion_recommend'), async (req, res) => {
+    try {
+        const { selfie, occasion } = req.body;
+        if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+        if (!occasion) return res.status(400).json({ error: 'Occasion required' });
+
+        const hasPrefix = typeof selfie === 'string' && selfie.includes(',');
+        const base64Data = hasPrefix ? selfie.split(',')[1] : selfie;
+        const mimeType = hasPrefix
+            ? selfie.split(';')[0].split(':')[1] || 'image/jpeg'
+            : 'image/jpeg';
+
+        const ai = createAI();
+
+        const prompt = `You are an expert makeup artist and stylist specializing in occasion-specific looks. Analyze this person and recommend 3 distinct makeup and hairstyle combinations perfect for: ${occasion}\n\nFor each recommendation, provide:\n1. Style Name (e.g., "Classic Elegance", "Modern Bold", "Romantic")\n2. Makeup Description: Detailed breakdown of colors, techniques, and intensity\n3. Hair Description: Style, texture, color (temporary or permanent), volume\n4. Why it works: How this specifically complements their features and the occasion\n5. Tips: Application techniques and product suggestions\n\nFormat your response as 3 distinct recommendations separated by clear dividers.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [
+                {
+                    parts: [
+                        { text: prompt },
+                        { inlineData: { data: base64Data, mimeType } }
+                    ]
+                }
+            ],
+        });
+
+        const fullText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        if (!fullText) {
+            return res.status(500).json({ error: 'Failed to generate recommendations' });
+        }
+
+        const recommendations = parseOccasionRecommendations(fullText);
+
+        res.json({
+            recommendations: recommendations,
+        });
+    } catch (error: any) {
+        console.error('Occasion recommendation failed:', error);
+        res.status(500).json({ error: error.message || 'Occasion recommendation failed' });
+    }
+});
+
+const parseOccasionRecommendations = (text: string): Array<{ style: string; makeup: string; hair: string; description: string }> => {
+    const recommendations: Array<{ style: string; makeup: string; hair: string; description: string }> = [];
+    const sections = text.split(/(?:---+|###|==+|\\n\\n\n)/);
+
+    for (let i = 0; i < Math.min(sections.length, 4); i++) {
+        const section = sections[i].trim();
+        if (!section) continue;
+
+        const lines = section.split('\\n').map((l: string) => l.trim());
+        let styleName = '';
+        let makeup = '';
+        let hair = '';
+        let description = '';
+
+        for (const line of lines) {
+            if (line.match(/^(Style Name|Name|Look):/i)) {
+                styleName = line.replace(/^(Style Name|Name|Look):\s*/i, '');
+            } else if (line.match(/^(Makeup|Makeup Description):/i)) {
+                makeup = line.replace(/^(Makeup|Makeup Description):\s*/i, '');
+            } else if (line.match(/^(Hair|Hairstyle|Hair Description):/i)) {
+                hair = line.replace(/^(Hair|Hairstyle|Hair Description):\s*/i, '');
+            } else if (line.match(/^(Why|Tips|Description|Why it works):/i)) {
+                description += (description ? ' ' : '') + line.replace(/^(Why|Tips|Description|Why it works):\s*/i, '');
+            }
+        }
+
+        if (styleName && makeup) {
+            recommendations.push({
+                style: styleName,
+                makeup: makeup,
+                hair: hair || 'Natural/Current style',
+                description: description || 'Occasion-specific styling',
+            });
+        }
+    }
+
+    return recommendations.slice(0, 3);
+};
+
+app.post('/api/analyze/beauty-profile', requireBilling('beauty_profile_analysis'), async (req, res) => {
+    try {
+        const { selfie } = req.body;
+        if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+
+        const hasPrefix = typeof selfie === 'string' && selfie.includes(',');
+        const base64Data = hasPrefix ? selfie.split(',')[1] : selfie;
+        const mimeType = hasPrefix
+            ? selfie.split(';')[0].split(':')[1] || 'image/jpeg'
+            : 'image/jpeg';
+
+        const ai = createAI();
+
+                const analysisPrompt = `You are a professional makeup artist, colorist, and beauty consultant with an encouraging, polished, glamorous tone. Analyze this person's features and provide ONLY valid JSON output (no markdown, no additional text). Do not provide medical advice for acne, rashes, or skin disorders; instead refer those concerns to a dermatologist. Use this exact structure:
+
+{
+  "skinTone": {
+    "undertone": "Cool|Warm|Neutral",
+    "overtone": "Fair|Light|Medium|Olive|Deep|Tan",
+    "description": "Brief description of their skin tone characteristics"
+  },
+  "faceShape": {
+    "shape": "Oval|Round|Square|Heart|Diamond|Oblong|Pear",
+    "characteristics": ["characteristic1", "characteristic2", "characteristic3"]
+  },
+  "eyes": {
+    "color": "Brown|Blue|Green|Hazel|Gray|Amber",
+    "shape": "Almond|Round|Hooded|Monolid|Downturned|Upturned",
+    "techniques": ["technique1 for this eye shape", "technique2", "technique3"]
+  },
+  "hair": {
+    "length": "Short|Medium|Long|Very Long",
+    "texture": "Straight|Wavy|Curly|Coily|Kinky",
+    "color": "Black|Dark Brown|Brown|Light Brown|Blonde|Red|Gray|Other",
+    "condition": "Brief assessment of hair health"
+  },
+    "makeupRecommendation": {
+        "foundationShades": ["specific shade family 1", "specific shade family 2", "specific shade family 3"],
+        "blushShades": ["specific blush shade 1", "specific blush shade 2", "specific blush shade 3"],
+        "lipstickShades": ["specific lipstick shade 1", "specific lipstick shade 2", "specific lipstick shade 3"],
+        "colorTheory": ["short color-theory explanation 1", "short color-theory explanation 2", "short color-theory explanation 3"],
+        "dailyLook": ["daily step 1", "daily step 2", "daily step 3", "daily step 4"],
+        "glamLook": ["glam step 1", "glam step 2", "glam step 3", "glam step 4", "glam step 5"]
+    },
+    "hairTransformation": {
+        "styles": [
+            {
+                "name": "style name",
+                "whyItWorks": "why it flatters this face shape",
+                "cutDescription": "professional salon terminology the user can tell their stylist"
+            },
+            {
+                "name": "style name",
+                "whyItWorks": "why it flatters this face shape",
+                "cutDescription": "professional salon terminology the user can tell their stylist"
+            },
+            {
+                "name": "style name",
+                "whyItWorks": "why it flatters this face shape",
+                "cutDescription": "professional salon terminology the user can tell their stylist"
+            }
+        ],
+        "colorSuggestions": ["undertone-complementary hair color 1", "undertone-complementary hair color 2", "undertone-complementary hair color 3"],
+        "highlightSuggestions": ["highlight idea 1", "highlight idea 2", "highlight idea 3"]
+    },
+    "safety": {
+        "disclaimer": "AI photo lighting can vary. Consult a professional stylist for final in-person color matching.",
+        "dermatologistNote": "For acne, irritation, rashes, or other skin concerns, consult a licensed dermatologist."
+    },
+  "recommendations": ["recommendation1", "recommendation2", "recommendation3", "recommendation4"]
+}
+
+Return ONLY the JSON object, nothing else.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                parts: [
+                    { text: analysisPrompt },
+                    { inlineData: { data: base64Data, mimeType } }
+                ]
+            }],
+        });
+
+        let analysisText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        if (!analysisText) {
+            return res.status(500).json({ error: 'Failed to analyze beauty profile' });
+        }
+
+        // Clean up the response - remove markdown code blocks if present
+        analysisText = analysisText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+        let analysis;
+        try {
+            analysis = JSON.parse(analysisText);
+        } catch (parseError) {
+            console.error('Failed to parse analysis JSON:', analysisText);
+            return res.status(500).json({ error: 'Invalid analysis format received' });
+        }
+
+        // Validate the structure
+        if (!analysis.skinTone || !analysis.faceShape || !analysis.eyes || !analysis.hair) {
+            return res.status(500).json({ error: 'Incomplete analysis results' });
+        }
+
+        const makeupRecommendation = {
+            foundationShades: Array.isArray(analysis.makeupRecommendation?.foundationShades)
+                ? analysis.makeupRecommendation.foundationShades
+                : [],
+            blushShades: Array.isArray(analysis.makeupRecommendation?.blushShades)
+                ? analysis.makeupRecommendation.blushShades
+                : [],
+            lipstickShades: Array.isArray(analysis.makeupRecommendation?.lipstickShades)
+                ? analysis.makeupRecommendation.lipstickShades
+                : [],
+            colorTheory: Array.isArray(analysis.makeupRecommendation?.colorTheory)
+                ? analysis.makeupRecommendation.colorTheory
+                : [],
+            dailyLook: Array.isArray(analysis.makeupRecommendation?.dailyLook)
+                ? analysis.makeupRecommendation.dailyLook
+                : [],
+            glamLook: Array.isArray(analysis.makeupRecommendation?.glamLook)
+                ? analysis.makeupRecommendation.glamLook
+                : [],
+        };
+
+        const hairTransformation = {
+            styles: Array.isArray(analysis.hairTransformation?.styles)
+                ? analysis.hairTransformation.styles.slice(0, 3).map((style: any) => ({
+                    name: style?.name || 'Recommended style',
+                    whyItWorks: style?.whyItWorks || 'Selected to complement your face shape.',
+                    cutDescription: style?.cutDescription || 'Ask your stylist for a customized cut adjusted to your bone structure.',
+                }))
+                : [],
+            colorSuggestions: Array.isArray(analysis.hairTransformation?.colorSuggestions)
+                ? analysis.hairTransformation.colorSuggestions
+                : [],
+            highlightSuggestions: Array.isArray(analysis.hairTransformation?.highlightSuggestions)
+                ? analysis.hairTransformation.highlightSuggestions
+                : [],
+        };
+
+        res.json({
+            skinTone: analysis.skinTone,
+            faceShape: analysis.faceShape,
+            eyes: analysis.eyes,
+            hair: analysis.hair,
+            makeupRecommendation,
+            hairTransformation,
+            safety: {
+                disclaimer: analysis.safety?.disclaimer || 'AI photo lighting can vary. Consult a professional stylist for final in-person color matching.',
+                dermatologistNote: analysis.safety?.dermatologistNote || 'For acne, irritation, rashes, or other skin concerns, consult a licensed dermatologist.',
+            },
+            recommendations: Array.isArray(analysis.recommendations) ? analysis.recommendations : [],
+        });
+    } catch (error: any) {
+        console.error('Beauty profile analysis failed:', error);
+        res.status(500).json({ error: error.message || 'Beauty profile analysis failed' });
     }
 });
 

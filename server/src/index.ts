@@ -772,17 +772,23 @@ type AnimationJob = {
 
 const animationJobs = new Map<string, AnimationJob>();
 
+const normalizeOrigin = (origin: string) => origin.trim().toLowerCase().replace(/\/$/, '');
+
 const configuredCorsOrigins = (process.env.CORS_ORIGINS || '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => normalizeOrigin(origin))
     .filter(Boolean);
 
 const canonicalWebOrigins = [
     'https://chromasnap.app',
     'https://www.chromasnap.app',
+    'http://localhost',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
     'https://localhost',       // Capacitor Android WebView (androidScheme: 'https')
+    'https://localhost:5173',
     'capacitor://localhost',   // Capacitor alternate scheme
-];
+].map((origin) => normalizeOrigin(origin));
 
 const corsOptions: cors.CorsOptions = {
     origin: (origin, callback) => {
@@ -791,12 +797,14 @@ const corsOptions: cors.CorsOptions = {
             return;
         }
 
-        if (canonicalWebOrigins.includes(origin)) {
+        const normalizedOrigin = normalizeOrigin(origin);
+
+        if (canonicalWebOrigins.includes(normalizedOrigin)) {
             callback(null, true);
             return;
         }
 
-        if (configuredCorsOrigins.includes(origin)) {
+        if (configuredCorsOrigins.includes(normalizedOrigin)) {
             callback(null, true);
             return;
         }
@@ -872,6 +880,12 @@ app.use(
     })
 );
 app.use(cors(corsOptions));
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err?.message === 'Not allowed by CORS') {
+        return res.status(403).json({ error: 'Origin not allowed by CORS policy' });
+    }
+    return next(err);
+});
 app.use(express.json({ limit: '20mb' }));
 
 app.use((req, res, next) => {

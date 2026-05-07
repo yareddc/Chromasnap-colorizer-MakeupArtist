@@ -114,6 +114,7 @@ type BeautyServiceId = (typeof BEAUTY_SERVICES)[number]['id'];
 
 const App: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [uploadPreviewZoom, setUploadPreviewZoom] = useState<number>(1);
   const [selectedTheme, setSelectedTheme] = useState<string>('Natural');
   const [result, setResult] = useState<ColorizedImage | null>(null);
   const [history, setHistory] = useState<ColorizedImage[]>([]);
@@ -186,6 +187,8 @@ const App: React.FC = () => {
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const uploadPreviewRef = useRef<HTMLDivElement | null>(null);
+  const pinchZoomStateRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
   const isDeveloperMode = import.meta.env.DEV || import.meta.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true';
 
@@ -590,6 +593,7 @@ const App: React.FC = () => {
 
   const handleImageSelected = (base64: string) => {
     setSelectedImage(base64);
+    setUploadPreviewZoom(1);
     setResult(null);
     setVideoResult(null);
     setProcessing(prev => ({ ...prev, error: undefined }));
@@ -608,6 +612,48 @@ const App: React.FC = () => {
 
   const handleSampleImage = () => {
     handleImageSelected(SAMPLE_IMAGE_DATA_URL);
+  };
+
+  const clampUploadZoom = (value: number) => Math.min(3, Math.max(0.5, Number(value.toFixed(2))));
+
+  const applyUploadZoom = (nextZoom: number) => {
+    setUploadPreviewZoom(clampUploadZoom(nextZoom));
+  };
+
+  const getTouchDistance = (touches: React.TouchList) => {
+    if (touches.length < 2) return 0;
+    const a = touches[0];
+    const b = touches[1];
+    return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+  };
+
+  const handlePreviewWheelZoom = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const zoomStep = event.deltaY < 0 ? 0.1 : -0.1;
+    applyUploadZoom(uploadPreviewZoom + zoomStep);
+  };
+
+  const handlePreviewTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 2) return;
+    pinchZoomStateRef.current = {
+      startDistance: getTouchDistance(event.touches),
+      startZoom: uploadPreviewZoom,
+    };
+  };
+
+  const handlePreviewTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 2 || !pinchZoomStateRef.current) return;
+    event.preventDefault();
+    const currentDistance = getTouchDistance(event.touches);
+    if (!currentDistance || !pinchZoomStateRef.current.startDistance) return;
+    const scale = currentDistance / pinchZoomStateRef.current.startDistance;
+    applyUploadZoom(pinchZoomStateRef.current.startZoom * scale);
+  };
+
+  const handlePreviewTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length < 2) {
+      pinchZoomStateRef.current = null;
+    }
   };
 
   const handleColorize = async () => {
@@ -753,6 +799,7 @@ const App: React.FC = () => {
 
   const reset = () => {
     setSelectedImage(null);
+    setUploadPreviewZoom(1);
     setSelectedTheme('Natural');
     setResult(null);
     setVideoResult(null);
@@ -2359,11 +2406,25 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'colorizer' && selectedImage && !result && (
           <div className="w-full flex flex-col items-center gap-6 animate-in slide-in-from-bottom-4 duration-500">
             <div className="relative w-full max-w-lg rounded-3xl overflow-hidden border border-slate-800 shadow-2xl group bg-slate-900">
-              <img
-                src={selectedImage}
-                alt="Preview"
-                className="w-full h-auto block"
-              />
+              <div
+                ref={uploadPreviewRef}
+                className="max-h-[70vh] overflow-auto bg-slate-950/40"
+                style={{ touchAction: 'none' }}
+                onWheel={handlePreviewWheelZoom}
+                onTouchStart={handlePreviewTouchStart}
+                onTouchMove={handlePreviewTouchMove}
+                onTouchEnd={handlePreviewTouchEnd}
+              >
+                <img
+                  src={selectedImage}
+                  alt="Preview"
+                  className="block h-auto"
+                  style={{
+                    width: `${uploadPreviewZoom * 100}%`,
+                    minWidth: '100%',
+                  }}
+                />
+              </div>
               <button
                 onClick={reset}
                 className="absolute top-4 right-4 p-2 bg-slate-900/80 backdrop-blur-md rounded-full text-white hover:bg-red-500 transition-colors shadow-lg z-10"
@@ -2372,6 +2433,33 @@ const App: React.FC = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
+            </div>
+
+            <div className="w-full max-w-lg flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-400">Preview zoom: {Math.round(uploadPreviewZoom * 100)}%</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => applyUploadZoom(uploadPreviewZoom - 0.25)}
+                  className="px-3 py-2 min-h-[40px] rounded-lg border border-slate-700 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors"
+                  aria-label="Zoom out uploaded preview"
+                >
+                  -
+                </button>
+                <button
+                  onClick={() => applyUploadZoom(1)}
+                  className="px-3 py-2 min-h-[40px] rounded-lg border border-slate-700 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors"
+                  aria-label="Reset uploaded preview zoom"
+                >
+                  100%
+                </button>
+                <button
+                  onClick={() => applyUploadZoom(uploadPreviewZoom + 0.25)}
+                  className="px-3 py-2 min-h-[40px] rounded-lg border border-slate-700 text-slate-200 hover:border-indigo-400 hover:text-white transition-colors"
+                  aria-label="Zoom in uploaded preview"
+                >
+                  +
+                </button>
+              </div>
             </div>
 
             {/* Minimalist Theme Selector */}

@@ -51,7 +51,7 @@ android {
         applicationId "com.chromasnap.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode ((releaseVersionCode?.isInteger() ? releaseVersionCode.toInteger() : 6))
+        versionCode ((releaseVersionCode?.isInteger() ? releaseVersionCode.toInteger() : 19))
         versionName (releaseVersionName ?: "1.2.1")
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

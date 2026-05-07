@@ -27,35 +27,35 @@ steps:
         set -euo pipefail
         echo "Validating required auth secrets in Secret Manager..."
 
-        JWT_VALUE="$(gcloud secrets versions access latest --secret="$_SECRET_JWT_SECRET" --project="$PROJECT_ID" | tr -d '\r')"
-        ADMIN_VALUE="$(gcloud secrets versions access latest --secret="$_SECRET_ADMIN_API_KEY" --project="$PROJECT_ID" | tr -d '\r')"
+        JWT_VALUE="$$(gcloud secrets versions access latest --secret="$_SECRET_JWT_SECRET" --project="$PROJECT_ID" | tr -d '\r')"
+        ADMIN_VALUE="$$(gcloud secrets versions access latest --secret="$_SECRET_ADMIN_API_KEY" --project="$PROJECT_ID" | tr -d '\r')"
 
-        if [ -z "${JWT_VALUE}" ]; then
+        if [ -z "$${JWT_VALUE}" ]; then
           echo "ERROR: $_SECRET_JWT_SECRET latest version is empty"
           exit 1
         fi
 
-        if [ -z "${ADMIN_VALUE}" ]; then
+        if [ -z "$${ADMIN_VALUE}" ]; then
           echo "ERROR: $_SECRET_ADMIN_API_KEY latest version is empty"
           exit 1
         fi
 
-        if [ ${#JWT_VALUE} -lt 32 ]; then
+        if [ $${#JWT_VALUE} -lt 32 ]; then
           echo "ERROR: $_SECRET_JWT_SECRET must be at least 32 characters"
           exit 1
         fi
 
-        if [ ${#ADMIN_VALUE} -lt 24 ]; then
+        if [ $${#ADMIN_VALUE} -lt 24 ]; then
           echo "ERROR: $_SECRET_ADMIN_API_KEY must be at least 24 characters"
           exit 1
         fi
 
-        if [[ "$JWT_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
+        if [[ "$$JWT_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
           echo "ERROR: $_SECRET_JWT_SECRET cannot be a Google API key"
           exit 1
         fi
 
-        if [[ "$ADMIN_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
+        if [[ "$$ADMIN_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
           echo "ERROR: $_SECRET_ADMIN_API_KEY cannot be a Google API key"
           exit 1
         fi

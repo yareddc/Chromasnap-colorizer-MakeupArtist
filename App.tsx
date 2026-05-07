@@ -183,8 +183,6 @@ const App: React.FC = () => {
   const [profileAnalysisResult, setProfileAnalysisResult] = useState<BeautyProfileAnalysis | null>(null);
   const [profileAnalysisLoading, setProfileAnalysisLoading] = useState(false);
   const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
-  const [guestBeautyAccess, setGuestBeautyAccess] = useState(false);
-  const [guestBeautyMessage, setGuestBeautyMessage] = useState<string | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
@@ -608,147 +606,6 @@ const App: React.FC = () => {
     return `${imageUrl}${separator}cb=${Date.now().toString(36)}`;
   };
 
-  const buildGuestTryOnPreview = async (
-    sourceImage: string,
-    makeupStyle: string,
-    hairStyle: string,
-    occasion: string,
-  ): Promise<string> => {
-    const styleProfile: Record<string, {
-      filter: string;
-      faceTint: string;
-      blendMode: GlobalCompositeOperation;
-      eyeAccent: string;
-      lipAccent: string;
-    }> = {
-      natural: {
-        filter: 'saturate(1.08) contrast(1.02) brightness(1.03)',
-        faceTint: 'rgba(244, 198, 160, 0.12)',
-        blendMode: 'soft-light',
-        eyeAccent: 'rgba(178, 128, 94, 0.1)',
-        lipAccent: 'rgba(198, 120, 107, 0.1)',
-      },
-      bold: {
-        filter: 'saturate(1.38) contrast(1.17) brightness(1.01)',
-        faceTint: 'rgba(214, 66, 126, 0.2)',
-        blendMode: 'overlay',
-        eyeAccent: 'rgba(105, 33, 82, 0.18)',
-        lipAccent: 'rgba(180, 42, 92, 0.18)',
-      },
-      'smokey-eye': {
-        filter: 'saturate(1.08) contrast(1.24) brightness(0.93)',
-        faceTint: 'rgba(88, 92, 136, 0.2)',
-        blendMode: 'multiply',
-        eyeAccent: 'rgba(49, 54, 82, 0.24)',
-        lipAccent: 'rgba(126, 76, 98, 0.14)',
-      },
-      glam: {
-        filter: 'saturate(1.3) contrast(1.18) brightness(1.08)',
-        faceTint: 'rgba(226, 146, 189, 0.2)',
-        blendMode: 'screen',
-        eyeAccent: 'rgba(173, 84, 144, 0.14)',
-        lipAccent: 'rgba(205, 88, 132, 0.2)',
-      },
-      editorial: {
-        filter: 'saturate(1.02) contrast(1.3) brightness(0.98) hue-rotate(-10deg)',
-        faceTint: 'rgba(90, 62, 176, 0.16)',
-        blendMode: 'hard-light',
-        eyeAccent: 'rgba(56, 33, 119, 0.18)',
-        lipAccent: 'rgba(132, 53, 183, 0.14)',
-      },
-      dewy: {
-        filter: 'saturate(1.16) contrast(1.01) brightness(1.12)',
-        faceTint: 'rgba(246, 215, 174, 0.2)',
-        blendMode: 'lighten',
-        eyeAccent: 'rgba(201, 153, 111, 0.08)',
-        lipAccent: 'rgba(226, 152, 133, 0.12)',
-      },
-    };
-
-    const hairByStyle: Record<string, string> = {
-      wavy: 'rgba(138, 103, 74, 0.14)',
-      sleek: 'rgba(80, 68, 60, 0.16)',
-      curly: 'rgba(108, 80, 52, 0.18)',
-      updo: 'rgba(90, 73, 63, 0.16)',
-      braid: 'rgba(112, 85, 60, 0.14)',
-      bob: 'rgba(99, 77, 66, 0.15)',
-      'half-up': 'rgba(118, 93, 70, 0.14)',
-      braided: 'rgba(114, 86, 62, 0.15)',
-      volume: 'rgba(126, 92, 63, 0.16)',
-      'taper-fade': 'rgba(72, 63, 58, 0.18)',
-      'skin-fade': 'rgba(62, 56, 52, 0.2)',
-      'buzz-cut': 'rgba(58, 52, 49, 0.2)',
-      'crew-cut': 'rgba(70, 60, 54, 0.18)',
-      pompadour: 'rgba(86, 68, 56, 0.18)',
-      'textured-crop': 'rgba(78, 64, 56, 0.17)',
-      quiff: 'rgba(92, 73, 59, 0.17)',
-    };
-
-    const occasionPunch: Record<string, number> = {
-      wedding: 1.12,
-      celebration: 1.08,
-      party: 1.14,
-      business: 1.02,
-      casual: 1,
-      photoshoot: 1.16,
-      festival: 1.18,
-      barbershop: 1.06,
-    };
-
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || img.width;
-          canvas.height = img.naturalHeight || img.height;
-          const ctx = canvas.getContext('2d');
-
-          if (!ctx || !canvas.width || !canvas.height) {
-            resolve(sourceImage);
-            return;
-          }
-
-          const profile = styleProfile[makeupStyle] || styleProfile.natural;
-          const punch = occasionPunch[occasion] || 1;
-          ctx.filter = `${profile.filter} saturate(${punch.toFixed(2)})`;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          ctx.filter = 'none';
-
-          ctx.globalCompositeOperation = profile.blendMode;
-          ctx.fillStyle = profile.faceTint;
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-          const eyeGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.38);
-          eyeGradient.addColorStop(0, profile.eyeAccent);
-          eyeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          ctx.fillStyle = eyeGradient;
-          ctx.fillRect(0, 0, canvas.width, canvas.height * 0.38);
-
-          const lipGradient = ctx.createLinearGradient(0, canvas.height * 0.62, 0, canvas.height);
-          lipGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-          lipGradient.addColorStop(1, profile.lipAccent);
-          ctx.fillStyle = lipGradient;
-          ctx.fillRect(0, canvas.height * 0.62, canvas.width, canvas.height * 0.38);
-
-          const hairTint = hairByStyle[hairStyle] || hairByStyle.wavy;
-          const hairGradient = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.45);
-          hairGradient.addColorStop(0, hairTint);
-          hairGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          ctx.fillStyle = hairGradient;
-          ctx.fillRect(0, 0, canvas.width, canvas.height * 0.45);
-
-          ctx.globalCompositeOperation = 'source-over';
-          resolve(canvas.toDataURL('image/jpeg', 0.92));
-        } catch {
-          resolve(sourceImage);
-        }
-      };
-      img.onerror = () => resolve(sourceImage);
-      img.src = sourceImage;
-    });
-  };
-
   const handleSampleImage = () => {
     handleImageSelected(SAMPLE_IMAGE_DATA_URL);
   };
@@ -927,19 +784,63 @@ const App: React.FC = () => {
   };
 
   const handleWorkspaceTabChange = (tab: WorkspaceTab) => {
-    if (guestBeautyAccess && tab === 'colorizer') {
-      setGuestBeautyMessage('Guest mode is temporarily limited to Beauty Lab while production wiring is in progress.');
-      setActiveWorkspaceTab('beauty-lab');
-      window.requestAnimationFrame(() => {
-        document.getElementById('beauty-lab-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-      return;
-    }
     setActiveWorkspaceTab(tab);
     const targetId = tab === 'beauty-lab' ? 'beauty-lab-panel' : 'colorizer-panel';
     window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+  };
+
+  const sleepWithBackoff = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const isRetryableBeautyError = (error: unknown): boolean => {
+    const message = String((error as { message?: string })?.message || '').toLowerCase();
+    if (!message) return false;
+
+    // Avoid retrying auth/validation failures that need user action.
+    if (
+      message.includes('unauthorized') ||
+      message.includes('forbidden') ||
+      message.includes('invalid') ||
+      message.includes('captcha') ||
+      message.includes('session expired')
+    ) {
+      return false;
+    }
+
+    return (
+      message.includes('failed to fetch') ||
+      message.includes('network') ||
+      message.includes('timeout') ||
+      message.includes('abort') ||
+      message.includes('429') ||
+      message.includes('502') ||
+      message.includes('503') ||
+      message.includes('504') ||
+      message.includes('temporar') ||
+      message.includes('unavailable')
+    );
+  };
+
+  const runBeautyActionWithRetry = async <T,>(action: () => Promise<T>, maxAttempts: number = 3): Promise<T> => {
+    const backoffMs = [350, 900];
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await action();
+      } catch (error) {
+        lastError = error;
+        const canRetry = isRetryableBeautyError(error);
+        if (!canRetry || attempt === maxAttempts) {
+          throw error;
+        }
+        const delay = backoffMs[attempt - 1] ?? 1200;
+        await sleepWithBackoff(delay);
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Beauty action failed');
   };
 
   const handleBeautyConsultation = async () => {
@@ -957,29 +858,11 @@ const App: React.FC = () => {
     setBeautyConsultationResult(null);
 
     try {
-      if (guestBeautyAccess) {
-        const normalizedNotes = beautyNotes.trim().replace(/\s+/g, ' ');
-        const notesExcerpt = normalizedNotes.length > 180
-          ? `${normalizedNotes.slice(0, 180)}...`
-          : normalizedNotes;
-        const sampleAdvice = `Absolutely gorgeous base to work with. For a ${beautyService.replace('-', ' ')} direction, keep the complexion luminous, softly sculpt the cheeks, and focus your statement on eyes or lips (not both at full intensity).`;
-        const sampleRecommendations = [
-          'Skin prep: hydrating primer on high points for a lit-from-within finish.',
-          'Eyes: diffuse matte transition shade first, then add shimmer only at center lid.',
-          'Lips: pair neutral liner with a tone-matching lipstick for polished balance.',
-        ];
-        const adviceWithNotes = notesExcerpt
-          ? `${sampleAdvice}\n\nYour notes detected: ${notesExcerpt}\n\nBased on those notes, prioritize longevity and keep layering thin so the look stays clean in photos.`
-          : sampleAdvice;
-        setBeautyConsultationResult({ advice: adviceWithNotes, recommendations: sampleRecommendations });
-        setBeautyConsultationMessage('Guest preview: consultation generated with local demo data.');
-        return;
-      }
-      const result = await consultBeautyAdvisor(
+      const result = await runBeautyActionWithRetry(() => consultBeautyAdvisor(
         trySelfie,
         beautyNotes,
         beautyService
-      );
+      ));
       setBeautyConsultationResult(result);
       setBeautyConsultationMessage('Consultation complete! Review the advice below.');
     } catch (error: any) {
@@ -1013,32 +896,7 @@ const App: React.FC = () => {
     setTryResults(null);
 
     try {
-      if (guestBeautyAccess) {
-        const demoRecs = [
-          {
-            style: 'Soft Radiance',
-            makeup: 'Sheer base, peach cream blush, subtle brown liner, satin nude lip.',
-            hair: 'Loose polished waves with face-framing movement',
-            description: `Great for ${tryOccasion}: balanced glow, flattering depth at lash line, and a photo-friendly finish.`,
-          },
-          {
-            style: 'Defined Elegance',
-            makeup: 'Medium coverage base, lifted bronzer placement, rose-mauve lip.',
-            hair: 'Low textured ponytail with crown volume',
-            description: 'Adds structure while staying wearable and modern for day-to-night transitions.',
-          },
-          {
-            style: 'Glam Focus',
-            makeup: 'Soft glam eye gradient, strategic highlighter, statement lip option.',
-            hair: 'Side-part blowout with smooth ends',
-            description: 'A polished, event-ready profile with camera-friendly contrast and dimension.',
-          },
-        ];
-        setTryResults(demoRecs);
-        setTryMessage(`Guest preview: ${demoRecs.length} demo looks generated for ${tryOccasion}.`);
-        return;
-      }
-      const result = await recommendOccasionLook(trySelfie, tryOccasion);
+      const result = await runBeautyActionWithRetry(() => recommendOccasionLook(trySelfie, tryOccasion));
       setTryResults(result.recommendations);
       setTryMessage(`Found ${result.recommendations.length} looks perfect for ${tryOccasion}!`);
     } catch (error: any) {
@@ -1058,30 +916,12 @@ const App: React.FC = () => {
     setTryMessage(null);
 
     try {
-      if (guestBeautyAccess) {
-        const guestPreview = await buildGuestTryOnPreview(
-          trySelfie,
-          tryMakeupStyle,
-          tryHairStyle,
-          tryOccasion,
-        );
-        const singleRec = [{
-          style: `${tryMakeupStyle.charAt(0).toUpperCase() + tryMakeupStyle.slice(1)} Look`,
-          makeup: `Demo ${tryMakeupStyle} profile with complexion balancing and lip harmony for ${tryOccasion}.`,
-          hair: tryHairStyle,
-          description: `Guest preview style: ${tryMakeupStyle} makeup paired with ${tryHairStyle} hair for ${tryOccasion}. Ask your stylist to tailor intensity to venue lighting and dress color.`
-        }];
-        setTryResults(singleRec);
-        setTryAfterImage(ensureFreshPreviewUrl(guestPreview));
-        setTryMessage('Guest preview: virtual look generated with local demo data.');
-        return;
-      }
-      const result = await generateVirtualMakeup(
+      const result = await runBeautyActionWithRetry(() => generateVirtualMakeup(
         trySelfie,
         tryMakeupStyle,
         tryHairStyle,
         tryOccasion
-      );
+      ));
       const singleRec = [{
         style: `${tryMakeupStyle.charAt(0).toUpperCase() + tryMakeupStyle.slice(1)} Look`,
         makeup: result.description.substring(0, 200),
@@ -1134,15 +974,13 @@ const App: React.FC = () => {
       };
 
       let baseDescription = `Hair preview for ${tryHairStyle} on ${tryOccasion}.`;
-      if (!guestBeautyAccess) {
-        const result = await generateVirtualMakeup(
-          trySelfie,
-          tryMakeupStyle,
-          `${tryHairStyle}, length:${hair360Length}, volume:${hair360Volume}, fringe:${hair360Fringe}, texture:${hair360Texture}`,
-          `${tryOccasion} 360 hairstyle preview`
-        );
-        baseDescription = result.description || baseDescription;
-      }
+      const result = await runBeautyActionWithRetry(() => generateVirtualMakeup(
+        trySelfie,
+        tryMakeupStyle,
+        `${tryHairStyle}, length:${hair360Length}, volume:${hair360Volume}, fringe:${hair360Fringe}, texture:${hair360Texture}`,
+        `${tryOccasion} 360 hairstyle preview`
+      ));
+      baseDescription = result.description || baseDescription;
 
       const previews = angleOrder.map((angle) => ({
         angle,
@@ -1152,9 +990,7 @@ const App: React.FC = () => {
       }));
 
       setHair360Previews(previews);
-      setHair360Message(guestBeautyAccess
-        ? 'Guest preview: 360 hairstyle simulation generated from local styling logic.'
-        : '360 hairstyle preview generated. Switch angles and fine-tune your settings.');
+      setHair360Message('360 hairstyle preview generated. Switch angles and fine-tune your settings.');
     } catch (error: any) {
       setHair360Message(friendlyError(error, 'hair-360-preview'));
     } finally {
@@ -1171,67 +1007,7 @@ const App: React.FC = () => {
     setProfileAnalysisMessage(null);
     setProfileAnalysisResult(null);
     try {
-      if (guestBeautyAccess) {
-        setProfileAnalysisResult({
-          skinTone: {
-            undertone: 'Neutral',
-            overtone: 'Medium',
-            description: 'Balanced skin tone that supports both warm and cool accent colors.',
-          },
-          faceShape: {
-            shape: 'Oval',
-            characteristics: ['Gently rounded jawline', 'Balanced forehead-to-jaw proportion', 'Versatile symmetry for multiple styles'],
-          },
-          eyes: {
-            color: 'Brown',
-            shape: 'Almond',
-            techniques: ['Lift outer corners with a soft wing', 'Place shimmer at center lid for dimension', 'Smudge deeper tone along outer third for elongation'],
-          },
-          hair: {
-            length: 'Long',
-            texture: 'Wavy',
-            color: 'Dark Brown',
-            condition: 'Healthy density with light dryness at ends.',
-          },
-          makeupRecommendation: {
-            foundationShades: ['Neutral beige', 'Golden neutral', 'Soft olive-beige'],
-            blushShades: ['Peach rose', 'Warm apricot', 'Muted berry'],
-            lipstickShades: ['Rose nude', 'Terracotta rose', 'Classic blue-red'],
-            colorTheory: ['Peach-apricot tones brighten under-eye shadows and soften cool cast.', 'Rose-nude lips balance medium-neutral skin without overpowering features.', 'Blue-red lipstick enhances tooth brightness and gives high-contrast glam definition.'],
-            dailyLook: ['Apply thin, skin-like base with spot concealing.', 'Tap peach-rose blush high on cheeks for lift.', 'Use soft brown liner and mascara for eye definition.', 'Finish with rose-nude lipstick and diffused liner.'],
-            glamLook: ['Use medium-coverage satin foundation.', 'Sculpt temples and cheekbones with neutral bronzer.', 'Build almond-eye gradient with deeper outer corner.', 'Add half-lash for lift and camera-ready shape.', 'Finish with terracotta rose or blue-red lip.'],
-          },
-          hairTransformation: {
-            styles: [
-              {
-                name: 'Long Layered Butterfly Cut',
-                whyItWorks: 'Adds airy movement and frames oval proportions without adding width.',
-                cutDescription: 'Request long internal layers, cheekbone face-framing, and soft U-shaped perimeter with weight removal through mid-lengths.',
-              },
-              {
-                name: 'Collarbone Textured Lob',
-                whyItWorks: 'Keeps structure while maintaining softness around the jaw and neck.',
-                cutDescription: 'Ask for a collarbone lob with blunt baseline, invisible internal texturizing, and slight forward angle in front.',
-              },
-              {
-                name: 'Soft Curtain Layers',
-                whyItWorks: 'Creates vertical lines and eye focus while preserving balance.',
-                cutDescription: 'Ask for curtain fringe starting at cheekbone, blended into long layers with slide-cut detailing around the face.',
-              },
-            ],
-            colorSuggestions: ['Neutral mocha brunette', 'Soft chestnut brown', 'Espresso with neutral reflect'],
-            highlightSuggestions: ['Fine caramel babylights around hairline', 'Subtle mocha ribbon highlights through mid-lengths', 'Money-piece kept one level lighter for brightness'],
-          },
-          safety: {
-            disclaimer: 'AI photo lighting can vary. Please confirm final shade and color placement in person with your professional stylist.',
-            dermatologistNote: 'For acne, irritation, rashes, or persistent skin concerns, consult a licensed dermatologist.',
-          },
-          recommendations: ['Keep two lipstick options: one daily neutral, one event bold.', 'Match foundation on jawline and check in natural light before purchase.', 'Use a gloss topper only at center lip for fuller glam effect.'],
-        });
-        setProfileAnalysisMessage('Guest preview: beauty profile generated with local demo data.');
-        return;
-      }
-      const result = await analyzeBeautyProfile(trySelfie);
+      const result = await runBeautyActionWithRetry(() => analyzeBeautyProfile(trySelfie));
       setProfileAnalysisResult(result);
       setProfileAnalysisMessage('Beauty profile analysis complete!');
     } catch (error: any) {
@@ -1259,7 +1035,7 @@ const App: React.FC = () => {
     return <AdminLoginPage onBack={() => setShowAdminLoginPage(false)} />;
   }
 
-  if (!authUser && !guestBeautyAccess) {
+  if (!authUser) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
         <Header tokenBalance={null} activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
@@ -1643,21 +1419,6 @@ const App: React.FC = () => {
               )}
             </div>
 
-            <div className="pt-2 border-t border-slate-800 space-y-2">
-              <button
-                onClick={() => {
-                  setGuestBeautyAccess(true);
-                  setActiveWorkspaceTab('beauty-lab');
-                  setGuestBeautyMessage('Temporary guest access enabled for Beauty Lab preview mode.');
-                }}
-                className="w-full px-4 py-2 rounded-xl bg-cyan-600 text-white text-sm font-semibold hover:bg-cyan-500 transition-colors"
-              >
-                Continue As Guest (Beauty Lab Preview)
-              </button>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Temporary access for Beauty Lab while production auth wiring is in progress.
-              </p>
-            </div>
           </div>
           </div>
         </main>
@@ -1670,26 +1431,6 @@ const App: React.FC = () => {
       <Header activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 space-y-6 sm:space-y-8 max-w-4xl mx-auto w-full">
-        {guestBeautyAccess && (
-          <div className="w-full rounded-2xl border border-cyan-500/40 bg-cyan-500/10 p-3 text-xs text-cyan-100">
-            <div className="font-semibold uppercase tracking-wider mb-1">Guest Beauty Lab Preview</div>
-            <div>Temporary mode is active. Beauty Lab uses demo responses until production wiring is complete.</div>
-            {guestBeautyMessage && <div className="mt-2 text-cyan-200">{guestBeautyMessage}</div>}
-            <div className="mt-3">
-              <button
-                onClick={() => {
-                  setGuestBeautyAccess(false);
-                  setGuestBeautyMessage(null);
-                  setActiveWorkspaceTab('colorizer');
-                }}
-                className="px-3 py-2 rounded-lg bg-slate-900/80 border border-cyan-400/40 text-cyan-100 hover:bg-slate-900 text-[11px] font-semibold uppercase tracking-wider transition-colors"
-              >
-                Exit Guest Mode
-              </button>
-            </div>
-          </div>
-        )}
-
         {processing.isProcessing && (
           <LoadingOverlay
             message={processing.statusMessage}
@@ -1699,7 +1440,7 @@ const App: React.FC = () => {
 
         <div
           id="account-panel"
-          className={`w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto ${guestBeautyAccess ? 'hidden' : ''}`}
+          className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>

@@ -1485,6 +1485,7 @@ const App: React.FC = () => {
           />
         )}
 
+        {activeWorkspaceTab === 'colorizer' && (
         <div
           id="account-panel"
           className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto"
@@ -1711,14 +1712,12 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
+        )}
 
+        {activeWorkspaceTab === 'beauty-lab' && (
         <div
           id="beauty-lab-panel"
-          className={`w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all ${
-            activeWorkspaceTab === 'beauty-lab'
-              ? 'border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10'
-              : 'border-slate-800 bg-slate-900/50'
-          }`}
+          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10"
         >
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -2376,6 +2375,7 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
+        )}
 
         <div id="colorizer-panel" className="w-full" />
 

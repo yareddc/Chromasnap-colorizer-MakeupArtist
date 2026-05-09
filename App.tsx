@@ -1477,7 +1477,7 @@ const App: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
       <Header activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
 
-      <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 space-y-6 sm:space-y-8 max-w-4xl mx-auto w-full">
+      <main className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full">
         {processing.isProcessing && (
           <LoadingOverlay
             message={processing.statusMessage}
@@ -1485,15 +1485,17 @@ const App: React.FC = () => {
           />
         )}
 
-        {activeWorkspaceTab === 'colorizer' && (
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div
           id="account-panel"
-          className="w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto"
+          className="order-2 xl:order-none w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto xl:col-start-2 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]"
         >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account</h3>
-              <p className="text-xs leading-relaxed text-slate-400">Compact summary for mobile/tablet. Expand for full billing controls and account details.</p>
+              <p className="text-xs leading-relaxed text-slate-400">
+                Workspace details for {activeWorkspaceTab === 'beauty-lab' ? 'Beauty Lab' : 'Colorizer'}.
+              </p>
             </div>
             <div ref={accountMenuRef} className="relative">
               <button
@@ -1551,7 +1553,7 @@ const App: React.FC = () => {
 
           {accountTab === 'account-details' && (
             <>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-2">
                 <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3">
                   <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">User</div>
                   <div className="text-xs font-semibold text-slate-200 truncate">{authUser?.username || activeUserId}</div>
@@ -1571,7 +1573,7 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">User Id</label>
                   <div className="flex gap-2">
@@ -1627,7 +1629,7 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3">
                 {subscriptionPlans.map((plan) => (
                   <button
                     key={plan.id}
@@ -1712,7 +1714,8 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
-        )}
+
+        <div className="order-1 xl:order-none w-full space-y-6 sm:space-y-8 xl:col-start-1">
 
         {activeWorkspaceTab === 'beauty-lab' && (
         <div
@@ -2682,6 +2685,8 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+        </div>
+      </div>
       </main>
 
       <footer className="py-6 px-4 text-center border-t border-slate-900 bg-slate-900/20 space-y-3">

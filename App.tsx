@@ -185,6 +185,7 @@ const App: React.FC = () => {
   const [profileAnalysisLoading, setProfileAnalysisLoading] = useState(false);
   const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const uploadPreviewRef = useRef<HTMLDivElement | null>(null);
@@ -832,6 +833,7 @@ const App: React.FC = () => {
 
   const handleWorkspaceTabChange = (tab: WorkspaceTab) => {
     setActiveWorkspaceTab(tab);
+    setShowWorkspaceMenu(false);
     const targetId = tab === 'beauty-lab' ? 'beauty-lab-panel' : 'colorizer-panel';
     window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1070,7 +1072,7 @@ const App: React.FC = () => {
   if (!authInitialized) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
-        <Header tokenBalance={null} activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
+        <Header tokenBalance={null} />
         <main className="flex-1 flex items-center justify-center p-6">
           <div className="text-sm text-slate-300">Initializing secure session...</div>
         </main>
@@ -1085,7 +1087,7 @@ const App: React.FC = () => {
   if (!authUser) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
-        <Header tokenBalance={null} activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
+        <Header tokenBalance={null} />
         <main className="flex-1 flex items-center justify-center p-4">
           <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-6 items-center lg:items-stretch">
 
@@ -1475,7 +1477,11 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
-      <Header activeTab={activeWorkspaceTab} onTabChange={handleWorkspaceTabChange} />
+      <Header
+        tokenBalance={subscriptionAccount?.tokenBalance ?? null}
+        onMenuToggle={() => setShowWorkspaceMenu((current) => !current)}
+        isMenuOpen={showWorkspaceMenu}
+      />
 
       <main className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full">
         {processing.isProcessing && (
@@ -1485,14 +1491,43 @@ const App: React.FC = () => {
           />
         )}
 
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="grid items-start gap-6 xl:grid-cols-[310px_minmax(0,1fr)]">
         <div
           id="account-panel"
-          className="order-2 xl:order-none w-full rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[65vh] overflow-y-auto xl:col-start-2 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]"
+          className={`${showWorkspaceMenu ? 'block' : 'hidden'} xl:block w-full rounded-3xl border border-indigo-500/25 bg-[#111f3d]/80 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[72vh] overflow-y-auto xl:col-start-1 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]`}
         >
+          <div className="rounded-2xl border border-indigo-400/30 bg-slate-950/60 p-2 space-y-1">
+            <button
+              onClick={() => handleWorkspaceTabChange('colorizer')}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                activeWorkspaceTab === 'colorizer'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
+                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+              }`}
+            >
+              Colorizer
+            </button>
+            <button
+              onClick={() => handleWorkspaceTabChange('beauty-lab')}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                activeWorkspaceTab === 'beauty-lab'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
+                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+              }`}
+            >
+              Beauty Lab
+            </button>
+            <button
+              disabled
+              className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-500 border border-transparent"
+            >
+              Gallery
+            </button>
+          </div>
+
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account</h3>
+              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account Settings</h3>
               <p className="text-xs leading-relaxed text-slate-400">
                 Workspace details for {activeWorkspaceTab === 'beauty-lab' ? 'Beauty Lab' : 'Colorizer'}.
               </p>
@@ -1715,7 +1750,7 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="order-1 xl:order-none w-full space-y-6 sm:space-y-8 xl:col-start-1">
+        <div className="w-full space-y-6 sm:space-y-8 xl:col-start-2">
 
         {activeWorkspaceTab === 'beauty-lab' && (
         <div

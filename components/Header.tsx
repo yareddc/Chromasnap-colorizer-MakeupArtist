@@ -1,28 +1,21 @@
 
 import React from 'react';
 
-type WorkspaceTab = 'colorizer' | 'beauty-lab';
-
 type HeaderProps = {
   tokenBalance?: number | null;
-  activeTab: WorkspaceTab;
-  onTabChange: (tab: WorkspaceTab) => void;
+  onMenuToggle?: () => void;
+  isMenuOpen?: boolean;
 };
 
-const Header: React.FC<HeaderProps> = ({ tokenBalance, activeTab, onTabChange }) => {
-  const handleBadgeClick = () => {
-    const target = document.getElementById('account-panel');
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
+const Header: React.FC<HeaderProps> = ({ tokenBalance, onMenuToggle, isMenuOpen = false }) => {
   return (
-    <header className="py-6 px-4 border-b border-slate-800 bg-slate-900/50 sticky top-0 z-50 backdrop-blur-md">
-      <div className="max-w-4xl mx-auto w-full space-y-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center justify-center sm:justify-start gap-3">
+    <header className="py-4 px-4 border-b border-slate-800 bg-slate-950/70 sticky top-0 z-50 backdrop-blur-md">
+      <div className="max-w-7xl mx-auto w-full">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
             <img src="/icon.png" alt="ChromaSnap logo" className="w-10 h-10 rounded-xl shadow-lg shadow-indigo-500/20 object-contain" />
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-200 to-indigo-400">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-4xl font-bold text-indigo-100 truncate">
                 ChromaSnap
               </h1>
               {typeof tokenBalance === 'number' && (
@@ -33,40 +26,20 @@ const Header: React.FC<HeaderProps> = ({ tokenBalance, activeTab, onTabChange })
             </div>
           </div>
 
-          <div className="flex items-center justify-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => onTabChange('colorizer')}
-              className={`px-3 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
-                activeTab === 'colorizer'
-                  ? 'bg-indigo-500/20 border-indigo-400 text-white'
-                  : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-indigo-400 hover:text-white'
-              }`}
-              aria-pressed={activeTab === 'colorizer'}
-            >
-              Colorizer
-            </button>
-            <button
-              type="button"
-              onClick={() => onTabChange('beauty-lab')}
-              className={`px-3 py-2 rounded-full text-[11px] font-bold uppercase tracking-widest border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
-                activeTab === 'beauty-lab'
-                  ? 'bg-rose-500/20 border-rose-400 text-white'
-                  : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-rose-400 hover:text-white'
-              }`}
-              aria-pressed={activeTab === 'beauty-lab'}
-            >
-              Beauty Lab
-            </button>
-            <button
-              type="button"
-              onClick={handleBadgeClick}
-              className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest bg-slate-950/70 border border-slate-800 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-              aria-label="Jump to account panel"
-            >
-              Account
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onMenuToggle}
+            className={`h-11 w-11 rounded-xl border transition-colors flex items-center justify-center ${
+              isMenuOpen
+                ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
+                : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-indigo-400 hover:text-indigo-100'
+            }`}
+            aria-label="Toggle workspace menu"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         </div>
       </div>
     </header>

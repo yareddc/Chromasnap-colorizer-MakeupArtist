@@ -27,6 +27,7 @@ const Header: React.FC<HeaderProps> = ({ tokenBalance, onMenuToggle, isMenuOpen 
           </div>
 
           <button
+            id="workspace-hamburger-trigger"
             type="button"
             onClick={onMenuToggle}
             className={`h-11 w-11 rounded-xl border transition-colors flex items-center justify-center ${

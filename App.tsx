@@ -185,7 +185,7 @@ const App: React.FC = () => {
   const [profileAnalysisLoading, setProfileAnalysisLoading] = useState(false);
   const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
-  const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
+  const [showAccountDrawer, setShowAccountDrawer] = useState(false);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const uploadPreviewRef = useRef<HTMLDivElement | null>(null);
@@ -270,6 +270,8 @@ const App: React.FC = () => {
     if (!showAccountMenu) return;
 
     const handlePointerDown = (event: PointerEvent) => {
+      const trigger = (event.target as Element | null)?.closest('#workspace-hamburger-trigger');
+      if (trigger) return;
       if (accountMenuRef.current?.contains(event.target as Node)) return;
       setShowAccountMenu(false);
     };
@@ -833,7 +835,7 @@ const App: React.FC = () => {
 
   const handleWorkspaceTabChange = (tab: WorkspaceTab) => {
     setActiveWorkspaceTab(tab);
-    setShowWorkspaceMenu(false);
+    setShowAccountMenu(false);
     const targetId = tab === 'beauty-lab' ? 'beauty-lab-panel' : 'colorizer-panel';
     window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1479,9 +1481,62 @@ const App: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
       <Header
         tokenBalance={subscriptionAccount?.tokenBalance ?? null}
-        onMenuToggle={() => setShowWorkspaceMenu((current) => !current)}
-        isMenuOpen={showWorkspaceMenu}
+        onMenuToggle={() => setShowAccountMenu((current) => !current)}
+        isMenuOpen={showAccountMenu}
       />
+
+      {showAccountMenu && (
+        <div ref={accountMenuRef} className="fixed right-4 top-20 z-[60] w-[min(92vw,320px)] rounded-2xl border border-slate-700 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
+          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Workspace</div>
+          <button
+            onClick={() => handleWorkspaceTabChange('colorizer')}
+            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'colorizer' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            Colorizer
+          </button>
+          <button
+            onClick={() => handleWorkspaceTabChange('beauty-lab')}
+            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'beauty-lab' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            Beauty Lab
+          </button>
+
+          <div className="my-2 border-t border-slate-800" />
+          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Account</div>
+          <button
+            onClick={() => { setAccountTab('overview'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
+            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => { setAccountTab('account-details'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
+            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
+          >
+            Account Details
+          </button>
+          <button
+            onClick={() => { setShowAccountMenu(false); void refreshSubscription(); }}
+            disabled={billingLoading}
+            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
+          >
+            Refresh
+          </button>
+          <div className="my-2 border-t border-slate-800" />
+          <button
+            onClick={() => { setAccountTab('delete-account'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
+            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+          >
+            Delete Account
+          </button>
+          <button
+            onClick={() => { setShowAccountMenu(false); handleLogout(); }}
+            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
+          >
+            Logout
+          </button>
+        </div>
+      )}
 
       <main className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full">
         {processing.isProcessing && (
@@ -1493,8 +1548,8 @@ const App: React.FC = () => {
 
         <div className="grid items-start gap-6 xl:grid-cols-[310px_minmax(0,1fr)]">
         <div
-          id="account-panel"
-          className={`${showWorkspaceMenu ? 'block' : 'hidden'} xl:block w-full rounded-3xl border border-indigo-500/25 bg-[#111f3d]/80 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[72vh] overflow-y-auto xl:col-start-1 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]`}
+          id="workspace-panel"
+          className="hidden xl:block w-full rounded-3xl border border-indigo-500/25 bg-[#111f3d]/80 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[72vh] overflow-y-auto xl:col-start-1 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]"
         >
           <div className="rounded-2xl border border-indigo-400/30 bg-slate-950/60 p-2 space-y-1">
             <button
@@ -1524,62 +1579,26 @@ const App: React.FC = () => {
               Gallery
             </button>
           </div>
+        </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div
+          id="account-drawer"
+          className={`${showAccountDrawer ? 'fixed' : 'hidden'} right-4 top-24 z-50 w-[min(92vw,420px)] rounded-3xl border border-slate-800 bg-slate-900/95 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[calc(100vh-7rem)] overflow-y-auto`}
+        >
+          <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account Settings</h3>
-              <p className="text-xs leading-relaxed text-slate-400">
-                Workspace details for {activeWorkspaceTab === 'beauty-lab' ? 'Beauty Lab' : 'Colorizer'}.
-              </p>
+              <p className="text-xs leading-relaxed text-slate-400">All account actions are available from the top-right hamburger menu.</p>
             </div>
-            <div ref={accountMenuRef} className="relative">
-              <button
-                onClick={() => setShowAccountMenu((current) => !current)}
-                className={`w-10 h-10 flex items-center justify-center rounded-full border transition-colors ${showAccountMenu ? 'border-indigo-500 bg-indigo-500/20 text-white' : 'border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white'}`}
-                title="Account menu"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="8" r="4" />
-                  <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-                </svg>
-              </button>
-              {showAccountMenu && (
-                <div className="absolute right-0 top-full z-10 mt-2 min-w-[180px] rounded-2xl border border-slate-700 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
-                  <button
-                    onClick={() => { setAccountTab('overview'); setShowAccountMenu(false); }}
-                    className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${accountTab === 'overview' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-                  >
-                    Overview
-                  </button>
-                  <button
-                    onClick={() => { setAccountTab('account-details'); setShowAccountMenu(false); }}
-                    className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${accountTab === 'account-details' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-                  >
-                    Account Details
-                  </button>
-                  <button
-                    onClick={() => { setShowAccountMenu(false); void refreshSubscription(); }}
-                    disabled={billingLoading}
-                    className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
-                  >
-                    Refresh
-                  </button>
-                  <div className="my-1 border-t border-slate-800" />
-                  <button
-                    onClick={() => { setAccountTab('delete-account'); setShowAccountMenu(false); }}
-                    className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${accountTab === 'delete-account' ? 'bg-rose-500/10 text-rose-300' : 'text-rose-400 hover:bg-rose-500/10 hover:text-rose-300'}`}
-                  >
-                    Delete Account
-                  </button>
-                  <button
-                    onClick={() => { setShowAccountMenu(false); handleLogout(); }}
-                    className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
-                  >
-                    Logout
-                  </button>
-                </div>
-              )}
-            </div>
+            <button
+              onClick={() => setShowAccountDrawer(false)}
+              className="w-9 h-9 flex items-center justify-center rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors"
+              aria-label="Close account drawer"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
           {accountTab === 'overview' && (

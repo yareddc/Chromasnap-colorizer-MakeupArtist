@@ -83,11 +83,31 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x android/gradlew
 
+      - name: Resolve Android version inputs
+        id: resolve_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_CODE="${{ github.event.inputs.android_version_code }}"
+          VERSION_NAME="${{ github.event.inputs.android_version_name }}"
+
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE="${{ github.run_number }}"
+          fi
+
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME="1.2.${{ github.run_number }}"
+          fi
+
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "Resolved Android versionCode=$VERSION_CODE versionName=$VERSION_NAME"
+
       - name: Build signed release AAB
         working-directory: android
         env:
-          ANDROID_VERSION_CODE: ${{ inputs.android_version_code || github.run_number }}
-          ANDROID_VERSION_NAME: ${{ inputs.android_version_name || format('1.2.{0}', github.run_number) }}
+          ANDROID_VERSION_CODE: ${{ steps.resolve_version.outputs.version_code }}
+          ANDROID_VERSION_NAME: ${{ steps.resolve_version.outputs.version_name }}
           KEYSTORE_PATH: /tmp/keystore.jks
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}

@@ -88,17 +88,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION_CODE="${{ github.event.inputs.android_version_code }}"
-          VERSION_NAME="${{ github.event.inputs.android_version_name }}"
-
-          if [ -z "$VERSION_CODE" ]; then
-            VERSION_CODE="${{ github.run_number }}"
-          fi
-
-          if [ -z "$VERSION_NAME" ]; then
-            VERSION_NAME="1.2.${{ github.run_number }}"
-          fi
-
+          VERSION_CODE="22"
+          VERSION_NAME="1.2.3"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "Resolved Android versionCode=$VERSION_CODE versionName=$VERSION_NAME"

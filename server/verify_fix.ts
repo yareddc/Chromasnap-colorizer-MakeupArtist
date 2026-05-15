@@ -31,15 +31,9 @@ async function verifyAccess() {
     // 2. Test Imagen 3 (Image Generation)
     console.log("\n2. Testing Imagen 3 (Image Generation)...");
     try {
-        const base64Image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNiAAAABgDNjd8qAAAAAElFTkSuQmCC";
-        // @ts-ignore
-        const response = await ai.models.generateImages({
+        await ai.models.generateImages({
             model: 'imagen-3.0-generate-001',
             prompt: "A test image",
-            image: {
-                imageBytes: base64Image,
-                mimeType: "image/png"
-            },
             config: {
                 numberOfImages: 1
             }

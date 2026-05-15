@@ -546,14 +546,24 @@ export const consultBeautyAdvisor = async (
     throw new Error('Beauty advisor consultation failed');
   }
   const result = await parseJsonResponse(response);
-  return result;
+  const advice = typeof result?.advice === 'string'
+    ? result.advice
+    : typeof result?.message === 'string'
+      ? result.message
+      : '';
+  const recommendations = Array.isArray(result?.recommendations)
+    ? result.recommendations.filter((item: unknown) => typeof item === 'string')
+    : [];
+
+  return { advice, recommendations };
 };
 
 export const generateVirtualMakeup = async (
   selfieBase64: string,
   makeupStyle: string,
   hairStyle: string,
-  occasion: string
+  occasion: string,
+  options?: { generateImage?: boolean; styleIntensity?: 'subtle' | 'balanced' | 'dramatic' }
 ): Promise<{ editedImage: string; description: string }> => {
   const response = await fetchWithTimeout(API_ENDPOINTS.GENERATE_VIRTUAL_MAKEUP, {
     method: 'POST',
@@ -564,6 +574,8 @@ export const generateVirtualMakeup = async (
       makeupStyle,
       hairStyle,
       occasion,
+      generateImage: options?.generateImage ?? true,
+      styleIntensity: options?.styleIntensity || 'balanced',
     }),
   }, 120000);
 
@@ -572,7 +584,23 @@ export const generateVirtualMakeup = async (
     throw new Error('Virtual makeup generation failed');
   }
   const result = await parseJsonResponse(response);
-  return result;
+  const editedImage = typeof result?.editedImage === 'string'
+    ? result.editedImage
+    : typeof result?.result === 'string'
+      ? result.result
+      : typeof result?.image === 'string'
+        ? result.image
+        : typeof result?.afterImage === 'string'
+          ? result.afterImage
+          : selfieBase64;
+
+  const description = typeof result?.description === 'string'
+    ? result.description
+    : typeof result?.advice === 'string'
+      ? result.advice
+      : '';
+
+  return { editedImage, description };
 };
 
 export const recommendOccasionLook = async (
@@ -594,7 +622,22 @@ export const recommendOccasionLook = async (
     throw new Error('Occasion recommendation failed');
   }
   const result = await parseJsonResponse(response);
-  return result;
+  const rawRecommendations = Array.isArray(result?.recommendations)
+    ? result.recommendations
+    : Array.isArray(result?.looks)
+      ? result.looks
+      : [];
+
+  const recommendations = rawRecommendations
+    .filter((item: unknown) => !!item && typeof item === 'object')
+    .map((item: any, index: number) => ({
+      style: typeof item.style === 'string' && item.style.trim() ? item.style : `Look ${index + 1}`,
+      makeup: typeof item.makeup === 'string' ? item.makeup : '',
+      hair: typeof item.hair === 'string' ? item.hair : 'Natural/Current style',
+      description: typeof item.description === 'string' ? item.description : '',
+    }));
+
+  return { recommendations };
 };
 
 export const analyzeBeautyProfile = async (
@@ -612,7 +655,77 @@ export const analyzeBeautyProfile = async (
     throw new Error('Beauty profile analysis failed');
   }
   const result = await parseJsonResponse(response);
-  return result;
+
+  return {
+    skinTone: {
+      undertone: String(result?.skinTone?.undertone || 'Unknown'),
+      overtone: String(result?.skinTone?.overtone || 'Unknown'),
+      description: String(result?.skinTone?.description || ''),
+    },
+    faceShape: {
+      shape: String(result?.faceShape?.shape || 'Unknown'),
+      characteristics: Array.isArray(result?.faceShape?.characteristics)
+        ? result.faceShape.characteristics.filter((item: unknown) => typeof item === 'string')
+        : [],
+    },
+    eyes: {
+      color: String(result?.eyes?.color || 'Unknown'),
+      shape: String(result?.eyes?.shape || 'Unknown'),
+      techniques: Array.isArray(result?.eyes?.techniques)
+        ? result.eyes.techniques.filter((item: unknown) => typeof item === 'string')
+        : [],
+    },
+    hair: {
+      length: String(result?.hair?.length || 'Unknown'),
+      texture: String(result?.hair?.texture || 'Unknown'),
+      color: String(result?.hair?.color || 'Unknown'),
+      condition: String(result?.hair?.condition || ''),
+    },
+    makeupRecommendation: {
+      foundationShades: Array.isArray(result?.makeupRecommendation?.foundationShades)
+        ? result.makeupRecommendation.foundationShades.filter((item: unknown) => typeof item === 'string')
+        : [],
+      blushShades: Array.isArray(result?.makeupRecommendation?.blushShades)
+        ? result.makeupRecommendation.blushShades.filter((item: unknown) => typeof item === 'string')
+        : [],
+      lipstickShades: Array.isArray(result?.makeupRecommendation?.lipstickShades)
+        ? result.makeupRecommendation.lipstickShades.filter((item: unknown) => typeof item === 'string')
+        : [],
+      colorTheory: Array.isArray(result?.makeupRecommendation?.colorTheory)
+        ? result.makeupRecommendation.colorTheory.filter((item: unknown) => typeof item === 'string')
+        : [],
+      dailyLook: Array.isArray(result?.makeupRecommendation?.dailyLook)
+        ? result.makeupRecommendation.dailyLook.filter((item: unknown) => typeof item === 'string')
+        : [],
+      glamLook: Array.isArray(result?.makeupRecommendation?.glamLook)
+        ? result.makeupRecommendation.glamLook.filter((item: unknown) => typeof item === 'string')
+        : [],
+    },
+    hairTransformation: {
+      styles: Array.isArray(result?.hairTransformation?.styles)
+        ? result.hairTransformation.styles
+            .filter((style: unknown) => !!style && typeof style === 'object')
+            .map((style: any) => ({
+              name: String(style?.name || 'Recommended style'),
+              whyItWorks: String(style?.whyItWorks || ''),
+              cutDescription: String(style?.cutDescription || ''),
+            }))
+        : [],
+      colorSuggestions: Array.isArray(result?.hairTransformation?.colorSuggestions)
+        ? result.hairTransformation.colorSuggestions.filter((item: unknown) => typeof item === 'string')
+        : [],
+      highlightSuggestions: Array.isArray(result?.hairTransformation?.highlightSuggestions)
+        ? result.hairTransformation.highlightSuggestions.filter((item: unknown) => typeof item === 'string')
+        : [],
+    },
+    safety: {
+      disclaimer: String(result?.safety?.disclaimer || ''),
+      dermatologistNote: String(result?.safety?.dermatologistNote || ''),
+    },
+    recommendations: Array.isArray(result?.recommendations)
+      ? result.recommendations.filter((item: unknown) => typeof item === 'string')
+      : [],
+  };
 };
 
 export type BeautyProfileAnalysis = {

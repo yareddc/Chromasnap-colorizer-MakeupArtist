@@ -1414,6 +1414,83 @@ const runColorization = async (image: string): Promise<string> => {
     return `data:image/png;base64,${imgBase64}`;
 };
 
+const extractGeminiInlineImageBase64 = (response: any): string | undefined => {
+    const candidateRoots = [
+        response?.candidates,
+        response?.response?.candidates,
+        response?.response?.response?.candidates,
+    ];
+
+    for (const candidates of candidateRoots) {
+        if (!Array.isArray(candidates)) continue;
+        for (const candidate of candidates) {
+            const parts = candidate?.content?.parts;
+            if (!Array.isArray(parts)) continue;
+            for (const part of parts) {
+                const data = part?.inlineData?.data;
+                if (typeof data === 'string' && data.length > 0) {
+                    return data;
+                }
+            }
+        }
+    }
+
+    return undefined;
+};
+
+const runVirtualMakeupImageEdit = async (
+    selfie: string,
+    makeupStyle: string,
+    hairStyle?: string,
+    occasion?: string,
+    styleIntensity: 'subtle' | 'balanced' | 'dramatic' = 'balanced'
+): Promise<string> => {
+    const base64Image = await normalizeImageToPngBase64(selfie);
+    const ai = createAI();
+
+    const intensityInstructions: Record<'subtle' | 'balanced' | 'dramatic', string> = {
+        subtle: 'Keep the look very natural and conservative with soft makeup contrast and gentle hair adjustments.',
+        balanced: 'Apply a noticeable but realistic makeover with clear style improvements while staying wearable.',
+        dramatic: 'Apply a bold editorial makeover with stronger contrast, richer tones, and more pronounced styling while preserving realism.',
+    };
+
+    const editPrompt = [
+        'Transform this exact selfie with a realistic virtual makeover.',
+        `Makeup style: ${makeupStyle || 'natural'}.`,
+        `Hairstyle: ${hairStyle || 'natural/current'}.`,
+        `Occasion: ${occasion || 'everyday'}.`,
+        `Intensity: ${styleIntensity}.`,
+        intensityInstructions[styleIntensity],
+        'Hard constraints:',
+        '- Keep the same person identity, pose, framing, background, and clothing.',
+        '- Do not swap faces or change age, skin tone identity, or facial structure.',
+        '- Apply only believable makeup and hair styling edits.',
+        '- Return one photorealistic edited image.',
+    ].join('\n');
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [{
+            role: 'user',
+            parts: [
+                { inlineData: { data: base64Image, mimeType: 'image/png' } },
+                { text: editPrompt },
+            ],
+        }],
+        config: {
+            responseModalities: ['IMAGE'],
+            temperature: 0.35,
+        },
+    });
+
+    const imageBase64 = extractGeminiInlineImageBase64(response);
+    if (!imageBase64) {
+        throw new Error('Virtual makeover image generation returned no image');
+    }
+
+    return `data:image/png;base64,${imageBase64}`;
+};
+
 // --- Endpoints ---
 
 app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
@@ -1765,22 +1842,33 @@ app.post('/api/auth/recover/password/confirm', authWriteLimiter, async (req, res
     }
 });
 
+const buildHealthPayload = () => ({
+    ok: true,
+    service: 'chromasnap-server',
+    environment: process.env.NODE_ENV || 'development',
+    vertexConfigured: Boolean(process.env.GCP_PROJECT_ID),
+    timestamp: new Date().toISOString(),
+});
+
 // Health check
+app.get('/health', (_req, res) => {
+    res.status(200).json(buildHealthPayload());
+});
+
 app.get('/api/health', (_req, res) => {
-    res.json({
-        ok: true,
-        service: 'chromasnap-server',
-        vertexConfigured: Boolean(process.env.GCP_PROJECT_ID),
-        timestamp: new Date().toISOString()
-    });
+    res.status(200).json(buildHealthPayload());
 });
 
 app.get('/healthz', (_req, res) => {
-    res.status(200).json({ ok: true });
+    res.status(200).json(buildHealthPayload());
+});
+
+app.get('/readyz', (_req, res) => {
+    res.status(200).json(buildHealthPayload());
 });
 
 app.get('/api/healthz', (_req, res) => {
-    res.status(200).json({ ok: true });
+    res.status(200).json(buildHealthPayload());
 });
 
 app.get('/api/subscription/plans', (_req, res) => {
@@ -2296,6 +2384,7 @@ app.post('/api/consult/beauty-advisor', requireBilling('beauty_consult'), async 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: [{
+                role: 'user',
                 parts: [
                     {
                         text: `You are a professional makeup artist and salon consultant. Analyze this client selfie and provide expert, salon-ready beauty advice.\n\nService requested: ${serviceDesc}\n\nClient consultation notes: ${notes}\n\nBased on the client\'s facial features, skin tone, and their consultation notes, provide:\n1. A brief professional analysis of their current complexion and features\n2. 3-5 specific product recommendations (with price range if applicable)\n3. Step-by-step application techniques tailored to their face shape and features\n4. Timing and maintenance tips\n5. Alternative looks within the same service category\n\nBe specific, professional, and actionable. Use proper makeup artist terminology.`
@@ -2349,7 +2438,7 @@ const extractRecommendations = (text: string): string[] => {
 
 app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async (req, res) => {
     try {
-        const { selfie, makeupStyle, hairStyle, occasion } = req.body;
+        const { selfie, makeupStyle, hairStyle, occasion, generateImage, styleIntensity } = req.body;
         if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
         if (!makeupStyle) return res.status(400).json({ error: 'Makeup style required' });
 
@@ -2361,12 +2450,17 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
 
         const ai = createAI();
 
-        const prompt = `You are a professional makeup artist and hairstylist AI. Using your expertise, provide a detailed visual description of how this person would look with:\n\nMakeup Style: ${makeupStyle}\nHairstyle: ${hairStyle || 'Natural/Current'}\nOccasion: ${occasion || 'Everyday'}\n\nProvide:\n1. A vivid description of the makeup application (colors, placement, intensity)\n2. Description of the hairstyle changes (texture, volume, color, styling)\n3. Overall look assessment and how it suits their facial features\n4. Specific product recommendations\n5. Application tips for achieving this look\n\nBe detailed and specific, as if describing a before/after makeover.`;
+        const normalizedIntensity = styleIntensity === 'subtle' || styleIntensity === 'dramatic' || styleIntensity === 'balanced'
+            ? styleIntensity
+            : 'balanced';
+
+        const prompt = `You are a professional makeup artist and hairstylist AI. Using your expertise, provide a detailed visual description of how this person would look with:\n\nMakeup Style: ${makeupStyle}\nHairstyle: ${hairStyle || 'Natural/Current'}\nOccasion: ${occasion || 'Everyday'}\nIntensity: ${normalizedIntensity}\n\nProvide:\n1. A vivid description of the makeup application (colors, placement, intensity)\n2. Description of the hairstyle changes (texture, volume, color, styling)\n3. Overall look assessment and how it suits their facial features\n4. Specific product recommendations\n5. Application tips for achieving this look\n\nTailor your tone and recommendations to the chosen intensity. Be detailed and specific, as if describing a before/after makeover.`;
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: [
                 {
+                    role: 'user',
                     parts: [
                         { text: prompt },
                         { inlineData: { data: base64Data, mimeType } }
@@ -2375,14 +2469,22 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
             ],
         });
 
-        const description = (response as any)?.response?.content?.parts?.[0]?.text || '';
-        if (!description) {
-            return res.status(500).json({ error: 'Failed to generate virtual makeup description' });
-        }
+        const description = (response as any)?.response?.content?.parts?.[0]?.text || 'Virtual look generated.';
+
+        const shouldGenerateImage = generateImage !== false;
+        const editedImage = shouldGenerateImage
+            ? await runVirtualMakeupImageEdit(
+                selfie,
+                String(makeupStyle),
+                String(hairStyle || ''),
+                String(occasion || ''),
+                normalizedIntensity
+            )
+            : selfie;
 
         res.json({
-            editedImage: selfie,
-            description: description,
+            editedImage,
+            description,
         });
     } catch (error: any) {
         console.error('Virtual makeup generation failed:', error);
@@ -2410,6 +2512,7 @@ app.post('/api/recommend/occasion-look', requireBilling('occasion_recommend'), a
             model: 'gemini-2.5-flash',
             contents: [
                 {
+                    role: 'user',
                     parts: [
                         { text: prompt },
                         { inlineData: { data: base64Data, mimeType } }
@@ -2550,6 +2653,7 @@ Return ONLY the JSON object, nothing else.`;
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: [{
+                role: 'user',
                 parts: [
                     { text: analysisPrompt },
                     { inlineData: { data: base64Data, mimeType } }

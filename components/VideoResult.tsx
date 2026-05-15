@@ -3,9 +3,10 @@ import React from 'react';
 
 interface VideoResultProps {
   videoUrl: string;
+  onDownload?: () => void | Promise<void>;
 }
 
-const VideoResult: React.FC<VideoResultProps> = ({ videoUrl }) => {
+const VideoResult: React.FC<VideoResultProps> = ({ videoUrl, onDownload }) => {
   return (
     <div className="w-full max-w-2xl px-4 animate-in zoom-in-95 duration-700">
       <div className="relative w-full aspect-video rounded-3xl overflow-hidden shadow-2xl border border-slate-700 bg-black group">
@@ -24,16 +25,29 @@ const VideoResult: React.FC<VideoResultProps> = ({ videoUrl }) => {
       
       <div className="w-full flex justify-between items-center px-2 mt-4">
         <p className="text-slate-400 text-sm italic">Video generated from your colorized photo</p>
-        <a 
-          href={videoUrl}
-          download="chromasnap-animation.mp4"
+        <button
+          type="button"
+          onClick={() => {
+            if (onDownload) {
+              void onDownload();
+              return;
+            }
+            const link = document.createElement('a');
+            link.href = videoUrl;
+            link.download = 'chromasnap-animation.mp4';
+            link.rel = 'noopener noreferrer';
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+          }}
           className="flex items-center gap-2 text-indigo-400 font-semibold hover:text-indigo-300 transition-colors"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
           Download MP4
-        </a>
+        </button>
       </div>
     </div>
   );

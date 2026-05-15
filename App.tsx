@@ -51,6 +51,17 @@ import {
   purchaseGooglePlayProduct,
   isAndroidNativePlatform,
 } from './services/googlePlayBillingService';
+import {
+  BARBERSHOP_HAIRCUT_OPTIONS,
+  GENERAL_HAIRSTYLE_OPTIONS,
+  OCCASION_OPTIONS,
+  buildHair360BaseDescription,
+  buildHair360PreviewOccasionContext,
+  buildOccasionRequestValue,
+  buildOccasionSuccessMessage,
+  buildVirtualMakeupOccasionContext,
+} from './services/barbershopVisitFeature';
+import { generateBarbershopLook, getBarbershopRecommendations } from './services/barbershopService';
 
 const PALETTES = [
   { id: 'Natural', name: 'Natural', colors: 'from-emerald-600 to-emerald-400' },
@@ -59,6 +70,29 @@ const PALETTES = [
   { id: 'Vintage', name: 'Vintage', colors: 'from-amber-600 to-amber-400' },
   { id: 'Technicolor', name: 'Technicolor', colors: 'from-rose-600 to-rose-400' }
 ];
+
+const PALETTE_COMMAND_KEYWORDS: Array<{ theme: string; keywords: string[] }> = [
+  { theme: 'Natural', keywords: ['natural', 'realistic', 'true color'] },
+  { theme: 'Cinematic', keywords: ['cinematic', 'film', 'movie'] },
+  { theme: 'Vivid', keywords: ['vivid', 'vibrant', 'bold color'] },
+  { theme: 'Vintage', keywords: ['vintage', 'retro', 'old film'] },
+  { theme: 'Technicolor', keywords: ['technicolor', 'techni', 'saturated'] },
+];
+
+const detectColorizerCommandIntent = (commandText: string, fallbackTheme: string) => {
+  const command = commandText.trim().toLowerCase();
+  const detectedTheme = PALETTE_COMMAND_KEYWORDS.find(({ keywords }) =>
+    keywords.some((keyword) => command.includes(keyword))
+  )?.theme;
+  const isAnimationCommand =
+    command.includes('animate') || command.includes('video') || command.includes('motion');
+
+  return {
+    isAnimationCommand,
+    detectedTheme,
+    effectiveTheme: detectedTheme || fallbackTheme,
+  };
+};
 
 const SAMPLE_IMAGE_DATA_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600">
@@ -101,8 +135,9 @@ const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
     'chromasnap_topup_1000',
 };
 
-type WorkspaceTab = 'colorizer' | 'beauty-lab';
+type WorkspaceTab = 'dashboard' | 'colorizer' | 'beauty-lab' | 'barbershop' | 'account';
 type Hair360Angle = 'front' | 'left' | 'right' | 'back';
+type LookRecommendation = { style: string; makeup: string; hair: string; description: string };
 
 const BEAUTY_SERVICES = [
   { id: 'bridal-glam', label: 'Bridal Glam', description: 'Premium full-face glam workflow for bridal clients.' },
@@ -124,6 +159,7 @@ const App: React.FC = () => {
     isProcessing: false,
     statusMessage: '',
   });
+  const [colorizerCommand, setColorizerCommand] = useState('');
   const [activeUserId, setActiveUserId] = useState<string>(() => getCurrentUserId());
   const [userIdInput, setUserIdInput] = useState<string>(activeUserId);
   const [subscriptionAccount, setSubscriptionAccount] = useState<SubscriptionAccount | null>(null);
@@ -158,7 +194,7 @@ const App: React.FC = () => {
   const [deleteAccountConfirmUsername, setDeleteAccountConfirmUsername] = useState('');
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const [accountTab, setAccountTab] = useState<'overview' | 'account-details' | 'delete-account'>('overview');
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('colorizer');
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('dashboard');
   const [beautyService, setBeautyService] = useState<BeautyServiceId>('bridal-glam');
   const [beautyClientName, setBeautyClientName] = useState('');
   const [beautyNotes, setBeautyNotes] = useState('');
@@ -166,13 +202,23 @@ const App: React.FC = () => {
   const [beautyConsultationLoading, setBeautyConsultationLoading] = useState(false);
   const [beautyConsultationMessage, setBeautyConsultationMessage] = useState<string | null>(null);
   const [trySelfie, setTrySelfie] = useState<string | null>(null);
-  const [tryOccasion, setTryOccasion] = useState('barbershop');
+  const [tryOccasion, setTryOccasion] = useState('wedding');
   const [tryMakeupStyle, setTryMakeupStyle] = useState('bold');
-  const [tryHairStyle, setTryHairStyle] = useState('taper-fade');
+  const [tryStyleIntensity, setTryStyleIntensity] = useState<'subtle' | 'balanced' | 'dramatic'>('balanced');
+  const [tryHairStyle, setTryHairStyle] = useState('wavy');
   const [tryAfterImage, setTryAfterImage] = useState<string | null>(null);
-  const [tryResults, setTryResults] = useState<Array<{ style: string; makeup: string; hair: string; description: string }> | null>(null);
+  const [tryResults, setTryResults] = useState<LookRecommendation[] | null>(null);
   const [tryLoading, setTryLoading] = useState(false);
   const [tryMessage, setTryMessage] = useState<string | null>(null);
+  const [barbershopSelfie, setBarbershopSelfie] = useState<string | null>(null);
+  const [barbershopMakeupStyle, setBarbershopMakeupStyle] = useState('natural');
+  const [barbershopStyleIntensity, setBarbershopStyleIntensity] = useState<'subtle' | 'balanced' | 'dramatic'>('balanced');
+  const [barbershopNotes, setBarbershopNotes] = useState('');
+  const [barbershopHaircut, setBarbershopHaircut] = useState('taper-fade');
+  const [barbershopAfterImage, setBarbershopAfterImage] = useState<string | null>(null);
+  const [barbershopResults, setBarbershopResults] = useState<LookRecommendation[] | null>(null);
+  const [barbershopLoading, setBarbershopLoading] = useState(false);
+  const [barbershopMessage, setBarbershopMessage] = useState<string | null>(null);
   const [hair360Length, setHair360Length] = useState<'short' | 'medium' | 'long'>('medium');
   const [hair360Volume, setHair360Volume] = useState<'low' | 'balanced' | 'high'>('balanced');
   const [hair360Fringe, setHair360Fringe] = useState<'none' | 'curtain' | 'side-swept' | 'full'>('none');
@@ -186,12 +232,14 @@ const App: React.FC = () => {
   const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountDrawer, setShowAccountDrawer] = useState(false);
+  const [showBeautyToolsDrawer, setShowBeautyToolsDrawer] = useState(false);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const uploadPreviewRef = useRef<HTMLDivElement | null>(null);
   const pinchZoomStateRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
   const isDeveloperMode = import.meta.env.DEV || import.meta.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true';
+  const commandIntent = detectColorizerCommandIntent(colorizerCommand, selectedTheme);
 
   const currentPlan = subscriptionPlans.find((plan) => plan.id === (subscriptionAccount?.tier ?? 'free'));
   const planMonthlyTokens = currentPlan?.monthlyTokens ?? 1;
@@ -659,12 +707,13 @@ const App: React.FC = () => {
     }
   };
 
-  const handleColorize = async () => {
+  const handleColorize = async (themeOverride?: string) => {
     if (!selectedImage) return;
+    const activeTheme = themeOverride || selectedTheme;
 
     setProcessing({
       isProcessing: true,
-      statusMessage: `Colorizing with ${selectedTheme} Palette...`,
+      statusMessage: `Colorizing with ${activeTheme} Palette...`,
       type: 'colorizing',
       error: undefined
     });
@@ -691,8 +740,8 @@ const App: React.FC = () => {
         return;
       }
 
-      setProcessing(prev => ({ ...prev, statusMessage: `Applying ${selectedTheme} palette...` }));
-      const colorized = await colorizeImage(selectedImage, selectedTheme);
+      setProcessing(prev => ({ ...prev, statusMessage: `Applying ${activeTheme} palette...` }));
+      const colorized = await colorizeImage(selectedImage, activeTheme);
 
       setProcessing(prev => ({ ...prev, statusMessage: 'Verifying result...' }));
       const postSafety = await checkImageSafety(colorized);
@@ -773,8 +822,45 @@ const App: React.FC = () => {
     }
   };
 
+  const triggerDownload = async (sourceUrl: string, filename: string) => {
+    let objectUrl: string | null = null;
+
+    try {
+      try {
+        const response = await fetch(sourceUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          objectUrl = URL.createObjectURL(blob);
+        }
+      } catch {
+        objectUrl = null;
+      }
+
+      const link = document.createElement('a');
+      link.href = objectUrl || sourceUrl;
+      link.download = filename;
+      link.rel = 'noopener noreferrer';
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      if (!objectUrl && /^https?:/i.test(sourceUrl)) {
+        window.open(sourceUrl, '_blank', 'noopener,noreferrer');
+      }
+    } finally {
+      if (objectUrl) {
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl as string), 1000);
+      }
+    }
+  };
+
   const handleAnimate = async () => {
-    if (!result || !result.safetyCheck?.isSafe || result.safetyCheck?.containsMinors) return;
+    const sourceImage = result?.colorized || selectedImage;
+    if (!sourceImage) return;
+
+    const safety = result?.safetyCheck || await checkImageSafety(sourceImage);
+    if (!safety?.isSafe || safety?.containsMinors) return;
 
     setProcessing({
       isProcessing: true,
@@ -783,7 +869,7 @@ const App: React.FC = () => {
     });
 
     try {
-      const videoUrl = await animateImage(result.colorized, (message) => {
+      const videoUrl = await animateImage(sourceImage, (message) => {
         setProcessing(prev => ({ ...prev, statusMessage: message }));
       });
       setVideoResult({
@@ -800,6 +886,38 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRunColorizerCommand = async () => {
+    if (!selectedImage && !result?.colorized) {
+      setProcessing((prev) => ({
+        ...prev,
+        error: 'Upload an image first to run a command.',
+      }));
+      return;
+    }
+
+    const command = colorizerCommand.trim().toLowerCase();
+    if (!command) {
+      setProcessing((prev) => ({
+        ...prev,
+        error: 'Type a command like "animate this" or "colorize with cinematic palette".',
+      }));
+      return;
+    }
+
+    const { isAnimationCommand, detectedTheme: paletteFromCommand } = detectColorizerCommandIntent(command, selectedTheme);
+
+    if (paletteFromCommand && paletteFromCommand !== selectedTheme) {
+      setSelectedTheme(paletteFromCommand);
+    }
+
+    if (isAnimationCommand) {
+      await handleAnimate();
+      return;
+    }
+
+    await handleColorize(paletteFromCommand);
+  };
+
   const reset = () => {
     setSelectedImage(null);
     setUploadPreviewZoom(1);
@@ -809,12 +927,9 @@ const App: React.FC = () => {
     setProcessing({ isProcessing: false, statusMessage: '', error: undefined });
   };
 
-  const handleDownloadResult = () => {
+  const handleDownloadResult = async () => {
     if (!result) return;
-    const link = document.createElement('a');
-    link.href = result.colorized;
-    link.download = `chromasnap-hd-${Date.now()}.png`;
-    link.click();
+    await triggerDownload(result.colorized, `chromasnap-hd-${Date.now()}.png`);
   };
 
   const handleShareResult = async () => {
@@ -836,7 +951,18 @@ const App: React.FC = () => {
   const handleWorkspaceTabChange = (tab: WorkspaceTab) => {
     setActiveWorkspaceTab(tab);
     setShowAccountMenu(false);
-    const targetId = tab === 'beauty-lab' ? 'beauty-lab-panel' : 'colorizer-panel';
+    if (tab !== 'beauty-lab') {
+      setShowBeautyToolsDrawer(false);
+    }
+    const targetId = tab === 'dashboard'
+      ? 'dashboard-panel'
+      : tab === 'beauty-lab'
+        ? 'beauty-lab-panel'
+        : tab === 'barbershop'
+          ? 'barbershop-panel'
+          : tab === 'account'
+            ? 'account-panel'
+            : 'colorizer-panel';
     window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -936,6 +1062,21 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  const handleBarbershopSelfieCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64String = e.target?.result as string;
+      setBarbershopSelfie(base64String);
+      setBarbershopAfterImage(null);
+      setBarbershopResults(null);
+      setBarbershopMessage(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleGetOccasionRecommendations = async () => {
     if (!trySelfie) {
       setTryMessage('Please upload a selfie first');
@@ -947,9 +1088,11 @@ const App: React.FC = () => {
     setTryResults(null);
 
     try {
-      const result = await runBeautyActionWithRetry(() => recommendOccasionLook(trySelfie, tryOccasion));
+      const result = await runBeautyActionWithRetry(() =>
+        recommendOccasionLook(trySelfie, buildOccasionRequestValue(tryOccasion))
+      );
       setTryResults(result.recommendations);
-      setTryMessage(`Found ${result.recommendations.length} looks perfect for ${tryOccasion}!`);
+      setTryMessage(buildOccasionSuccessMessage(tryOccasion, result.recommendations.length));
     } catch (error: any) {
       setTryMessage(friendlyError(error, 'try-on-recommendations'));
     } finally {
@@ -971,10 +1114,11 @@ const App: React.FC = () => {
         trySelfie,
         tryMakeupStyle,
         tryHairStyle,
-        tryOccasion
+        buildVirtualMakeupOccasionContext(tryOccasion, beautyNotes),
+        { styleIntensity: tryStyleIntensity }
       ));
       const singleRec = [{
-        style: `${tryMakeupStyle.charAt(0).toUpperCase() + tryMakeupStyle.slice(1)} Look`,
+        style: `${tryMakeupStyle.charAt(0).toUpperCase() + tryMakeupStyle.slice(1)} ${tryStyleIntensity.charAt(0).toUpperCase() + tryStyleIntensity.slice(1)} Look`,
         makeup: result.description.substring(0, 200),
         hair: tryHairStyle,
         description: result.description
@@ -989,13 +1133,104 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDownloadTryOn = () => {
+  const handleGetBarbershopRecommendations = async () => {
+    if (!barbershopSelfie) {
+      setBarbershopMessage('Please upload a selfie first');
+      return;
+    }
+
+    setBarbershopLoading(true);
+    setBarbershopMessage(null);
+    setBarbershopResults(null);
+
+    try {
+      const result = await runBeautyActionWithRetry(() => getBarbershopRecommendations(barbershopSelfie));
+      setBarbershopResults(result.recommendations);
+      setBarbershopMessage(result.message);
+    } catch (error: any) {
+      setBarbershopMessage(friendlyError(error, 'barbershop-recommendations'));
+    } finally {
+      setBarbershopLoading(false);
+    }
+  };
+
+  const handleGenerateBarbershopLook = async () => {
+    if (!barbershopSelfie) {
+      setBarbershopMessage('Please upload a selfie first');
+      return;
+    }
+
+    setBarbershopLoading(true);
+    setBarbershopMessage(null);
+
+    try {
+      const result = await runBeautyActionWithRetry(() =>
+        generateBarbershopLook({
+          selfieBase64: barbershopSelfie,
+          makeupStyle: barbershopMakeupStyle,
+          haircut: barbershopHaircut,
+          notes: barbershopNotes,
+          styleIntensity: barbershopStyleIntensity,
+        })
+      );
+
+      setBarbershopResults(result.recommendations);
+      setBarbershopAfterImage(ensureFreshPreviewUrl(result.afterImage));
+      setBarbershopMessage(result.message);
+    } catch (error: any) {
+      setBarbershopMessage(friendlyError(error, 'barbershop-virtual-look'));
+    } finally {
+      setBarbershopLoading(false);
+    }
+  };
+
+  const handleDownloadTryOn = async () => {
     const imageToDownload = tryAfterImage || trySelfie;
     if (!imageToDownload) return;
-    const link = document.createElement('a');
-    link.href = imageToDownload;
-    link.download = `chromasnap-virutal-try-on-${Date.now()}.jpg`;
-    link.click();
+
+    const toSlug = (value: string) =>
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 24) || 'na';
+
+    const filename = [
+      'chromasnap-virtual-try-on',
+      toSlug(tryMakeupStyle),
+      toSlug(tryHairStyle),
+      toSlug(tryOccasion),
+      toSlug(tryStyleIntensity),
+      Date.now().toString(),
+    ].join('-');
+
+    await triggerDownload(imageToDownload, `${filename}.jpg`);
+  };
+
+  const handleDownloadBarbershop = async () => {
+    const imageToDownload = barbershopAfterImage || barbershopSelfie;
+    if (!imageToDownload) return;
+
+    const toSlug = (value: string) =>
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 24) || 'na';
+
+    const filename = [
+      'chromasnap-barbershop',
+      toSlug(barbershopHaircut),
+      toSlug(barbershopStyleIntensity),
+      Date.now().toString(),
+    ].join('-');
+
+    await triggerDownload(imageToDownload, `${filename}.jpg`);
+  };
+
+  const handleDownloadAnimation = async () => {
+    if (!videoResult?.videoUrl) return;
+    await triggerDownload(videoResult.videoUrl, `chromasnap-animation-${Date.now()}.mp4`);
   };
 
   const handleGenerateHair360Preview = async () => {
@@ -1024,12 +1259,13 @@ const App: React.FC = () => {
         back: 'Rebalance crown fullness and hemline shape for movement and polish.',
       };
 
-      let baseDescription = `Hair preview for ${tryHairStyle} on ${tryOccasion}.`;
+      let baseDescription = buildHair360BaseDescription(tryHairStyle, tryOccasion);
       const result = await runBeautyActionWithRetry(() => generateVirtualMakeup(
         trySelfie,
         tryMakeupStyle,
         `${tryHairStyle}, length:${hair360Length}, volume:${hair360Volume}, fringe:${hair360Fringe}, texture:${hair360Texture}`,
-        `${tryOccasion} 360 hairstyle preview`
+        buildHair360PreviewOccasionContext(tryOccasion),
+        { generateImage: false, styleIntensity: tryStyleIntensity }
       ));
       baseDescription = result.description || baseDescription;
 
@@ -1489,6 +1725,12 @@ const App: React.FC = () => {
         <div ref={accountMenuRef} className="fixed right-4 top-20 z-[60] w-[min(92vw,320px)] rounded-2xl border border-slate-700 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
           <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Workspace</div>
           <button
+            onClick={() => handleWorkspaceTabChange('dashboard')}
+            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'dashboard' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            Dashboard
+          </button>
+          <button
             onClick={() => handleWorkspaceTabChange('colorizer')}
             className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'colorizer' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
           >
@@ -1499,6 +1741,28 @@ const App: React.FC = () => {
             className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'beauty-lab' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
           >
             Beauty Lab
+          </button>
+          <button
+            onClick={() => handleWorkspaceTabChange('barbershop')}
+            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'barbershop' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            Barbershop
+          </button>
+          <button
+            onClick={() => handleWorkspaceTabChange('account')}
+            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'account' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            Account
+          </button>
+
+          <div className="my-2 border-t border-slate-800" />
+          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Beauty Tools</div>
+          <button
+            onClick={() => { setShowBeautyToolsDrawer(true); setShowAccountMenu(false); }}
+            disabled={activeWorkspaceTab !== 'beauty-lab'}
+            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
+          >
+            Open Beauty Tools
           </button>
 
           <div className="my-2 border-t border-slate-800" />
@@ -1553,6 +1817,16 @@ const App: React.FC = () => {
         >
           <div className="rounded-2xl border border-indigo-400/30 bg-slate-950/60 p-2 space-y-1">
             <button
+              onClick={() => handleWorkspaceTabChange('dashboard')}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                activeWorkspaceTab === 'dashboard'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
+                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+              }`}
+            >
+              Dashboard
+            </button>
+            <button
               onClick={() => handleWorkspaceTabChange('colorizer')}
               className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
                 activeWorkspaceTab === 'colorizer'
@@ -1573,10 +1847,24 @@ const App: React.FC = () => {
               Beauty Lab
             </button>
             <button
-              disabled
-              className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-slate-500 border border-transparent"
+              onClick={() => handleWorkspaceTabChange('barbershop')}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                activeWorkspaceTab === 'barbershop'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
+                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+              }`}
             >
-              Gallery
+              Barbershop
+            </button>
+            <button
+              onClick={() => handleWorkspaceTabChange('account')}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                activeWorkspaceTab === 'account'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
+                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+              }`}
+            >
+              Account
             </button>
           </div>
         </div>
@@ -1769,7 +2057,329 @@ const App: React.FC = () => {
           )}
         </div>
 
+        <div
+          id="beauty-tools-drawer"
+          className={`${showBeautyToolsDrawer ? 'fixed' : 'hidden'} right-4 top-24 z-50 w-[min(92vw,420px)] rounded-3xl border border-amber-500/35 bg-slate-900/95 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[calc(100vh-7rem)] overflow-y-auto`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-amber-100 uppercase tracking-[0.18em]">Beauty Tools</h3>
+              <p className="text-xs leading-relaxed text-slate-400">Advanced tools moved out of the main Beauty Lab canvas.</p>
+            </div>
+            <button
+              onClick={() => setShowBeautyToolsDrawer(false)}
+              className="w-9 h-9 flex items-center justify-center rounded-full border border-slate-700 text-slate-300 hover:border-amber-400 hover:text-white transition-colors"
+              aria-label="Close beauty tools drawer"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-rose-300">Selected Service</label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {BEAUTY_SERVICES.map((service) => (
+                  <button
+                    key={service.id}
+                    type="button"
+                    onClick={() => setBeautyService(service.id)}
+                    className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                      beautyService === service.id
+                        ? 'border-rose-400/60 bg-rose-500/10 text-rose-50'
+                        : 'border-slate-800 bg-slate-950/50 text-slate-300 hover:border-rose-400/40 hover:text-white'
+                    }`}
+                  >
+                    <div className="text-[11px] font-semibold uppercase tracking-wider">{service.label}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-rose-300">Client Name</label>
+              <input
+                value={beautyClientName}
+                onChange={(event) => setBeautyClientName(event.target.value)}
+                placeholder="Client profile name"
+                className="w-full rounded-xl bg-slate-950/60 border border-rose-400/30 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-rose-400"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Occasion</label>
+              <select
+                value={tryOccasion}
+                onChange={(e) => setTryOccasion(e.target.value)}
+                className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300"
+              >
+                <optgroup label="General Occasions">
+                  {OCCASION_OPTIONS.map((occasion) => (
+                    <option key={occasion.value} value={occasion.value}>{occasion.label}</option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Makeup Style</label>
+              <select
+                value={tryMakeupStyle}
+                onChange={(e) => setTryMakeupStyle(e.target.value)}
+                className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300"
+              >
+                <option value="natural">Natural/Minimal</option>
+                <option value="bold">Bold/Dramatic</option>
+                <option value="smokey-eye">Smokey Eye</option>
+                <option value="glam">Glamorous</option>
+                <option value="editorial">Editorial/Artistic</option>
+                <option value="dewy">Dewy/Fresh</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Style Intensity</label>
+              <select
+                value={tryStyleIntensity}
+                onChange={(e) => setTryStyleIntensity(e.target.value as 'subtle' | 'balanced' | 'dramatic')}
+                className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300"
+              >
+                <option value="subtle">Subtle (natural)</option>
+                <option value="balanced">Balanced</option>
+                <option value="dramatic">Dramatic</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Hairstyle / Haircut</label>
+              <select
+                value={tryHairStyle}
+                onChange={(e) => setTryHairStyle(e.target.value)}
+                className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300"
+              >
+                <optgroup label="General Styles">
+                  {GENERAL_HAIRSTYLE_OPTIONS.map((style) => (
+                    <option key={style.value} value={style.value}>{style.label}</option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              onClick={handleGetOccasionRecommendations}
+              disabled={tryLoading || !trySelfie}
+              className="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+            >
+              {tryLoading ? 'Getting...' : 'Get Ideas'}
+            </button>
+            <button
+              onClick={handleGenerateHair360Preview}
+              disabled={hair360Loading || !trySelfie}
+              className="px-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+            >
+              {hair360Loading ? 'Generating 360...' : 'Generate 360 Preview'}
+            </button>
+            <button
+              onClick={handleAnalyzeBeautyProfile}
+              disabled={profileAnalysisLoading || !trySelfie}
+              className="px-4 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+            >
+              {profileAnalysisLoading ? 'Analyzing...' : 'Analyze Profile'}
+            </button>
+            <button
+              onClick={() => void handleBeautyConsultation()}
+              disabled={beautyConsultationLoading || !trySelfie || !beautyNotes.trim()}
+              className="px-4 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+            >
+              {beautyConsultationLoading ? 'Consulting...' : 'Consult Notes'}
+            </button>
+          </div>
+
+          {tryMessage && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">{tryMessage}</div>
+          )}
+          {beautyConsultationMessage && (
+            <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-100">{beautyConsultationMessage}</div>
+          )}
+          {hair360Message && (
+            <div className="rounded-xl border border-violet-500/30 bg-violet-500/10 p-3 text-xs text-violet-100">{hair360Message}</div>
+          )}
+          {profileAnalysisMessage && (
+            <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs text-cyan-100">{profileAnalysisMessage}</div>
+          )}
+
+          {tryResults && tryResults.length > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-slate-950/60 p-3 space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Look Ideas</div>
+              {tryResults.slice(0, 3).map((rec, idx) => (
+                <div key={idx} className="text-[11px] text-slate-300">
+                  <span className="font-semibold text-amber-200">{rec.style}: </span>
+                  {rec.description?.slice(0, 120) || rec.makeup?.slice(0, 120) || 'Generated look'}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {beautyConsultationResult && (
+            <div className="rounded-xl border border-rose-500/30 bg-slate-950/60 p-3 space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-rose-300">Consultation</div>
+              <div className="text-[11px] text-slate-300 max-h-24 overflow-y-auto whitespace-pre-wrap">
+                {beautyConsultationResult.advice}
+              </div>
+            </div>
+          )}
+
+          {hair360Previews && hair360Previews.length > 0 && (
+            <div className="rounded-xl border border-violet-500/30 bg-slate-950/60 p-3 space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Hair 360</div>
+              <div className="grid grid-cols-4 gap-1">
+                {(['front', 'left', 'right', 'back'] as Hair360Angle[]).map((angle) => (
+                  <button
+                    key={angle}
+                    onClick={() => setHair360ActiveAngle(angle)}
+                    className={`rounded-md px-2 py-1 text-[9px] uppercase font-bold ${hair360ActiveAngle === angle ? 'bg-violet-500/25 text-violet-100' : 'bg-slate-800 text-slate-300'}`}
+                  >
+                    {angle}
+                  </button>
+                ))}
+              </div>
+              {hair360Previews.filter((item) => item.angle === hair360ActiveAngle).map((item) => (
+                <div key={item.angle} className="text-[11px] text-slate-300">{item.summary}</div>
+              ))}
+            </div>
+          )}
+
+          {profileAnalysisResult && (
+            <div className="rounded-xl border border-cyan-500/30 bg-slate-950/60 p-3 space-y-1 text-[11px] text-slate-300">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Profile Snapshot</div>
+              <div><span className="text-cyan-200 font-semibold">Skin: </span>{profileAnalysisResult.skinTone.undertone} / {profileAnalysisResult.skinTone.overtone}</div>
+              <div><span className="text-cyan-200 font-semibold">Face: </span>{profileAnalysisResult.faceShape.shape}</div>
+              <div><span className="text-cyan-200 font-semibold">Eyes: </span>{profileAnalysisResult.eyes.shape}</div>
+              <div><span className="text-cyan-200 font-semibold">Hair: </span>{profileAnalysisResult.hair.texture}</div>
+            </div>
+          )}
+        </div>
+
         <div className="w-full space-y-6 sm:space-y-8 xl:col-start-2">
+
+        {activeWorkspaceTab === 'dashboard' && (
+        <div
+          id="dashboard-panel"
+          className="w-full rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-[#0f172a] via-[#111827] to-[#1f2937] p-4 sm:p-6 shadow-2xl shadow-cyan-500/10"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+            <div>
+              <h3 className="text-base sm:text-lg font-black tracking-[0.16em] uppercase text-white">Workspace Hub</h3>
+              <p className="text-xs text-slate-300 mt-1">2026 Bento navigation. Open any feature card to enter its dedicated page.</p>
+            </div>
+            <div className="inline-flex items-center rounded-full border border-cyan-300/40 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-100">
+              Android Ready Layout
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 auto-rows-[140px]">
+            <button
+              onClick={() => handleWorkspaceTabChange('colorizer')}
+              className="lg:col-span-3 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-400/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+            >
+              <div className="text-[10px] uppercase tracking-widest text-indigo-200/80 font-bold">Image Engine</div>
+              <div className="mt-2 text-lg font-extrabold text-white">Colorizer Studio</div>
+              <p className="mt-2 text-xs text-indigo-100/80">Upload, enhance, animate, and export.</p>
+            </button>
+
+            <button
+              onClick={() => handleWorkspaceTabChange('beauty-lab')}
+              className="lg:col-span-3 rounded-3xl border border-rose-400/40 bg-gradient-to-br from-rose-500/15 via-rose-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+            >
+              <div className="text-[10px] uppercase tracking-widest text-rose-200/80 font-bold">Salon AI</div>
+              <div className="mt-2 text-lg font-extrabold text-white">Beauty Lab</div>
+              <p className="mt-2 text-xs text-rose-100/80">Try-on studio, consultation, and profile tools.</p>
+            </button>
+
+            <button
+              onClick={() => handleWorkspaceTabChange('barbershop')}
+              className="lg:col-span-4 rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 via-emerald-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+            >
+              <div className="text-[10px] uppercase tracking-widest text-emerald-200/80 font-bold">Dedicated Feature</div>
+              <div className="mt-2 text-lg font-extrabold text-white">Barbershop Visit</div>
+              <p className="mt-2 text-xs text-emerald-100/80">Haircut previews with isolated session context.</p>
+            </button>
+
+            <button
+              onClick={() => handleWorkspaceTabChange('account')}
+              className="lg:col-span-2 rounded-3xl border border-amber-300/40 bg-gradient-to-br from-amber-500/15 via-amber-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+            >
+              <div className="text-[10px] uppercase tracking-widest text-amber-200/80 font-bold">Control Center</div>
+              <div className="mt-2 text-base font-extrabold text-white">Account</div>
+              <p className="mt-2 text-xs text-amber-100/80">Plans, usage, refresh, and security actions.</p>
+            </button>
+          </div>
+        </div>
+        )}
+
+        {activeWorkspaceTab === 'account' && (
+        <div
+          id="account-panel"
+          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-amber-500/45 bg-amber-500/5 shadow-lg shadow-amber-500/10"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account Center</h3>
+              <p className="text-xs leading-relaxed text-slate-400">Manage subscription, usage, and security from one page.</p>
+            </div>
+            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-amber-400/40 bg-amber-500/10 text-amber-200">
+              Feature Page
+            </span>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Current User</div>
+              <div className="mt-2 text-sm font-semibold text-white truncate">{authUser?.username || activeUserId}</div>
+            </div>
+            <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Token Balance</div>
+              <div className="mt-2 text-sm font-semibold text-white">{subscriptionAccount?.tokenBalance ?? '--'}</div>
+            </div>
+            <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Plan</div>
+              <div className="mt-2 text-sm font-semibold text-white uppercase">{subscriptionAccount?.tier ?? 'free'}</div>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              onClick={() => { setAccountTab('overview'); setShowAccountDrawer(true); }}
+              className="px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+            >
+              Open Account Overview
+            </button>
+            <button
+              onClick={() => { setAccountTab('account-details'); setShowAccountDrawer(true); }}
+              className="px-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+            >
+              Open Account Details
+            </button>
+            <button
+              onClick={() => { void refreshSubscription(); }}
+              disabled={billingLoading}
+              className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+            >
+              {billingLoading ? 'Refreshing...' : 'Refresh Billing'}
+            </button>
+            <button
+              onClick={() => { setAccountTab('delete-account'); setShowAccountDrawer(true); }}
+              className="px-4 py-3 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+            >
+              Danger Zone
+            </button>
+          </div>
+        </div>
+        )}
 
         {activeWorkspaceTab === 'beauty-lab' && (
         <div
@@ -1784,48 +2394,6 @@ const App: React.FC = () => {
             <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-rose-400/40 bg-rose-500/10 text-rose-200">
               New Tab
             </span>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
-            {BEAUTY_SERVICES.map((service) => (
-              <button
-                key={service.id}
-                type="button"
-                onClick={() => setBeautyService(service.id)}
-                className={`rounded-2xl border px-3 py-3 text-left transition-colors ${
-                  beautyService === service.id
-                    ? 'border-rose-400/60 bg-rose-500/10 text-rose-50'
-                    : 'border-slate-800 bg-slate-950/50 text-slate-300 hover:border-rose-400/40 hover:text-white'
-                }`}
-              >
-                <div className="text-xs font-semibold uppercase tracking-wider">{service.label}</div>
-                <div className="text-[11px] mt-1 text-slate-300">{service.description}</div>
-              </button>
-            ))}
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Client Name</label>
-              <input
-                value={beautyClientName}
-                onChange={(event) => setBeautyClientName(event.target.value)}
-                placeholder="Client profile name"
-                className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Selected Service</label>
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-3 text-xs text-slate-200">
-                {BEAUTY_SERVICES.find((service) => service.id === beautyService)?.label}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-950/50 px-3 py-3 text-xs text-slate-300">
-            {beautyClientName.trim()
-              ? `Ready for ${beautyClientName.trim()}. Use Color Studio tab to upload a reference image and apply the ${BEAUTY_SERVICES.find((service) => service.id === beautyService)?.label} workflow.`
-              : 'Add a client name, select a service, and capture notes before switching to Color Studio for image processing.'}
           </div>
 
           <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 space-y-3">
@@ -1850,7 +2418,18 @@ const App: React.FC = () => {
                     <img src={trySelfie} alt="Before selfie" className="w-full h-40 object-cover" />
                   </div>
                   <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-amber-300 border-b border-amber-500/20">After</div>
+                    <div className="px-2 py-1 border-b border-amber-500/20 flex items-center justify-between gap-2">
+                      <span className="text-[10px] uppercase tracking-wider font-bold text-amber-300">After</span>
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
+                        tryStyleIntensity === 'dramatic'
+                          ? 'border-fuchsia-400/50 bg-fuchsia-500/15 text-fuchsia-200'
+                          : tryStyleIntensity === 'subtle'
+                            ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-200'
+                            : 'border-amber-400/50 bg-amber-500/15 text-amber-200'
+                      }`}>
+                        {tryStyleIntensity}
+                      </span>
+                    </div>
                     {tryAfterImage ? (
                       <img src={tryAfterImage} alt="After virtual try-on" className="w-full h-40 object-cover" />
                     ) : (
@@ -1897,524 +2476,40 @@ const App: React.FC = () => {
               <textarea
                 value={beautyNotes}
                 onChange={(event) => setBeautyNotes(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                    event.preventDefault();
-                    if (!beautyConsultationLoading && trySelfie && beautyNotes.trim()) {
-                      void handleBeautyConsultation();
-                    }
-                  }
-                }}
                 placeholder="Skin tone goals, finish preference, timing, and product notes"
                 rows={4}
                 className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
               />
-              <div className="flex justify-end">
+              <div className="grid gap-2 sm:grid-cols-2">
                 <button
-                  onClick={() => void handleBeautyConsultation()}
-                  disabled={beautyConsultationLoading || !trySelfie || !beautyNotes.trim()}
-                  aria-label="Send notes for beauty advice"
-                  className="inline-flex items-center justify-center h-9 w-9 rounded-full bg-rose-600 text-white hover:bg-rose-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                  onClick={handleGenerateVirtualMakeup}
+                  disabled={tryLoading || !trySelfie}
+                  className="px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14m0 0l-6-6m6 6l-6 6" />
-                  </svg>
+                  {tryLoading ? 'Generating...' : 'Generate Look'}
+                </button>
+                <button
+                  onClick={handleDownloadTryOn}
+                  disabled={!trySelfie}
+                  className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Download
                 </button>
               </div>
             </div>
 
-            {beautyConsultationMessage && (
+            {tryMessage && (
               <div className={`p-3 rounded-xl text-xs ${
-                beautyConsultationMessage.toLowerCase().includes('error') || beautyConsultationMessage.toLowerCase().includes('failed')
+                tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed')
                   ? 'bg-red-500/10 border border-red-500/30 text-red-200'
                   : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
               }`}>
-                {beautyConsultationMessage}
-              </div>
-            )}
-
-            {beautyConsultationResult && (
-              <div className="space-y-3 p-3 rounded-xl border border-rose-400/30 bg-slate-950/50">
-                <div className="space-y-2">
-                  <h5 className="text-xs font-bold text-rose-200 uppercase tracking-wider">Professional Advice</h5>
-                  <div className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
-                    {beautyConsultationResult.advice}
-                  </div>
-                </div>
-
-                {beautyConsultationResult.recommendations.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-slate-800">
-                    <h5 className="text-xs font-bold text-rose-200 uppercase tracking-wider">Recommendations</h5>
-                    <ul className="space-y-1">
-                      {beautyConsultationResult.recommendations.map((rec, idx) => (
-                        <li key={idx} className="text-xs text-slate-300 flex gap-2">
-                          <span className="text-rose-400 font-bold flex-shrink-0">•</span>
-                          <span>{rec}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {tryMessage}
               </div>
             )}
 
             {trySelfie && (
               <>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Occasion</label>
-                    <select
-                      value={tryOccasion}
-                      onChange={(e) => setTryOccasion(e.target.value)}
-                      className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                    >
-                      <option value="wedding">Wedding</option>
-                      <option value="celebration">Celebration</option>
-                      <option value="party">Party/Night Out</option>
-                      <option value="business">Business Event</option>
-                      <option value="casual">Casual Everyday</option>
-                      <option value="barbershop">Barbershop Visit</option>
-                      <option value="photoshoot">Photoshoot</option>
-                      <option value="festival">Festival/Concert</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Makeup Style</label>
-                    <select
-                      value={tryMakeupStyle}
-                      onChange={(e) => setTryMakeupStyle(e.target.value)}
-                      className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                    >
-                      <option value="natural">Natural/Minimal</option>
-                      <option value="bold">Bold/Dramatic</option>
-                      <option value="smokey-eye">Smokey Eye</option>
-                      <option value="glam">Glamorous</option>
-                      <option value="editorial">Editorial/Artistic</option>
-                      <option value="dewy">Dewy/Fresh</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Hairstyle / Haircut</label>
-                  <select
-                    value={tryHairStyle}
-                    onChange={(e) => setTryHairStyle(e.target.value)}
-                    className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300 focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                  >
-                    <optgroup label="General Styles">
-                    <option value="wavy">Loose Waves</option>
-                    <option value="sleek">Sleek/Straight</option>
-                    <option value="curly">Curls/Coils</option>
-                    <option value="updo">Updo/Bun</option>
-                    <option value="half-up">Half-Up Half-Down</option>
-                    <option value="braided">Braided</option>
-                    <option value="volume">High-Volume</option>
-                    </optgroup>
-                    <optgroup label="Barbershop Haircuts">
-                    <option value="taper-fade">Taper Fade</option>
-                    <option value="skin-fade">Skin Fade</option>
-                    <option value="buzz-cut">Buzz Cut</option>
-                    <option value="crew-cut">Crew Cut</option>
-                    <option value="textured-crop">Textured Crop</option>
-                    <option value="pompadour">Pompadour</option>
-                    <option value="quiff">Quiff</option>
-                    </optgroup>
-                  </select>
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    onClick={handleGetOccasionRecommendations}
-                    disabled={tryLoading}
-                    className="px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5h.01" />
-                    </svg>
-                    {tryLoading ? 'Getting...' : 'Get Ideas'}
-                  </button>
-                  <button
-                    onClick={handleGenerateVirtualMakeup}
-                    disabled={tryLoading}
-                    className="px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    {tryLoading ? 'Making...' : 'Try This Look'}
-                  </button>
-                </div>
-
-                <div className="rounded-xl border border-violet-500/30 bg-violet-950/20 p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <h5 className="text-xs font-bold text-violet-200 uppercase tracking-wider">360 Hairstyle Preview (Beta)</h5>
-                    <span className="text-[10px] px-2 py-1 rounded-full border border-violet-400/40 bg-violet-500/10 text-violet-200 uppercase tracking-wider font-bold">Phase 1</span>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Length</label>
-                      <select
-                        value={hair360Length}
-                        onChange={(e) => setHair360Length(e.target.value as 'short' | 'medium' | 'long')}
-                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
-                      >
-                        <option value="short">Short</option>
-                        <option value="medium">Medium</option>
-                        <option value="long">Long</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Volume</label>
-                      <select
-                        value={hair360Volume}
-                        onChange={(e) => setHair360Volume(e.target.value as 'low' | 'balanced' | 'high')}
-                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
-                      >
-                        <option value="low">Low</option>
-                        <option value="balanced">Balanced</option>
-                        <option value="high">High</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Fringe</label>
-                      <select
-                        value={hair360Fringe}
-                        onChange={(e) => setHair360Fringe(e.target.value as 'none' | 'curtain' | 'side-swept' | 'full')}
-                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
-                      >
-                        <option value="none">None</option>
-                        <option value="curtain">Curtain</option>
-                        <option value="side-swept">Side-swept</option>
-                        <option value="full">Full</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold uppercase tracking-widest text-violet-300">Texture Finish</label>
-                      <select
-                        value={hair360Texture}
-                        onChange={(e) => setHair360Texture(e.target.value as 'soft' | 'defined' | 'sleek')}
-                        className="w-full rounded-xl bg-slate-950/60 border border-violet-400/40 px-3 py-2 text-xs text-violet-100 focus:outline-none"
-                      >
-                        <option value="soft">Soft</option>
-                        <option value="defined">Defined</option>
-                        <option value="sleek">Sleek</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleGenerateHair360Preview}
-                    disabled={hair360Loading || !trySelfie}
-                    className="w-full px-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                  >
-                    {hair360Loading ? 'Generating 360...' : 'Generate 360 Preview'}
-                  </button>
-
-                  {hair360Message && (
-                    <div className={`p-3 rounded-xl text-xs ${
-                      hair360Message.toLowerCase().includes('error') || hair360Message.toLowerCase().includes('failed')
-                        ? 'bg-red-500/10 border border-red-500/30 text-red-200'
-                        : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
-                    }`}>
-                      {hair360Message}
-                    </div>
-                  )}
-
-                  {hair360Previews && hair360Previews.length > 0 && (
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                        {(['front', 'left', 'right', 'back'] as Hair360Angle[]).map((angle) => (
-                          <button
-                            key={angle}
-                            onClick={() => setHair360ActiveAngle(angle)}
-                            className={`px-2 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${
-                              hair360ActiveAngle === angle
-                                ? 'bg-violet-500/20 border border-violet-400/50 text-violet-100'
-                                : 'bg-slate-900/70 border border-slate-700 text-slate-300 hover:border-violet-400/40'
-                            }`}
-                          >
-                            {angle}
-                          </button>
-                        ))}
-                      </div>
-
-                      {hair360Previews
-                        .filter((item) => item.angle === hair360ActiveAngle)
-                        .map((item) => (
-                          <div key={item.angle} className="rounded-xl border border-violet-400/30 bg-slate-950/60 p-3 space-y-2">
-                            <div className="text-xs font-bold text-violet-200 uppercase tracking-wider">{item.title}</div>
-                            <div className="text-[10px] text-slate-300 leading-relaxed">{item.summary}</div>
-                            <div className="text-[10px] text-violet-200/90">
-                              <span className="font-semibold text-violet-300">Edit suggestion: </span>
-                              {item.editHint}
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-
-                {tryMessage && (
-                  <div className={`p-3 rounded-xl text-xs ${
-                    tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed')
-                      ? 'bg-red-500/10 border border-red-500/30 text-red-200'
-                      : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
-                  }`}>
-                    {tryMessage}
-                  </div>
-                )}
-
-                {tryResults && tryResults.length > 0 && (
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {tryResults.map((rec, idx) => (
-                      <div key={idx} className="rounded-xl border border-amber-400/30 bg-slate-950/50 p-3 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <h5 className="text-xs font-bold text-amber-200 uppercase tracking-wider">{rec.style}</h5>
-                          {idx === 0 && (
-                            <button
-                              onClick={handleDownloadTryOn}
-                              className="text-[10px] font-bold text-amber-400 hover:text-amber-300 transition-colors"
-                            >
-                              Download
-                            </button>
-                          )}
-                        </div>
-
-                        {rec.makeup && (
-                          <div className="text-[10px] text-slate-300">
-                            <span className="font-semibold text-amber-300">Makeup: </span>
-                            {rec.makeup.substring(0, 150)}{rec.makeup.length > 150 ? '...' : ''}
-                          </div>
-                        )}
-                        {rec.hair && (
-                          <div className="text-[10px] text-slate-300">
-                            <span className="font-semibold text-amber-300">Hair: </span>
-                            {rec.hair}
-                          </div>
-                        )}
-                        {rec.description && (
-                          <details className="text-[10px] text-slate-300 cursor-pointer">
-                            <summary className="font-semibold text-amber-300 hover:text-amber-200">Full Details</summary>
-                            <div className="mt-2 whitespace-pre-wrap text-slate-400">{rec.description}</div>
-                          </details>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Beauty Profile Analysis Section */}
-                <div className="border-t border-slate-700 pt-4 mt-4">
-                  <h4 className="text-xs font-bold text-cyan-300 uppercase tracking-wider mb-3">Beauty Profile Analysis</h4>
-                  
-                  <button
-                    onClick={handleAnalyzeBeautyProfile}
-                    disabled={profileAnalysisLoading || !trySelfie}
-                    className="w-full px-4 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 mb-3"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                    {profileAnalysisLoading ? 'Analyzing...' : 'Analyze My Profile'}
-                  </button>
-
-                  {profileAnalysisMessage && (
-                    <div className={`p-3 rounded-xl text-xs mb-3 ${
-                      profileAnalysisMessage.toLowerCase().includes('error') || profileAnalysisMessage.toLowerCase().includes('failed')
-                        ? 'bg-red-500/10 border border-red-500/30 text-red-200'
-                        : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
-                    }`}>
-                      {profileAnalysisMessage}
-                    </div>
-                  )}
-
-                  {profileAnalysisResult && (
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {/* Skin Tone Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Skin Tone</h5>
-                        <div className="text-[10px] text-slate-300 space-y-1">
-                          <div><span className="font-semibold text-cyan-300">Undertone: </span>{profileAnalysisResult.skinTone.undertone}</div>
-                          <div><span className="font-semibold text-cyan-300">Overtone: </span>{profileAnalysisResult.skinTone.overtone}</div>
-                          <div><span className="font-semibold text-cyan-300">Description: </span>{profileAnalysisResult.skinTone.description}</div>
-                        </div>
-                      </div>
-
-                      {/* Face Shape Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Face Shape</h5>
-                        <div className="text-[10px] text-slate-300 space-y-1">
-                          <div><span className="font-semibold text-cyan-300">Shape: </span>{profileAnalysisResult.faceShape.shape}</div>
-                          <div className="font-semibold text-cyan-300 mb-1">Key Characteristics:</div>
-                          <ul className="list-disc list-inside text-slate-400">
-                            {profileAnalysisResult.faceShape.characteristics.map((char, idx) => (
-                              <li key={idx}>{char}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-
-                      {/* Eyes Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Eyes</h5>
-                        <div className="text-[10px] text-slate-300 space-y-1">
-                          <div><span className="font-semibold text-cyan-300">Color: </span>{profileAnalysisResult.eyes.color}</div>
-                          <div><span className="font-semibold text-cyan-300">Shape: </span>{profileAnalysisResult.eyes.shape}</div>
-                          <div className="font-semibold text-cyan-300 mb-1">Eyeshadow Techniques:</div>
-                          <ul className="list-disc list-inside text-slate-400">
-                            {profileAnalysisResult.eyes.techniques.map((tech, idx) => (
-                              <li key={idx}>{tech}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-
-                      {/* Hair Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Hair</h5>
-                        <div className="text-[10px] text-slate-300 space-y-1">
-                          <div><span className="font-semibold text-cyan-300">Length: </span>{profileAnalysisResult.hair.length}</div>
-                          <div><span className="font-semibold text-cyan-300">Texture: </span>{profileAnalysisResult.hair.texture}</div>
-                          <div><span className="font-semibold text-cyan-300">Color: </span>{profileAnalysisResult.hair.color}</div>
-                          <div><span className="font-semibold text-cyan-300">Condition: </span>{profileAnalysisResult.hair.condition}</div>
-                        </div>
-                      </div>
-
-                      {/* Makeup Recommendation Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Makeup Recommendation</h5>
-                        <div className="text-[10px] text-slate-300 space-y-2">
-                          <div>
-                            <div className="font-semibold text-cyan-300 mb-1">Foundation Shades</div>
-                            <ul className="list-disc list-inside text-slate-400">
-                              {profileAnalysisResult.makeupRecommendation.foundationShades.map((shade, idx) => (
-                                <li key={idx}>{shade}</li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div>
-                            <div className="font-semibold text-cyan-300 mb-1">Blush Shades</div>
-                            <ul className="list-disc list-inside text-slate-400">
-                              {profileAnalysisResult.makeupRecommendation.blushShades.map((shade, idx) => (
-                                <li key={idx}>{shade}</li>
-                              ))}
-                            </ul>
-                          </div>
-                          <div>
-                            <div className="font-semibold text-cyan-300 mb-1">Lipstick Shades</div>
-                            <ul className="list-disc list-inside text-slate-400">
-                              {profileAnalysisResult.makeupRecommendation.lipstickShades.map((shade, idx) => (
-                                <li key={idx}>{shade}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Color Theory Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Color Theory</h5>
-                        <ul className="list-disc list-inside text-[10px] text-slate-300 space-y-1">
-                          {profileAnalysisResult.makeupRecommendation.colorTheory.map((note, idx) => (
-                            <li key={idx}>{note}</li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      {/* Daily And Glam Looks Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-3">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Daily & Glam Looks</h5>
-                        <div className="text-[10px] text-slate-300 space-y-2">
-                          <div>
-                            <div className="font-semibold text-cyan-300 mb-1 flex items-center gap-2">
-                              <span>Daily Look</span>
-                              <span className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-200">Daily</span>
-                            </div>
-                            <ol className="list-decimal list-inside text-slate-400 space-y-1">
-                              {profileAnalysisResult.makeupRecommendation.dailyLook.map((step, idx) => (
-                                <li key={idx}>{step}</li>
-                              ))}
-                            </ol>
-                          </div>
-                          <div>
-                            <div className="font-semibold text-cyan-300 mb-1 flex items-center gap-2">
-                              <span>Glam Look</span>
-                              <span className="inline-flex items-center rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-fuchsia-200">Glam</span>
-                            </div>
-                            <ol className="list-decimal list-inside text-slate-400 space-y-1">
-                              {profileAnalysisResult.makeupRecommendation.glamLook.map((step, idx) => (
-                                <li key={idx}>{step}</li>
-                              ))}
-                            </ol>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Hair Transformation Card */}
-                      <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-3">
-                        <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Hair Transformation</h5>
-                        <div className="space-y-2 text-[10px] text-slate-300">
-                          <div className="font-semibold text-cyan-300">Recommended Hairstyles</div>
-                          {profileAnalysisResult.hairTransformation.styles.map((style, idx) => (
-                            <div key={idx} className="rounded-lg border border-cyan-500/20 p-2 bg-slate-900/60 space-y-1">
-                              <div className="font-semibold text-cyan-200">{style.name}</div>
-                              <div><span className="font-semibold text-cyan-300">Why it works: </span>{style.whyItWorks}</div>
-                              <div>
-                                <span className="font-semibold text-cyan-300">Salon cut language: </span>
-                                <span>{style.cutDescription}</span>
-                                <span className="ml-2 inline-flex items-center rounded-full border border-amber-400/40 bg-amber-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-200">Stylist Script</span>
-                              </div>
-                            </div>
-                          ))}
-
-                          <div>
-                            <div className="font-semibold text-cyan-300 mb-1">Undertone-Complementary Hair Colors</div>
-                            <ul className="list-disc list-inside text-slate-400">
-                              {profileAnalysisResult.hairTransformation.colorSuggestions.map((item, idx) => (
-                                <li key={idx}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          <div>
-                            <div className="font-semibold text-cyan-300 mb-1">Highlight Ideas</div>
-                            <ul className="list-disc list-inside text-slate-400">
-                              {profileAnalysisResult.hairTransformation.highlightSuggestions.map((item, idx) => (
-                                <li key={idx}>{item}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Safety Note Card */}
-                      <div className="rounded-xl border border-amber-400/30 bg-amber-500/5 p-3 space-y-1">
-                        <h5 className="text-xs font-bold text-amber-200 uppercase tracking-wider">Stylist Note</h5>
-                        <div className="text-[10px] text-amber-100/90">{profileAnalysisResult.safety.disclaimer}</div>
-                        <div className="text-[10px] text-amber-100/90">{profileAnalysisResult.safety.dermatologistNote}</div>
-                      </div>
-
-                      {/* Recommendations Card */}
-                      {profileAnalysisResult.recommendations && profileAnalysisResult.recommendations.length > 0 && (
-                        <div className="rounded-xl border border-cyan-400/30 bg-slate-950/50 p-3 space-y-2">
-                          <h5 className="text-xs font-bold text-cyan-200 uppercase tracking-wider">Personalized Recommendations</h5>
-                          <ul className="list-disc list-inside text-[10px] text-slate-300 space-y-1">
-                            {profileAnalysisResult.recommendations.map((rec, idx) => (
-                              <li key={idx}>{rec}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
                 <button
                   onClick={() => {
                     setTrySelfie(null);
@@ -2429,6 +2524,186 @@ const App: React.FC = () => {
                   Clear & Upload New Photo
                 </button>
               </>
+            )}
+          </div>
+        </div>
+        )}
+
+        {activeWorkspaceTab === 'barbershop' && (
+        <div
+          id="barbershop-panel"
+          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-emerald-500/50 bg-emerald-500/5 shadow-lg shadow-emerald-500/10"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Barbershop Visit</h3>
+              <p className="text-xs leading-relaxed text-slate-400">Dedicated haircut-focused feature with standalone actions and results.</p>
+            </div>
+            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200">
+              Own Feature
+            </span>
+          </div>
+
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 space-y-3">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Upload Photo</label>
+              {barbershopSelfie && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">Before</div>
+                    <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-40 object-cover" />
+                  </div>
+                  <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">After</div>
+                    {barbershopAfterImage ? (
+                      <img src={barbershopAfterImage} alt="After barbershop look" className="w-full h-40 object-cover" />
+                    ) : (
+                      <div className="h-40 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                        Generate a barbershop look to preview your after result.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBarbershopSelfieCapture}
+                  className="hidden"
+                  id="barbershop-upload-input"
+                />
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleBarbershopSelfieCapture}
+                  className="hidden"
+                  id="barbershop-camera-input"
+                />
+                <label
+                  htmlFor="barbershop-upload-input"
+                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border-2 border-dashed border-emerald-400/40 bg-emerald-500/5 text-emerald-300 hover:border-emerald-400/60 hover:bg-emerald-500/10 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
+                >
+                  {barbershopSelfie ? 'Upload New Photo' : 'Upload Photo'}
+                </label>
+                <label
+                  htmlFor="barbershop-camera-input"
+                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border border-emerald-400/40 bg-slate-950/50 text-emerald-200 hover:border-emerald-300/60 hover:text-emerald-100 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
+                >
+                  Use Camera
+                </label>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Barbershop Haircut</label>
+                <select
+                  value={barbershopHaircut}
+                  onChange={(e) => setBarbershopHaircut(e.target.value)}
+                  className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
+                >
+                  {BARBERSHOP_HAIRCUT_OPTIONS.map((style) => (
+                    <option key={style.value} value={style.value}>{style.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Style Intensity</label>
+                <select
+                  value={barbershopStyleIntensity}
+                  onChange={(e) => setBarbershopStyleIntensity(e.target.value as 'subtle' | 'balanced' | 'dramatic')}
+                  className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
+                >
+                  <option value="subtle">Subtle (natural)</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="dramatic">Dramatic</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Makeup Style</label>
+                <select
+                  value={barbershopMakeupStyle}
+                  onChange={(e) => setBarbershopMakeupStyle(e.target.value)}
+                  className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
+                >
+                  <option value="natural">Natural/Minimal</option>
+                  <option value="bold">Bold/Dramatic</option>
+                  <option value="smokey-eye">Smokey Eye</option>
+                  <option value="glam">Glamorous</option>
+                  <option value="editorial">Editorial/Artistic</option>
+                  <option value="dewy">Dewy/Fresh</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Session Notes</label>
+                <textarea
+                  value={barbershopNotes}
+                  onChange={(event) => setBarbershopNotes(event.target.value)}
+                  placeholder="Hairline, fade preference, texture goals, and maintenance notes"
+                  rows={3}
+                  className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-3">
+              <button
+                onClick={handleGetBarbershopRecommendations}
+                disabled={barbershopLoading || !barbershopSelfie}
+                className="px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+              >
+                {barbershopLoading ? 'Getting...' : 'Get Ideas'}
+              </button>
+              <button
+                onClick={handleGenerateBarbershopLook}
+                disabled={barbershopLoading || !barbershopSelfie}
+                className="px-4 py-3 rounded-xl bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+              >
+                {barbershopLoading ? 'Generating...' : 'Generate Look'}
+              </button>
+              <button
+                onClick={handleDownloadBarbershop}
+                disabled={!barbershopSelfie}
+                className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+              >
+                Download
+              </button>
+            </div>
+
+            {barbershopMessage && (
+              <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-3 text-xs text-emerald-100">{barbershopMessage}</div>
+            )}
+
+            {barbershopResults && barbershopResults.length > 0 && (
+              <div className="rounded-xl border border-emerald-500/30 bg-slate-950/60 p-3 space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Barbershop Ideas</div>
+                {barbershopResults.slice(0, 3).map((rec, idx) => (
+                  <div key={idx} className="text-[11px] text-slate-300">
+                    <span className="font-semibold text-emerald-200">{rec.style}: </span>
+                    {rec.description?.slice(0, 120) || rec.makeup?.slice(0, 120) || 'Generated barbershop look'}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {barbershopSelfie && (
+              <button
+                onClick={() => {
+                  setBarbershopSelfie(null);
+                  setBarbershopAfterImage(null);
+                  setBarbershopResults(null);
+                  setBarbershopMessage(null);
+                  setBarbershopNotes('');
+                }}
+                className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white transition-colors border border-emerald-700/70 hover:border-emerald-500"
+              >
+                Clear Barbershop Session
+              </button>
             )}
           </div>
         </div>
@@ -2553,15 +2828,32 @@ const App: React.FC = () => {
             )}
 
             {!processing.isProcessing && (
-              <button
-                onClick={handleColorize}
-                className="w-full max-w-md py-4 min-h-[48px] bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-2xl shadow-xl shadow-indigo-600/20 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                Colorize
-              </button>
+              <div className="w-full max-w-md space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Command</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={colorizerCommand}
+                    onChange={(event) => setColorizerCommand(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void handleRunColorizerCommand();
+                      }
+                    }}
+                    placeholder="Type: animate this image  or  colorize with cinematic palette"
+                    className="flex-1 rounded-xl bg-slate-900 border border-slate-700 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-indigo-400"
+                  />
+                  <button
+                    onClick={() => void handleRunColorizerCommand()}
+                    className="px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                  >
+                    Run
+                  </button>
+                </div>
+                <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                  {commandIntent.isAnimationCommand ? 'Detected: Animate' : 'Detected: Colorize'} | Palette: {commandIntent.effectiveTheme}
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -2664,16 +2956,32 @@ const App: React.FC = () => {
                   </p>
                 </div>
               ) : (
-                <button
-                  onClick={handleAnimate}
-                  disabled={processing.isProcessing}
-                  className="w-full py-4 min-h-[48px] bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-2xl shadow-xl shadow-purple-600/20 transition-all active:scale-95 flex items-center justify-center gap-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                  Generate Animation
-                </button>
+                <div className="w-full space-y-2">
+                  <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Command</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={colorizerCommand}
+                      onChange={(event) => setColorizerCommand(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          void handleRunColorizerCommand();
+                        }
+                      }}
+                      placeholder="Type: animate this image or colorize in vintage palette"
+                      className="flex-1 rounded-xl bg-slate-900 border border-slate-700 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-indigo-400"
+                    />
+                    <button
+                      onClick={() => void handleRunColorizerCommand()}
+                      className="px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
+                    >
+                      Run
+                    </button>
+                  </div>
+                  <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                    {commandIntent.isAnimationCommand ? 'Detected: Animate' : 'Detected: Colorize'} | Palette: {commandIntent.effectiveTheme}
+                  </div>
+                </div>
               )}
 
               <button
@@ -2690,7 +2998,7 @@ const App: React.FC = () => {
             {videoResult && (
               <div className="w-full space-y-4">
                 <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Animation</h3>
-                <VideoResult videoUrl={videoResult.videoUrl} />
+                <VideoResult videoUrl={videoResult.videoUrl} onDownload={handleDownloadAnimation} />
               </div>
             )}
           </div>

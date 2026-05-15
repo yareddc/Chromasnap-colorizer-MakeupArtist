@@ -54,6 +54,12 @@ export const API_ENDPOINTS = {
   PROCESS_ANIMATE_STATUS: `${API_BASE_URL}/api/process/animate/status`,
   PROCESS_ANIMATE_RESULT: `${API_BASE_URL}/api/process/animate/result`,
 
+  // Beauty Lab endpoints
+  CONSULT_BEAUTY_ADVISOR: `${API_BASE_URL}/api/consult/beauty-advisor`,
+  GENERATE_VIRTUAL_MAKEUP: `${API_BASE_URL}/api/generate/virtual-makeup`,
+  RECOMMEND_OCCASION_LOOK: `${API_BASE_URL}/api/recommend/occasion-look`,
+  ANALYZE_BEAUTY_PROFILE: `${API_BASE_URL}/api/analyze/beauty-profile`,
+
   // Subscription endpoints
   SUBSCRIPTION_PLANS: `${API_BASE_URL}/api/subscription/plans`,
   SUBSCRIPTION_ME: `${API_BASE_URL}/api/subscription/me`,

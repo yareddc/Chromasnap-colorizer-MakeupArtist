@@ -1,6 +1,10 @@
 FROM node:20-slim AS build
 WORKDIR /app/server
 
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends python3 make g++ \
+	&& rm -rf /var/lib/apt/lists/*
+
 COPY server/package*.json ./
 RUN npm ci
 
@@ -38,6 +42,10 @@ RUN npm run build
 
 FROM node:20-slim AS runtime
 WORKDIR /app/server
+
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends python3 make g++ \
+	&& rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV PORT=8080

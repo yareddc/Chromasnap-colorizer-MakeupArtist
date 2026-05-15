@@ -44,38 +44,45 @@ steps:
         set -euo pipefail
         echo "Validating required auth secrets in Secret Manager..."
 
-        JWT_VALUE="$$(gcloud secrets versions access latest --secret="$_SECRET_JWT_SECRET" --project="$PROJECT_ID" | tr -d '\r')"
-        ADMIN_VALUE="$$(gcloud secrets versions access latest --secret="$_SECRET_ADMIN_API_KEY" --project="$PROJECT_ID" | tr -d '\r')"
+        validate_secret() {
+          local secret_name="$1"
+          local min_length="$2"
+          local allow_google_api_key="$3"
+          local tmp_file
+          tmp_file="$$(mktemp)"
 
-        if [ -z "$${JWT_VALUE}" ]; then
-          echo "ERROR: $_SECRET_JWT_SECRET latest version is empty"
-          exit 1
-        fi
+          gcloud secrets versions access latest --secret="$$secret_name" --project="$PROJECT_ID" > "$$tmp_file"
 
-        if [ -z "$${ADMIN_VALUE}" ]; then
-          echo "ERROR: $_SECRET_ADMIN_API_KEY latest version is empty"
-          exit 1
-        fi
+          local raw_length
+          raw_length="$$(wc -c < "$$tmp_file" | tr -d ' ')"
+          local normalized_value
+          normalized_value="$$(tr -d '\r\n' < "$$tmp_file")"
+          local normalized_length="$${#normalized_value}"
 
-        if [ $${#JWT_VALUE} -lt 32 ]; then
-          echo "ERROR: $_SECRET_JWT_SECRET must be at least 32 characters"
-          exit 1
-        fi
+          if [ "$${raw_length}" -ne "$${normalized_length}" ]; then
+            echo "ERROR: $$secret_name contains trailing newline characters; store it without CR/LF"
+            exit 1
+          fi
 
-        if [ $${#ADMIN_VALUE} -lt 24 ]; then
-          echo "ERROR: $_SECRET_ADMIN_API_KEY must be at least 24 characters"
-          exit 1
-        fi
+          if [ -z "$${normalized_value}" ]; then
+            echo "ERROR: $$secret_name latest version is empty"
+            exit 1
+          fi
 
-        if [[ "$$JWT_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
-          echo "ERROR: $_SECRET_JWT_SECRET cannot be a Google API key"
-          exit 1
-        fi
+          if [ "$${normalized_length}" -lt "$${min_length}" ]; then
+            echo "ERROR: $$secret_name must be at least $$min_length characters"
+            exit 1
+          fi
 
-        if [[ "$$ADMIN_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
-          echo "ERROR: $_SECRET_ADMIN_API_KEY cannot be a Google API key"
-          exit 1
-        fi
+          if [ "$${allow_google_api_key}" != "true" ] && [[ "$${normalized_value}" =~ ^AIza[0-9A-Za-z_-]{20,}$$ ]]; then
+            echo "ERROR: $$secret_name cannot be a Google API key"
+            exit 1
+          fi
+        }
+
+        validate_secret "$_SECRET_GEMINI_API_KEY" 20 true
+        validate_secret "$_SECRET_JWT_SECRET" 32 false
+        validate_secret "$_SECRET_ADMIN_API_KEY" 24 false
 
         echo "Secret validation passed."
 
@@ -130,6 +137,62 @@ steps:
     waitFor:
       - push-build-id-image
       - push-latest-image
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: capture-service-url
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run services describe "$_SERVICE" --region "$_REGION" --platform managed --format="value(status.url)" > /workspace/.cloudrun-url
+        gcloud auth print-identity-token > /workspace/.identity-token || true
+        gcloud secrets versions access latest --secret="$_SECRET_ADMIN_API_KEY" --project="$PROJECT_ID" | tr -d '\r\n' > /workspace/.admin-api-key
+        echo "Captured deployed service URL: $$(cat /workspace/.cloudrun-url)"
+    waitFor:
+      - deploy-cloud-run
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: post-deploy-health-check
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL="$$(cat /workspace/.cloudrun-url)"
+        echo "Checking $$SERVICE_URL/health"
+        curl --fail --silent --show-error "$$SERVICE_URL/health"
+    waitFor:
+      - capture-service-url
+
+  - name: node:20
+    id: post-deploy-smoke-tests
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL="$$(cat /workspace/.cloudrun-url)"
+        cd /workspace/server
+        npm ci --no-audit --fund=false
+        AUTH_SMOKE_BASE_URL="$$SERVICE_URL" node scripts/smoke-auth-cookie.mjs
+        BILLING_SMOKE_BASE_URL="$$SERVICE_URL" BILLING_EXPECT_DIRECT_MUTATION_BLOCKED=1 node scripts/smoke-billing.mjs
+    waitFor:
+      - post-deploy-health-check
+
+  - name: node:20
+    id: post-deploy-admin-smoke
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL="$$(cat /workspace/.cloudrun-url)"
+        ADMIN_KEY="$$(cat /workspace/.admin-api-key)"
+        cd /workspace/server
+        ADMIN_SMOKE_BASE_URL="$$SERVICE_URL" ADMIN_SMOKE_ADMIN_API_KEY="$$ADMIN_KEY" node scripts/smoke-admin-api.mjs
+    waitFor:
+      - post-deploy-smoke-tests
 
 images:
   - gcr.io/$PROJECT_ID/$_SERVICE:$BUILD_ID

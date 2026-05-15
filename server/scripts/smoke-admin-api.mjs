@@ -1,16 +1,21 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
-const baseUrl = 'http://localhost:3001';
-const adminKey = process.env.ADMIN_API_KEY;
+const envPath = path.resolve(__dirname, '..', '.env');
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+}
+
+const baseUrl = (process.env.ADMIN_SMOKE_BASE_URL || process.env.BASE_URL || 'http://localhost:3001').trim();
+const adminKey = (process.env.ADMIN_SMOKE_ADMIN_API_KEY || process.env.ADMIN_API_KEY || '').trim();
 
 if (!adminKey) {
-  console.error('Missing ADMIN_API_KEY in server/.env');
+  console.error('Missing admin API key. Set ADMIN_SMOKE_ADMIN_API_KEY or ADMIN_API_KEY.');
   process.exit(1);
 }
 

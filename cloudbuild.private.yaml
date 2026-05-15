@@ -27,42 +27,52 @@ steps:
         set -euo pipefail
         echo "Validating required auth secrets in Secret Manager..."
 
-        JWT_VALUE="$$(gcloud secrets versions access latest --secret="$_SECRET_JWT_SECRET" --project="$PROJECT_ID" | tr -d '\r')"
-        ADMIN_VALUE="$$(gcloud secrets versions access latest --secret="$_SECRET_ADMIN_API_KEY" --project="$PROJECT_ID" | tr -d '\r')"
+        validate_secret() {
+          local secret_name="$1"
+          local min_length="$2"
+          local allow_google_api_key="$3"
+          local tmp_file
+          tmp_file="$$(mktemp)"
 
-        if [ -z "$${JWT_VALUE}" ]; then
-          echo "ERROR: $_SECRET_JWT_SECRET latest version is empty"
-          exit 1
-        fi
+          gcloud secrets versions access latest --secret="$$secret_name" --project="$PROJECT_ID" > "$$tmp_file"
 
-        if [ -z "$${ADMIN_VALUE}" ]; then
-          echo "ERROR: $_SECRET_ADMIN_API_KEY latest version is empty"
-          exit 1
-        fi
+          local raw_length
+          raw_length="$$(wc -c < "$$tmp_file" | tr -d ' ')"
+          local normalized_value
+          normalized_value="$$(tr -d '\r\n' < "$$tmp_file")"
+          local normalized_length="$${#normalized_value}"
 
-        if [ $${#JWT_VALUE} -lt 32 ]; then
-          echo "ERROR: $_SECRET_JWT_SECRET must be at least 32 characters"
-          exit 1
-        fi
+          if [ "$${raw_length}" -ne "$${normalized_length}" ]; then
+            echo "ERROR: $$secret_name contains trailing newline characters; store it without CR/LF"
+            exit 1
+          fi
 
-        if [ $${#ADMIN_VALUE} -lt 24 ]; then
-          echo "ERROR: $_SECRET_ADMIN_API_KEY must be at least 24 characters"
-          exit 1
-        fi
+          if [ -z "$${normalized_value}" ]; then
+            echo "ERROR: $$secret_name latest version is empty"
+            exit 1
+          fi
 
-        if [[ "$$JWT_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
-          echo "ERROR: $_SECRET_JWT_SECRET cannot be a Google API key"
-          exit 1
-        fi
+          if [ "$${normalized_length}" -lt "$${min_length}" ]; then
+            echo "ERROR: $$secret_name must be at least $$min_length characters"
+            exit 1
+          fi
 
-        if [[ "$$ADMIN_VALUE" =~ ^AIza[0-9A-Za-z_-]{20,}$ ]]; then
-          echo "ERROR: $_SECRET_ADMIN_API_KEY cannot be a Google API key"
-          exit 1
-        fi
+          if [ "$${allow_google_api_key}" != "true" ] && [[ "$${normalized_value}" =~ ^AIza[0-9A-Za-z_-]{20,}$$ ]]; then
+            echo "ERROR: $$secret_name cannot be a Google API key"
+            exit 1
+          fi
+        }
+
+        validate_secret "$_SECRET_GEMINI_API_KEY" 20 true
+        validate_secret "$_SECRET_JWT_SECRET" 32 false
+        validate_secret "$_SECRET_ADMIN_API_KEY" 24 false
+        validate_secret "$_SECRET_CAPTCHA_SECRET_KEY" 20 false
+        validate_secret "$_SECRET_CAPTCHA_BYPASS_TOKEN" 12 false
 
         echo "Secret validation passed."
 
   - name: gcr.io/cloud-builders/docker
+    id: build-image
     args:
       - build
       - -t
@@ -70,18 +80,27 @@ steps:
       - -t
       - gcr.io/$PROJECT_ID/$_SERVICE:latest
       - .
+    waitFor:
+      - validate-auth-secrets
 
   - name: gcr.io/cloud-builders/docker
+    id: push-build-id-image
     args:
       - push
       - gcr.io/$PROJECT_ID/$_SERVICE:$BUILD_ID
+    waitFor:
+      - build-image
 
   - name: gcr.io/cloud-builders/docker
+    id: push-latest-image
     args:
       - push
       - gcr.io/$PROJECT_ID/$_SERVICE:latest
+    waitFor:
+      - build-image
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy-cloud-run
     entrypoint: gcloud
     args:
       - run
@@ -99,6 +118,58 @@ steps:
       - ^|^NODE_ENV=production|GCP_PROJECT_ID=$PROJECT_ID|GCP_LOCATION=$_GCP_LOCATION|ALLOW_HEADER_BILLING_ID=false|CORS_ORIGINS=$_CORS_ORIGINS|VIDEO_MODEL_CANDIDATES=$_VIDEO_MODEL_CANDIDATES|USER_DB_GCS_BUCKET=$_USER_DB_GCS_BUCKET|USER_DB_GCS_OBJECT=$_USER_DB_GCS_OBJECT|ANIMATION_POLL_INTERVAL_MS=$_ANIMATION_POLL_INTERVAL_MS|ANIMATION_MAX_WAIT_MS_PER_MODEL=$_ANIMATION_MAX_WAIT_MS_PER_MODEL|ANIMATION_MAX_TOTAL_WAIT_MS=$_ANIMATION_MAX_TOTAL_WAIT_MS
       - --set-secrets
       - GEMINI_API_KEY=$_SECRET_GEMINI_API_KEY:latest,JWT_SECRET=$_SECRET_JWT_SECRET:latest,ADMIN_API_KEY=$_SECRET_ADMIN_API_KEY:latest,CAPTCHA_SECRET_KEY=$_SECRET_CAPTCHA_SECRET_KEY:latest,CAPTCHA_BYPASS_TOKEN=$_SECRET_CAPTCHA_BYPASS_TOKEN:latest
+    waitFor:
+      - push-build-id-image
+      - push-latest-image
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: capture-service-url
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run services describe "$_SERVICE" --region "$_REGION" --platform managed --format="value(status.url)" > /workspace/.cloudrun-url
+        gcloud auth print-identity-token > /workspace/.identity-token || true
+        echo "Captured deployed service URL: $$(cat /workspace/.cloudrun-url)"
+    waitFor:
+      - deploy-cloud-run
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: post-deploy-health-check
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL="$$(cat /workspace/.cloudrun-url)"
+        ID_TOKEN="$$(cat /workspace/.identity-token 2>/dev/null || true)"
+
+        AUTH_HEADER=()
+        if [ -n "$$ID_TOKEN" ]; then
+          AUTH_HEADER=(-H "X-Serverless-Authorization: Bearer $$ID_TOKEN")
+        fi
+
+        echo "Checking $$SERVICE_URL/health"
+        curl --fail --silent --show-error "$${AUTH_HEADER[@]}" "$$SERVICE_URL/health"
+    waitFor:
+      - capture-service-url
+
+  - name: node:20
+    id: post-deploy-smoke-tests
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SERVICE_URL="$$(cat /workspace/.cloudrun-url)"
+        ID_TOKEN="$$(cat /workspace/.identity-token 2>/dev/null || true)"
+        cd /workspace/server
+        npm ci --no-audit --fund=false
+        AUTH_SMOKE_BASE_URL="$$SERVICE_URL" AUTH_SMOKE_ID_TOKEN="$$ID_TOKEN" node scripts/smoke-auth-cookie.mjs
+        BILLING_SMOKE_BASE_URL="$$SERVICE_URL" BILLING_SMOKE_ID_TOKEN="$$ID_TOKEN" BILLING_EXPECT_DIRECT_MUTATION_BLOCKED=1 node scripts/smoke-billing.mjs
+    waitFor:
+      - post-deploy-health-check
 
 images:
   - gcr.io/$PROJECT_ID/$_SERVICE:$BUILD_ID

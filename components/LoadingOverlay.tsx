@@ -6,19 +6,21 @@ interface LoadingOverlayProps {
   type?: 'colorizing' | 'animating' | 'editing';
 }
 
-const stepsByType: Record<'colorizing' | 'animating' | 'editing', string[]> = {
+type LoadingOverlayType = 'colorizing' | 'animating' | 'editing';
+
+const stepsByType: Record<LoadingOverlayType, string[]> = {
   colorizing: ['Analyzing image', 'Applying color palette', 'Final quality check'],
   animating: ['Preparing frames', 'Generating motion', 'Rendering final video'],
   editing: ['Reading image', 'Applying enhancement', 'Finalizing output'],
 };
 
-const estimateByType: Record<'colorizing' | 'animating' | 'editing', string> = {
+const estimateByType: Record<LoadingOverlayType, string> = {
   colorizing: '~10-20 seconds',
   animating: '~45-90 seconds',
   editing: '~3-8 seconds',
 };
 
-const detectStepIndex = (message: string, type: 'colorizing' | 'animating' | 'editing') => {
+const detectStepIndex = (message: string, type: LoadingOverlayType) => {
   const normalized = message.toLowerCase();
   if (type === 'colorizing') {
     if (normalized.includes('safety') || normalized.includes('scan') || normalized.includes('analy')) return 0;
@@ -37,8 +39,10 @@ const detectStepIndex = (message: string, type: 'colorizing' | 'animating' | 'ed
 };
 
 const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message, type = 'colorizing' }) => {
-  const steps = stepsByType[type];
-  const activeIndex = detectStepIndex(message, type);
+  const normalizedType: LoadingOverlayType =
+    type === 'animating' || type === 'editing' ? type : 'colorizing';
+  const steps = stepsByType[normalizedType];
+  const activeIndex = detectStepIndex(message, normalizedType);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/80 backdrop-blur-xl animate-in fade-in duration-300">
@@ -54,7 +58,7 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message, type = 'colori
         </div>
       </div>
       <h3 className="text-lg sm:text-xl leading-snug font-bold text-white mb-2 text-center px-6">{message}</h3>
-      <p className="text-slate-400 text-xs sm:text-sm mb-4">Estimated time: {estimateByType[type]}</p>
+      <p className="text-slate-400 text-xs sm:text-sm mb-4">Estimated time: {estimateByType[normalizedType]}</p>
       <div className="w-full max-w-sm px-6 space-y-2">
         {steps.map((step, index) => {
           const isDone = index < activeIndex;

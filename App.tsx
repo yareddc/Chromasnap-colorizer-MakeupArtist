@@ -383,14 +383,24 @@ const App: React.FC = () => {
   };
 
   const handleRegister = async () => {
+    const normalizedUsername = authUsername.trim();
+    const normalizedPassword = authPassword;
+    const normalizedName = authName.trim();
+    const normalizedEmail = authEmail.trim();
+
+    if (!normalizedUsername || !normalizedPassword || !normalizedName || !normalizedEmail) {
+      setAuthMessage('Fill in username, password, full name, and email before creating an account.');
+      return;
+    }
+
     setAuthLoading(true);
     setAuthMessage(null);
     try {
       const { user } = await registerUser({
-        username: authUsername,
-        password: authPassword,
-        name: authName,
-        email: authEmail,
+        username: normalizedUsername,
+        password: normalizedPassword,
+        name: normalizedName,
+        email: normalizedEmail,
         phoneNumber: authPhoneNumber || undefined,
       });
       setAuthUser(user);
@@ -406,12 +416,25 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async () => {
+    const normalizedUsername = authUsername.trim();
+    const normalizedPassword = authPassword;
+
+    if (!normalizedUsername || !normalizedPassword) {
+      setAuthMessage('Enter both username and password to sign in.');
+      return;
+    }
+
+    if (authRequireCaptcha && !authCaptchaToken.trim()) {
+      setAuthMessage('Complete the captcha before signing in.');
+      return;
+    }
+
     setAuthLoading(true);
     setAuthMessage(null);
     try {
       const { user } = await loginUser({
-        username: authUsername,
-        password: authPassword,
+        username: normalizedUsername,
+        password: normalizedPassword,
         captchaToken: authRequireCaptcha ? authCaptchaToken : undefined,
       });
       setAuthUser(user);
@@ -458,13 +481,19 @@ const App: React.FC = () => {
   };
 
   const handleSendPhoneOtp = async () => {
+    const normalizedPhoneNumber = socialPhoneNumber.trim();
+    if (!normalizedPhoneNumber) {
+      setAuthMessage('Enter a phone number before sending an OTP.');
+      return;
+    }
+
     setAuthLoading(true);
     setAuthMessage(null);
     try {
       if (!isFirebaseAvailable()) {
         throw new Error('Phone login is not configured yet (missing Firebase env vars).');
       }
-      const startResult = await sendPhoneOtp(socialPhoneNumber);
+      const startResult = await sendPhoneOtp(normalizedPhoneNumber);
 
       if (startResult.status === 'verified') {
         const { user } = await socialLogin({ idToken: startResult.idToken, provider: 'phone' });
@@ -487,10 +516,16 @@ const App: React.FC = () => {
   };
 
   const handleVerifyPhoneOtp = async () => {
+    const normalizedOtp = socialOtpCode.trim();
+    if (!normalizedOtp) {
+      setAuthMessage('Enter the OTP code before verifying.');
+      return;
+    }
+
     setAuthLoading(true);
     setAuthMessage(null);
     try {
-      const idToken = await confirmPhoneOtp(socialOtpCode);
+      const idToken = await confirmPhoneOtp(normalizedOtp);
       const { user } = await socialLogin({ idToken, provider: 'phone' });
       setAuthUser(user);
       const storedId = setCurrentUserId(user.username);
@@ -507,11 +542,17 @@ const App: React.FC = () => {
   };
 
   const handleRecoverUsername = async () => {
+    const normalizedRecoveryEmail = authRecoveryEmail.trim();
+    if (!normalizedRecoveryEmail) {
+      setAuthMessage('Enter your recovery email to recover usernames.');
+      return;
+    }
+
     setAuthLoading(true);
     setAuthMessage(null);
     setRecoveredUsernames([]);
     try {
-      const usernames = await recoverUsername(authRecoveryEmail);
+      const usernames = await recoverUsername(normalizedRecoveryEmail);
       setRecoveredUsernames(usernames);
       setAuthMessage(usernames.length ? 'Recovered usernames below.' : 'No usernames found for that recovery email.');
     } catch (error: any) {
@@ -522,12 +563,20 @@ const App: React.FC = () => {
   };
 
   const handleRequestPasswordReset = async () => {
+    const normalizedUsername = authUsername.trim();
+    const normalizedRecoveryEmail = authRecoveryEmail.trim();
+
+    if (!normalizedUsername || !normalizedRecoveryEmail) {
+      setAuthMessage('Enter both username and recovery email to request a reset token.');
+      return;
+    }
+
     setAuthLoading(true);
     setAuthMessage(null);
     try {
       const result = await requestPasswordReset({
-        username: authUsername,
-        recoveryEmail: authRecoveryEmail,
+        username: normalizedUsername,
+        recoveryEmail: normalizedRecoveryEmail,
       });
       setIssuedResetToken(result.resetToken || '');
       if (result.resetToken) {
@@ -1612,7 +1661,7 @@ const App: React.FC = () => {
                   {!socialOtpSent ? (
                     <button
                       onClick={handleSendPhoneOtp}
-                      disabled={authLoading}
+                      disabled={authLoading || !socialPhoneNumber.trim()}
                       className="w-full px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
                     >
                       Send OTP
@@ -1629,7 +1678,7 @@ const App: React.FC = () => {
                       />
                       <button
                         onClick={handleVerifyPhoneOtp}
-                        disabled={authLoading}
+                        disabled={authLoading || !socialOtpCode.trim()}
                         className="w-full px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 transition-colors disabled:opacity-50"
                       >
                         Verify OTP & Sign In
@@ -1647,7 +1696,7 @@ const App: React.FC = () => {
                 <div className="space-y-2">
                   <button
                     onClick={handleLogin}
-                    disabled={authLoading}
+                    disabled={authLoading || !authUsername.trim() || !authPassword || (authRequireCaptcha && !authCaptchaToken.trim())}
                     className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
                   >
                     Sign In
@@ -1671,7 +1720,7 @@ const App: React.FC = () => {
               {authMode === 'register' && (
                 <button
                   onClick={handleRegister}
-                  disabled={authLoading}
+                  disabled={authLoading || !authUsername.trim() || !authPassword || !authName.trim() || !authEmail.trim()}
                   className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
                 >
                   Create Account
@@ -1680,7 +1729,7 @@ const App: React.FC = () => {
               {authMode === 'recover-username' && (
                 <button
                   onClick={handleRecoverUsername}
-                  disabled={authLoading}
+                  disabled={authLoading || !authRecoveryEmail.trim()}
                   className="w-full px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50"
                 >
                   Recover Username
@@ -1690,7 +1739,7 @@ const App: React.FC = () => {
                 <>
                   <button
                     onClick={handleRequestPasswordReset}
-                    disabled={authLoading}
+                    disabled={authLoading || !authUsername.trim() || !authRecoveryEmail.trim()}
                     className="w-full px-4 py-2 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-500 transition-colors disabled:opacity-50"
                   >
                     Request Reset Token

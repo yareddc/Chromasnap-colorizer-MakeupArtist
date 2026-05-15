@@ -2,6 +2,15 @@ name: Android Signed AAB
 
 on:
   workflow_dispatch:
+    inputs:
+      android_version_code:
+        description: Android version code to build
+        required: false
+        default: '20'
+      android_version_name:
+        description: Android version name to build
+        required: false
+        default: '1.2.1'
 
 jobs:
   build-signed-aab:
@@ -77,8 +86,8 @@ jobs:
       - name: Build signed release AAB
         working-directory: android
         env:
-          ANDROID_VERSION_CODE: ${{ github.run_number }}
-          ANDROID_VERSION_NAME: 1.2.${{ github.run_number }}
+          ANDROID_VERSION_CODE: ${{ inputs.android_version_code || github.run_number }}
+          ANDROID_VERSION_NAME: ${{ inputs.android_version_name || format('1.2.{0}', github.run_number) }}
           KEYSTORE_PATH: /tmp/keystore.jks
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}

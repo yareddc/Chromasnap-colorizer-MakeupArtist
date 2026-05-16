@@ -56,6 +56,26 @@ jobs:
             exit 1
           fi
 
+      - name: Create frontend .env.production
+        shell: bash
+        env:
+          ANDROID_FRONTEND_ENV_PRODUCTION_BASE64: ${{ vars.ANDROID_FRONTEND_ENV_PRODUCTION_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_FRONTEND_ENV_PRODUCTION_BASE64:-}" ]; then
+            echo "Missing required repository variable: ANDROID_FRONTEND_ENV_PRODUCTION_BASE64"
+            exit 1
+          fi
+
+          echo "$ANDROID_FRONTEND_ENV_PRODUCTION_BASE64" | base64 --decode > .env.production
+
+          for key in VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_APP_ID; do
+            if ! grep -Eq "^${key}=.+" .env.production; then
+              echo "Missing required key in .env.production: $key"
+              exit 1
+            fi
+          done
+
       - name: Build web assets
         run: npm run build
 

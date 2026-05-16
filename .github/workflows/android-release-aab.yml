@@ -108,8 +108,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION_CODE="22"
-          VERSION_NAME="1.2.3"
+          VERSION_CODE="23"
+          VERSION_NAME="1.2.4"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "Resolved Android versionCode=$VERSION_CODE versionName=$VERSION_NAME"

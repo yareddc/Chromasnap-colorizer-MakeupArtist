@@ -37,15 +37,16 @@ jobs:
         env:
           NODE_ENV: development
           NPM_CONFIG_PRODUCTION: "false"
-        run: npm ci --include=dev
+        run: npm ci --production=false --include=dev
 
       - name: Ensure CSS build dependencies exist
         shell: bash
         run: |
           set -euo pipefail
-          npm ls tailwindcss --depth=0
-          npm ls postcss --depth=0
-          npm ls autoprefixer --depth=0
+          if ! npm ls tailwindcss --depth=0 >/dev/null 2>&1; then
+            npm install --no-save tailwindcss@3.4.19 postcss@8.5.14 autoprefixer@10.5.0
+          fi
+          node -e "require.resolve('tailwindcss/package.json'); require.resolve('postcss/package.json'); require.resolve('autoprefixer/package.json'); console.log('CSS toolchain resolved')"
 
       - name: Validate Android signing secrets
         shell: bash

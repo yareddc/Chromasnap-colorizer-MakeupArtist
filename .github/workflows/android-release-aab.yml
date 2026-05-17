@@ -37,7 +37,6 @@ jobs:
         env:
           NODE_ENV: development
           NPM_CONFIG_PRODUCTION: "false"
-          npm_config_production: "false"
         run: npm ci --include=dev
 
       - name: Ensure CSS build dependencies exist

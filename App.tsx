@@ -7,6 +7,8 @@ import VideoResult from './components/VideoResult';
 import LoadingOverlay from './components/LoadingOverlay';
 import TurnstileCaptcha from './components/TurnstileCaptcha';
 import AdminLoginPage from './components/AdminLoginPage';
+import PhotoEditorModal from './components/PhotoEditorModal';
+import MultiAngleAfterPreview from './components/MultiAngleAfterPreview';
 import { AuthUser, ColorizedImage, AnimatedResult, ProcessingState, SubscriptionAccount, SubscriptionPlan, SubscriptionUsageItem } from './types';
 import {
   clearAuthToken,
@@ -46,6 +48,7 @@ import {
   signInWithGoogle,
 } from './services/firebaseAuthService';
 import { friendlyError } from './services/errorMessages';
+import { downloadAsset } from './services/downloadService';
 import {
   getGooglePlayBillingAvailability,
   purchaseGooglePlayProduct,
@@ -138,6 +141,7 @@ const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
 type WorkspaceTab = 'dashboard' | 'colorizer' | 'beauty-lab' | 'barbershop' | 'account';
 type Hair360Angle = 'front' | 'left' | 'right' | 'back';
 type LookRecommendation = { style: string; makeup: string; hair: string; description: string };
+type PendingPhotoEditTarget = 'try-on' | 'barbershop';
 
 const BEAUTY_SERVICES = [
   { id: 'bridal-glam', label: 'Bridal Glam', description: 'Premium full-face glam workflow for bridal clients.' },
@@ -230,6 +234,7 @@ const App: React.FC = () => {
   const [profileAnalysisResult, setProfileAnalysisResult] = useState<BeautyProfileAnalysis | null>(null);
   const [profileAnalysisLoading, setProfileAnalysisLoading] = useState(false);
   const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
+  const [pendingPhotoEdit, setPendingPhotoEdit] = useState<{ target: PendingPhotoEditTarget; image: string } | null>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountDrawer, setShowAccountDrawer] = useState(false);
   const [showBeautyToolsDrawer, setShowBeautyToolsDrawer] = useState(false);
@@ -872,36 +877,7 @@ const App: React.FC = () => {
   };
 
   const triggerDownload = async (sourceUrl: string, filename: string) => {
-    let objectUrl: string | null = null;
-
-    try {
-      try {
-        const response = await fetch(sourceUrl);
-        if (response.ok) {
-          const blob = await response.blob();
-          objectUrl = URL.createObjectURL(blob);
-        }
-      } catch {
-        objectUrl = null;
-      }
-
-      const link = document.createElement('a');
-      link.href = objectUrl || sourceUrl;
-      link.download = filename;
-      link.rel = 'noopener noreferrer';
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-
-      if (!objectUrl && /^https?:/i.test(sourceUrl)) {
-        window.open(sourceUrl, '_blank', 'noopener,noreferrer');
-      }
-    } finally {
-      if (objectUrl) {
-        window.setTimeout(() => URL.revokeObjectURL(objectUrl as string), 1000);
-      }
-    }
+    await downloadAsset(sourceUrl, filename);
   };
 
   const handleAnimate = async () => {
@@ -1105,10 +1081,10 @@ const App: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64String = e.target?.result as string;
-      setTrySelfie(base64String);
-      setTryAfterImage(null);
+      setPendingPhotoEdit({ target: 'try-on', image: base64String });
     };
     reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   const handleBarbershopSelfieCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1118,12 +1094,30 @@ const App: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64String = e.target?.result as string;
-      setBarbershopSelfie(base64String);
+      setPendingPhotoEdit({ target: 'barbershop', image: base64String });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
+  const handleApplyPendingPhotoEdit = (editedImage: string) => {
+    if (!pendingPhotoEdit) return;
+
+    if (pendingPhotoEdit.target === 'try-on') {
+      setTrySelfie(editedImage);
+      setTryAfterImage(null);
+      setTryResults(null);
+      setTryMessage(null);
+      setHair360Previews(null);
+      setHair360Message(null);
+    } else {
+      setBarbershopSelfie(editedImage);
       setBarbershopAfterImage(null);
       setBarbershopResults(null);
       setBarbershopMessage(null);
-    };
-    reader.readAsDataURL(file);
+    }
+
+    setPendingPhotoEdit(null);
   };
 
   const handleGetOccasionRecommendations = async () => {
@@ -1376,77 +1370,7 @@ const App: React.FC = () => {
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-indigo-500/30">
         <Header tokenBalance={null} />
         <main className="flex-1 flex items-center justify-center p-4">
-          <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-6 items-center lg:items-stretch">
-
-            {/* ── Product Preview Panel ── */}
-            <div className="hidden lg:flex flex-col flex-1 gap-4 justify-center">
-              <div className="text-center mb-2">
-                <h1 className="text-2xl font-extrabold text-white tracking-tight">ChromaSnap <span className="text-indigo-400">AI</span></h1>
-                <p className="text-sm text-slate-400 mt-1">Transform your photos with the power of AI</p>
-              </div>
-
-              {/* Feature cards */}
-              <div className="rounded-2xl border border-indigo-500/20 bg-gradient-to-br from-indigo-900/30 to-slate-900/60 p-4 space-y-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center shrink-0">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-white">AI Photo Colorizer</p>
-                    <p className="text-xs text-slate-400">Bring black &amp; white photos to life with intelligent colorization</p>
-                  </div>
-                </div>
-                <div className="flex gap-2 mt-2">
-                  <div className="flex-1 rounded-xl overflow-hidden h-20 bg-slate-800 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M6 8h.01" /></svg>
-                  </div>
-                  <div className="w-6 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                  </div>
-                  <div className="flex-1 rounded-xl overflow-hidden h-20 bg-gradient-to-br from-amber-700/40 via-sky-600/30 to-emerald-600/30 flex items-center justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8 text-amber-300/60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M6 8h.01" /></svg>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-rose-500/20 bg-gradient-to-br from-rose-900/20 to-slate-900/60 p-4 space-y-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-rose-500/20 flex items-center justify-center shrink-0">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-rose-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-white">Beauty Lab &amp; Virtual Try-On</p>
-                    <p className="text-xs text-slate-400">Try hairstyles, makeup looks, and get AI beauty advice</p>
-                  </div>
-                </div>
-                <div className="flex gap-1 mt-2">
-                  {['Taper Fade', 'Natural Glam', 'Bold Lip', 'Smoky Eye'].map(label => (
-                    <div key={label} className="flex-1 rounded-lg bg-slate-800/60 border border-slate-700/40 px-1 py-1.5 text-center">
-                      <p className="text-[10px] text-slate-300 leading-tight">{label}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-900/20 to-slate-900/60 p-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 flex items-center justify-center shrink-0">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-cyan-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-white">Animate &amp; Upscale</p>
-                    <p className="text-xs text-slate-400">Turn photos into short videos and enhance resolution with AI</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
+          <div className="w-full max-w-sm">
             {/* ── Login Form ── */}
           <div className="w-full max-w-sm rounded-3xl border border-slate-800 bg-slate-900/70 shadow-2xl p-5 space-y-3">
             <h2 className="text-base font-bold text-white">Secure Login</h2>
@@ -2461,10 +2385,10 @@ const App: React.FC = () => {
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Upload Photo</label>
               {trySelfie && (
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-amber-300 border-b border-amber-500/20">Before</div>
-                    <img src={trySelfie} alt="Before selfie" className="w-full h-40 object-cover" />
+                    <img src={trySelfie} alt="Before selfie" className="w-full h-56 sm:h-64 object-cover" />
                   </div>
                   <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 border-b border-amber-500/20 flex items-center justify-between gap-2">
@@ -2480,9 +2404,13 @@ const App: React.FC = () => {
                       </span>
                     </div>
                     {tryAfterImage ? (
-                      <img src={tryAfterImage} alt="After virtual try-on" className="w-full h-40 object-cover" />
+                      <MultiAngleAfterPreview
+                        image={tryAfterImage}
+                        alt="After virtual try-on"
+                        className="w-full h-56 sm:h-64 object-cover"
+                      />
                     ) : (
-                      <div className="h-40 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                      <div className="h-56 sm:h-64 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
                         Generate a look to preview your after result here.
                       </div>
                     )}
@@ -2597,17 +2525,21 @@ const App: React.FC = () => {
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Upload Photo</label>
               {barbershopSelfie && (
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">Before</div>
-                    <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-40 object-cover" />
+                    <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-56 sm:h-64 object-cover" />
                   </div>
                   <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">After</div>
                     {barbershopAfterImage ? (
-                      <img src={barbershopAfterImage} alt="After barbershop look" className="w-full h-40 object-cover" />
+                      <MultiAngleAfterPreview
+                        image={barbershopAfterImage}
+                        alt="After barbershop look"
+                        className="w-full h-56 sm:h-64 object-cover"
+                      />
                     ) : (
-                      <div className="h-40 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                      <div className="h-56 sm:h-64 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
                         Generate a barbershop look to preview your after result.
                       </div>
                     )}
@@ -3106,6 +3038,15 @@ const App: React.FC = () => {
         </div>
         <p className="text-slate-400 text-[10px] uppercase tracking-widest font-bold">ChromaSnap AI • Restoration Studio</p>
       </footer>
+
+      {pendingPhotoEdit && (
+        <PhotoEditorModal
+          image={pendingPhotoEdit.image}
+          title={pendingPhotoEdit.target === 'try-on' ? 'Edit Try-On Photo' : 'Edit Barbershop Photo'}
+          onCancel={() => setPendingPhotoEdit(null)}
+          onApply={handleApplyPendingPhotoEdit}
+        />
+      )}
     </div>
   );
 };

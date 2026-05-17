@@ -49,6 +49,21 @@ const getJsonHeaders = () => {
 
 const withAuthCredentials: RequestCredentials = 'include';
 
+const shouldSkipBootstrapAuthRequest = (): boolean => {
+  const authToken = String(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '').trim();
+  if (authToken) return false;
+
+  const clientHost = String(globalThis.location?.hostname || '').toLowerCase();
+  if (clientHost !== 'localhost') return false;
+
+  try {
+    const authMeUrl = new URL(API_ENDPOINTS.AUTH_ME, globalThis.location?.origin || undefined);
+    return authMeUrl.origin !== globalThis.location?.origin;
+  } catch {
+    return false;
+  }
+};
+
 const fetchWithTimeout = (url: string, options: RequestInit = {}, timeoutMs: number = 60000): Promise<Response> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -431,17 +446,27 @@ export const loginUser = async (payload: { username: string; password: string; c
 };
 
 export const fetchAuthMe = async (): Promise<AuthUser | null> => {
-  const response = await fetch(API_ENDPOINTS.AUTH_ME, {
-    credentials: withAuthCredentials,
-    headers: getJsonHeaders(),
-  });
-  if (!response.ok) {
+  if (shouldSkipBootstrapAuthRequest()) {
     return null;
   }
 
-  const data = await parseJsonResponse(response);
-  persistAuthToken(data.token);
-  return data.user as AuthUser;
+  try {
+    const response = await fetch(API_ENDPOINTS.AUTH_ME, {
+      credentials: withAuthCredentials,
+      headers: getJsonHeaders(),
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await parseJsonResponse(response);
+    persistAuthToken(data.token);
+    return data.user as AuthUser;
+  } catch (error) {
+    // Fail open during bootstrap when the auth endpoint is unreachable (CORS/network).
+    console.warn('Skipping auth bootstrap: auth endpoint unreachable.', error);
+    return null;
+  }
 };
 
 export const deleteAuthAccount = async (payload: { password: string; confirmUsername?: string }): Promise<void> => {

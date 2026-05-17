@@ -35,8 +35,20 @@ jobs:
 
       - name: Install dependencies
         env:
+          NODE_ENV: development
           NPM_CONFIG_PRODUCTION: "false"
+          npm_config_production: "false"
         run: npm ci --include=dev
+
+      - name: Ensure CSS build dependencies exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! npm ls tailwindcss --depth=0 >/dev/null 2>&1; then
+            echo "tailwindcss missing after npm ci; installing fallback CSS toolchain"
+            npm install --no-save --include=dev tailwindcss postcss autoprefixer
+          fi
+          npm ls tailwindcss --depth=0
 
       - name: Validate Android signing secrets
         shell: bash

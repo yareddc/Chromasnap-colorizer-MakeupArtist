@@ -97,21 +97,7 @@ const detectColorizerCommandIntent = (commandText: string, fallbackTheme: string
   };
 };
 
-const SAMPLE_IMAGE_DATA_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600">
-    <defs>
-      <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="#1f2937"/>
-        <stop offset="100%" stop-color="#9ca3af"/>
-      </linearGradient>
-    </defs>
-    <rect width="900" height="600" fill="url(#g)"/>
-    <rect x="140" y="70" width="620" height="460" rx="28" fill="#111827" stroke="#d1d5db" stroke-width="8"/>
-    <circle cx="320" cy="270" r="110" fill="#374151"/>
-    <rect x="460" y="180" width="210" height="180" rx="18" fill="#4b5563"/>
-    <text x="450" y="545" text-anchor="middle" fill="#f3f4f6" font-size="34" font-family="Arial, sans-serif">Sample B&amp;W Photo</text>
-  </svg>`
-)}`;
+const SAMPLE_IMAGE_ASSET_URL = '/bw_smoke_test.jpg';
 
 const resolveEnvProductId = (...keys: (keyof ImportMetaEnv)[]): string | undefined => {
   for (const key of keys) {
@@ -142,6 +128,20 @@ type WorkspaceTab = 'dashboard' | 'colorizer' | 'beauty-lab' | 'barbershop' | 'a
 type Hair360Angle = 'front' | 'left' | 'right' | 'back';
 type LookRecommendation = { style: string; makeup: string; hair: string; description: string };
 type PendingPhotoEditTarget = 'try-on' | 'barbershop';
+
+const blobToDataUrl = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('Could not load sample image.'));
+        return;
+      }
+      resolve(reader.result);
+    };
+    reader.onerror = () => reject(new Error('Could not read sample image.'));
+    reader.readAsDataURL(blob);
+  });
 
 const BEAUTY_SERVICES = [
   { id: 'bridal-glam', label: 'Bridal Glam', description: 'Premium full-face glam workflow for bridal clients.' },
@@ -221,7 +221,8 @@ const App: React.FC = () => {
   const [barbershopHaircut, setBarbershopHaircut] = useState('taper-fade');
   const [barbershopAfterImage, setBarbershopAfterImage] = useState<string | null>(null);
   const [barbershopResults, setBarbershopResults] = useState<LookRecommendation[] | null>(null);
-  const [barbershopLoading, setBarbershopLoading] = useState(false);
+  const [barbershopRecommendationLoading, setBarbershopRecommendationLoading] = useState(false);
+  const [barbershopGenerateLoading, setBarbershopGenerateLoading] = useState(false);
   const [barbershopMessage, setBarbershopMessage] = useState<string | null>(null);
   const [hair360Length, setHair360Length] = useState<'short' | 'medium' | 'long'>('medium');
   const [hair360Volume, setHair360Volume] = useState<'low' | 'balanced' | 'high'>('balanced');
@@ -715,8 +716,21 @@ const App: React.FC = () => {
     return `${imageUrl}${separator}cb=${Date.now().toString(36)}`;
   };
 
-  const handleSampleImage = () => {
-    handleImageSelected(SAMPLE_IMAGE_DATA_URL);
+  const handleSampleImage = async () => {
+    try {
+      const response = await fetch(SAMPLE_IMAGE_ASSET_URL, { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Sample image request failed (${response.status})`);
+      }
+      const sampleBlob = await response.blob();
+      handleImageSelected(await blobToDataUrl(sampleBlob));
+    } catch (error) {
+      console.error('Sample image load failed:', error);
+      setProcessing((prev) => ({
+        ...prev,
+        error: 'The sample image is unavailable right now. Please upload a photo instead.',
+      }));
+    }
   };
 
   const clampUploadZoom = (value: number) => Math.min(3, Math.max(0.5, Number(value.toFixed(2))));
@@ -1182,7 +1196,7 @@ const App: React.FC = () => {
       return;
     }
 
-    setBarbershopLoading(true);
+    setBarbershopRecommendationLoading(true);
     setBarbershopMessage(null);
     setBarbershopResults(null);
 
@@ -1193,7 +1207,7 @@ const App: React.FC = () => {
     } catch (error: any) {
       setBarbershopMessage(friendlyError(error, 'barbershop-recommendations'));
     } finally {
-      setBarbershopLoading(false);
+      setBarbershopRecommendationLoading(false);
     }
   };
 
@@ -1203,7 +1217,7 @@ const App: React.FC = () => {
       return;
     }
 
-    setBarbershopLoading(true);
+    setBarbershopGenerateLoading(true);
     setBarbershopMessage(null);
 
     try {
@@ -1223,7 +1237,7 @@ const App: React.FC = () => {
     } catch (error: any) {
       setBarbershopMessage(friendlyError(error, 'barbershop-virtual-look'));
     } finally {
-      setBarbershopLoading(false);
+      setBarbershopGenerateLoading(false);
     }
   };
 
@@ -2635,17 +2649,17 @@ const App: React.FC = () => {
             <div className="grid gap-2 sm:grid-cols-3">
               <button
                 onClick={handleGetBarbershopRecommendations}
-                disabled={barbershopLoading || !barbershopSelfie}
+                disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
                 className="px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
               >
-                {barbershopLoading ? 'Getting...' : 'Get Ideas'}
+                {barbershopRecommendationLoading ? 'Getting...' : 'Get Ideas'}
               </button>
               <button
                 onClick={handleGenerateBarbershopLook}
-                disabled={barbershopLoading || !barbershopSelfie}
+                disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
                 className="px-4 py-3 rounded-xl bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
               >
-                {barbershopLoading ? 'Generating...' : 'Generate Look'}
+                {barbershopGenerateLoading ? 'Generating...' : 'Generate Look'}
               </button>
               <button
                 onClick={handleDownloadBarbershop}

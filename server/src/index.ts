@@ -34,6 +34,7 @@ import {
     upsertBillingAccount,
     updateAuthUserPassword,
 } from './userDatabase';
+import { buildFallbackOccasionRecommendations, parseOccasionRecommendations } from './occasionRecommendations';
 import type { App as FirebaseAdminApp } from 'firebase-admin/app';
 
 dotenv.config();
@@ -833,7 +834,6 @@ const processingLimiter = rateLimit({
 const cspDirectives = helmet.contentSecurityPolicy.getDefaultDirectives();
 cspDirectives['script-src'] = [
     "'self'",
-    'https://cdn.tailwindcss.com',
     'https://www.gstatic.com',
     'https://apis.google.com',
     'https://accounts.google.com',
@@ -890,9 +890,18 @@ app.use(express.json({ limit: '20mb' }));
 
 app.use((req, res, next) => {
     const host = (req.headers.host || '').toLowerCase();
+    const requestPath = req.originalUrl || '/';
+    const isBrowserNavigation = req.method === 'GET' || req.method === 'HEAD';
+    const isProtectedPath = requestPath === '/health' || requestPath.startsWith('/api/');
+
     if (host === 'www.chromasnap.app') {
-        return res.redirect(308, `https://chromasnap.app${req.originalUrl || '/'}`);
+        return res.redirect(308, `https://chromasnap.app${requestPath}`);
     }
+
+    if (isBrowserNavigation && !isProtectedPath && /\.run\.app(?::\d+)?$/i.test(host)) {
+        return res.redirect(308, `https://chromasnap.app${requestPath}`);
+    }
+
     next();
 });
 
@@ -2497,6 +2506,7 @@ app.post('/api/recommend/occasion-look', requireBilling('occasion_recommend'), a
         const { selfie, occasion } = req.body;
         if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
         if (!occasion) return res.status(400).json({ error: 'Occasion required' });
+        const traceId = String(req.headers['x-cloud-trace-context'] || '').split('/')[0] || 'n/a';
 
         const hasPrefix = typeof selfie === 'string' && selfie.includes(',');
         const base64Data = hasPrefix ? selfie.split(',')[1] : selfie;
@@ -2523,58 +2533,44 @@ app.post('/api/recommend/occasion-look', requireBilling('occasion_recommend'), a
 
         const fullText = (response as any)?.response?.content?.parts?.[0]?.text || '';
         if (!fullText) {
-            return res.status(500).json({ error: 'Failed to generate recommendations' });
+            console.warn('Occasion recommendation returned empty model text', {
+                traceId,
+                occasion,
+                mimeType,
+            });
+            return res.json({
+                recommendations: buildFallbackOccasionRecommendations(String(occasion)),
+                fallback: true,
+                message: 'Showing curated fallback recommendations while AI output is unavailable.',
+            });
         }
 
         const recommendations = parseOccasionRecommendations(fullText);
+        if (!recommendations.length) {
+            console.warn('Occasion recommendation parser returned empty results', {
+                traceId,
+                occasion,
+                textPreview: fullText.slice(0, 220),
+            });
+            return res.json({
+                recommendations: buildFallbackOccasionRecommendations(String(occasion)),
+                fallback: true,
+                message: 'Showing curated fallback recommendations while AI output is being normalized.',
+            });
+        }
 
         res.json({
             recommendations: recommendations,
         });
     } catch (error: any) {
-        console.error('Occasion recommendation failed:', error);
+        const traceId = String(req.headers['x-cloud-trace-context'] || '').split('/')[0] || 'n/a';
+        console.error('Occasion recommendation failed:', {
+            traceId,
+            error: error?.message || String(error),
+        });
         res.status(500).json({ error: error.message || 'Occasion recommendation failed' });
     }
 });
-
-const parseOccasionRecommendations = (text: string): Array<{ style: string; makeup: string; hair: string; description: string }> => {
-    const recommendations: Array<{ style: string; makeup: string; hair: string; description: string }> = [];
-    const sections = text.split(/(?:---+|###|==+|\\n\\n\n)/);
-
-    for (let i = 0; i < Math.min(sections.length, 4); i++) {
-        const section = sections[i].trim();
-        if (!section) continue;
-
-        const lines = section.split('\\n').map((l: string) => l.trim());
-        let styleName = '';
-        let makeup = '';
-        let hair = '';
-        let description = '';
-
-        for (const line of lines) {
-            if (line.match(/^(Style Name|Name|Look):/i)) {
-                styleName = line.replace(/^(Style Name|Name|Look):\s*/i, '');
-            } else if (line.match(/^(Makeup|Makeup Description):/i)) {
-                makeup = line.replace(/^(Makeup|Makeup Description):\s*/i, '');
-            } else if (line.match(/^(Hair|Hairstyle|Hair Description):/i)) {
-                hair = line.replace(/^(Hair|Hairstyle|Hair Description):\s*/i, '');
-            } else if (line.match(/^(Why|Tips|Description|Why it works):/i)) {
-                description += (description ? ' ' : '') + line.replace(/^(Why|Tips|Description|Why it works):\s*/i, '');
-            }
-        }
-
-        if (styleName && makeup) {
-            recommendations.push({
-                style: styleName,
-                makeup: makeup,
-                hair: hair || 'Natural/Current style',
-                description: description || 'Occasion-specific styling',
-            });
-        }
-    }
-
-    return recommendations.slice(0, 3);
-};
 
 app.post('/api/analyze/beauty-profile', requireBilling('beauty_profile_analysis'), async (req, res) => {
     try {
@@ -2960,9 +2956,10 @@ const frontendBuildPath = path.resolve(__dirname, '../public');
 const frontendIndexPath = path.join(frontendBuildPath, 'index.html');
 
 if (existsSync(frontendIndexPath)) {
-    app.use(express.static(frontendBuildPath));
+    app.use(express.static(frontendBuildPath, { maxAge: '1h' }));
 
-    app.get(/^(?!\/api(?:\/|$)).*/, (_req, res) => {
+    // SPA catch-all: serve index.html for all routes except /api, /health, /assets, and /privacy, /delete-account
+    app.get(/^(?!\/api(?:\/|$)|\/health(?:\/|$)|\/assets(?:\/|$)|\/privacy(?:|$)|\/delete-account(?:|$)).*/, (_req, res) => {
         res.sendFile(frontendIndexPath);
     });
 }

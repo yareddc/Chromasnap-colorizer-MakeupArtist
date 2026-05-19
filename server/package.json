@@ -14,6 +14,7 @@
         "smoke:auth-cleanup": "node scripts/cleanup-auth-smoke-users.mjs",
         "smoke:auth-cleanup:dry-run": "node scripts/cleanup-auth-smoke-users.mjs --dryRun=true",
         "smoke:webhook-receiver": "node scripts/smoke-password-reset-webhook-receiver.mjs",
+        "test:occasion-recommendations": "tsx src/occasionRecommendations.test.ts",
         "smoke:auth-cookie:cloudrun": "node scripts/smoke-auth-cookie-cloudrun.mjs",
         "smoke:billing": "node scripts/smoke-billing.mjs",
         "smoke:billing:cloudrun": "node scripts/smoke-billing-cloudrun.mjs",

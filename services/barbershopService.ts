@@ -32,7 +32,7 @@ const humanizeHaircutLabel = (value: string): string =>
 
 export const getBarbershopRecommendations = async (
   selfieBase64: string
-): Promise<{ recommendations: BarbershopLookRecommendation[]; message: string }> => {
+): Promise<{ recommendations: BarbershopLookRecommendation[]; message: string; fallback?: boolean }> => {
   const result = await recommendOccasionLook(
     selfieBase64,
     buildOccasionRequestValue(BARBERSHOP_OCCASION)
@@ -40,7 +40,11 @@ export const getBarbershopRecommendations = async (
 
   return {
     recommendations: result.recommendations,
-    message: buildOccasionSuccessMessage(BARBERSHOP_OCCASION, result.recommendations.length),
+    message:
+      typeof result.message === 'string' && result.message.trim()
+        ? result.message
+        : buildOccasionSuccessMessage(BARBERSHOP_OCCASION, result.recommendations.length),
+    fallback: result.fallback,
   };
 };
 

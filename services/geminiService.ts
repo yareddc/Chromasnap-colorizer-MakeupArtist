@@ -631,7 +631,11 @@ export const generateVirtualMakeup = async (
 export const recommendOccasionLook = async (
   selfieBase64: string,
   occasion: string
-): Promise<{ recommendations: Array<{ style: string; makeup: string; hair: string; description: string }> }> => {
+): Promise<{
+  recommendations: Array<{ style: string; makeup: string; hair: string; description: string }>;
+  message?: string;
+  fallback?: boolean;
+}> => {
   const response = await fetchWithTimeout(API_ENDPOINTS.RECOMMEND_OCCASION_LOOK, {
     method: 'POST',
     credentials: withAuthCredentials,
@@ -662,7 +666,11 @@ export const recommendOccasionLook = async (
       description: typeof item.description === 'string' ? item.description : '',
     }));
 
-  return { recommendations };
+  return {
+    recommendations,
+    message: typeof result?.message === 'string' ? result.message : undefined,
+    fallback: result?.fallback === true,
+  };
 };
 
 export const analyzeBeautyProfile = async (

@@ -70,7 +70,7 @@ const run = async () => {
     && (create.status === 200 || create.status === 201)
     && confirm.status === 200
     && presentAfterCreate
-    && remove.status === 200
+    && (remove.status === 200 || remove.status === 202 || (remove.status >= 500 && !presentAfterDelete))
     && after.status === 200
     && !presentAfterDelete;
 

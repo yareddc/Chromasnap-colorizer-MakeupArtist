@@ -236,6 +236,8 @@ const App: React.FC = () => {
   const [profileAnalysisLoading, setProfileAnalysisLoading] = useState(false);
   const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
   const [pendingPhotoEdit, setPendingPhotoEdit] = useState<{ target: PendingPhotoEditTarget; image: string } | null>(null);
+  const [showBeautyPhotoPicker, setShowBeautyPhotoPicker] = useState(false);
+  const [showBarbershopPhotoPicker, setShowBarbershopPhotoPicker] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountDrawer, setShowAccountDrawer] = useState(false);
   const [showBeautyToolsDrawer, setShowBeautyToolsDrawer] = useState(false);
@@ -2498,46 +2500,56 @@ const App: React.FC = () => {
                   </div>
                 </div>
               )}
-              <div className="flex gap-2">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleTrySelfieCapture}
-                  className="hidden"
-                  id="try-on-upload-input"
-                />
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleTrySelfieCapture}
-                  className="hidden"
-                  id="try-on-camera-input"
-                />
-                <label
-                  htmlFor="try-on-upload-input"
-                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border-2 border-dashed border-amber-400/40 bg-amber-500/5 text-amber-300 hover:border-amber-400/60 hover:bg-amber-500/10 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
-                >
-                  {trySelfie ? 'Upload New Photo' : 'Upload Photo'}
-                </label>
-                <label
-                  htmlFor="try-on-camera-input"
-                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border border-amber-400/40 bg-slate-950/50 text-amber-200 hover:border-amber-300/60 hover:text-amber-100 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
-                >
-                  Use Camera
-                </label>
-              </div>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleTrySelfieCapture}
+                className="hidden"
+                id="try-on-upload-input"
+              />
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleTrySelfieCapture}
+                className="hidden"
+                id="try-on-camera-input"
+              />
             </div>
 
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Session Notes</label>
-              <textarea
-                value={beautyNotes}
-                onChange={(event) => setBeautyNotes(event.target.value)}
-                placeholder="Skin tone goals, finish preference, timing, and product notes"
-                rows={4}
-                className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-              />
+              <div className="relative">
+                <textarea
+                  value={beautyNotes}
+                  onChange={(event) => setBeautyNotes(event.target.value)}
+                  placeholder="Skin tone goals, finish preference, timing, and product notes"
+                  rows={4}
+                  className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 pb-10 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                />
+                <div className="absolute bottom-2 left-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBeautyPhotoPicker((v) => !v)}
+                    className="w-8 h-8 rounded-full bg-amber-600 hover:bg-amber-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
+                    title="Add photo"
+                  >+</button>
+                  {showBeautyPhotoPicker && (
+                    <div className="absolute bottom-10 left-0 z-30 w-44 rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl p-2 space-y-1 backdrop-blur">
+                      <label
+                        htmlFor="try-on-upload-input"
+                        className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                        onClick={() => setShowBeautyPhotoPicker(false)}
+                      >Upload Photo</label>
+                      <label
+                        htmlFor="try-on-camera-input"
+                        className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                        onClick={() => setShowBeautyPhotoPicker(false)}
+                      >Use Camera</label>
+                    </div>
+                  )}
+                </div>
+              </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 <button
                   onClick={handleGenerateVirtualMakeup}
@@ -2628,35 +2640,21 @@ const App: React.FC = () => {
                   </div>
                 </div>
               )}
-              <div className="flex gap-2">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleBarbershopSelfieCapture}
-                  className="hidden"
-                  id="barbershop-upload-input"
-                />
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleBarbershopSelfieCapture}
-                  className="hidden"
-                  id="barbershop-camera-input"
-                />
-                <label
-                  htmlFor="barbershop-upload-input"
-                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border-2 border-dashed border-emerald-400/40 bg-emerald-500/5 text-emerald-300 hover:border-emerald-400/60 hover:bg-emerald-500/10 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
-                >
-                  {barbershopSelfie ? 'Upload New Photo' : 'Upload Photo'}
-                </label>
-                <label
-                  htmlFor="barbershop-camera-input"
-                  className="flex-1 flex items-center justify-center px-4 py-3 rounded-xl border border-emerald-400/40 bg-slate-950/50 text-emerald-200 hover:border-emerald-300/60 hover:text-emerald-100 transition-colors cursor-pointer text-xs font-semibold uppercase tracking-wider"
-                >
-                  Use Camera
-                </label>
-              </div>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleBarbershopSelfieCapture}
+                className="hidden"
+                id="barbershop-upload-input"
+              />
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleBarbershopSelfieCapture}
+                className="hidden"
+                id="barbershop-camera-input"
+              />
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -2693,6 +2691,7 @@ const App: React.FC = () => {
                   onChange={(e) => setBarbershopMakeupStyle(e.target.value)}
                   className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
                 >
+                  <option value="none">None (No Makeup)</option>
                   <option value="natural">Natural/Minimal</option>
                   <option value="bold">Bold/Dramatic</option>
                   <option value="smokey-eye">Smokey Eye</option>
@@ -2704,13 +2703,37 @@ const App: React.FC = () => {
 
               <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Session Notes</label>
-                <textarea
-                  value={barbershopNotes}
-                  onChange={(event) => setBarbershopNotes(event.target.value)}
-                  placeholder="Hairline, fade preference, texture goals, and maintenance notes"
-                  rows={3}
-                  className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
-                />
+                <div className="relative">
+                  <textarea
+                    value={barbershopNotes}
+                    onChange={(event) => setBarbershopNotes(event.target.value)}
+                    placeholder="Hairline, fade preference, texture goals, and maintenance notes"
+                    rows={3}
+                    className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 pb-10 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
+                  />
+                  <div className="absolute bottom-2 left-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowBarbershopPhotoPicker((v) => !v)}
+                      className="w-8 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
+                      title="Add photo"
+                    >+</button>
+                    {showBarbershopPhotoPicker && (
+                      <div className="absolute bottom-10 left-0 z-30 w-44 rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl p-2 space-y-1 backdrop-blur">
+                        <label
+                          htmlFor="barbershop-upload-input"
+                          className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                          onClick={() => setShowBarbershopPhotoPicker(false)}
+                        >Upload Photo</label>
+                        <label
+                          htmlFor="barbershop-camera-input"
+                          className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                          onClick={() => setShowBarbershopPhotoPicker(false)}
+                        >Use Camera</label>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 

@@ -1452,7 +1452,8 @@ const runVirtualMakeupImageEdit = async (
     makeupStyle: string,
     hairStyle?: string,
     occasion?: string,
-    styleIntensity: 'subtle' | 'balanced' | 'dramatic' = 'balanced'
+    styleIntensity: 'subtle' | 'balanced' | 'dramatic' = 'balanced',
+    cameraView: 'front' | 'left' | 'right' | 'back' = 'front'
 ): Promise<string> => {
     const base64Image = await normalizeImageToPngBase64(selfie);
     const ai = createAI();
@@ -1468,12 +1469,22 @@ const runVirtualMakeupImageEdit = async (
         `Makeup style: ${makeupStyle || 'natural'}.`,
         `Hairstyle: ${hairStyle || 'natural/current'}.`,
         `Occasion: ${occasion || 'everyday'}.`,
+        `Requested camera view: ${cameraView}.`,
         `Intensity: ${styleIntensity}.`,
         intensityInstructions[styleIntensity],
         'Hard constraints:',
-        '- Keep the same person identity, pose, framing, background, and clothing.',
+        cameraView === 'front'
+            ? '- Keep the same person identity, pose, framing, background, and clothing.'
+            : `- Keep the same person identity, background, and clothing while rendering a realistic ${cameraView} view of the same look.`,
         '- Do not swap faces or change age, skin tone identity, or facial structure.',
         '- Apply only believable makeup and hair styling edits.',
+        cameraView === 'left'
+            ? '- For left view, show a clear left profile turn while preserving hairstyle continuity.'
+            : cameraView === 'right'
+                ? '- For right view, show a clear right profile turn while preserving hairstyle continuity.'
+                : cameraView === 'back'
+                    ? '- For back view, show the rear hairstyle silhouette with natural head alignment.'
+                    : '- Keep the frontal orientation.',
         '- Return one photorealistic edited image.',
     ].join('\n');
 
@@ -1498,6 +1509,40 @@ const runVirtualMakeupImageEdit = async (
     }
 
     return `data:image/png;base64,${imageBase64}`;
+};
+
+const buildVirtualLookDescription = (
+    makeupStyle: string,
+    hairStyle: string,
+    occasion: string,
+    styleIntensity: 'subtle' | 'balanced' | 'dramatic',
+    cameraView: 'front' | 'left' | 'right' | 'back'
+): string => {
+    const cleanMakeup = String(makeupStyle || 'natural').trim() || 'natural';
+    const cleanHair = String(hairStyle || 'natural/current').trim() || 'natural/current';
+    const cleanOccasion = String(occasion || 'everyday').trim() || 'everyday';
+
+    const intensityLabel =
+        styleIntensity === 'subtle'
+            ? 'soft'
+            : styleIntensity === 'dramatic'
+                ? 'high-impact'
+                : 'balanced';
+
+    const viewNote =
+        cameraView === 'front'
+            ? 'Front view focused on face-framing details.'
+            : cameraView === 'left'
+                ? 'Left profile view emphasizing contour continuity.'
+                : cameraView === 'right'
+                    ? 'Right profile view emphasizing contour continuity.'
+                    : 'Back view emphasizing shape and volume continuity.';
+
+    return [
+        `Generated ${intensityLabel} ${cleanMakeup} makeup with ${cleanHair} styling for ${cleanOccasion}.`,
+        viewNote,
+        'Description is intentionally constrained to requested style inputs to avoid speculative claims.',
+    ].join(' ');
 };
 
 // --- Endpoints ---
@@ -2447,7 +2492,7 @@ const extractRecommendations = (text: string): string[] => {
 
 app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async (req, res) => {
     try {
-        const { selfie, makeupStyle, hairStyle, occasion, generateImage, styleIntensity } = req.body;
+        const { selfie, makeupStyle, hairStyle, occasion, generateImage, styleIntensity, cameraView } = req.body;
         if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
         if (!makeupStyle) return res.status(400).json({ error: 'Makeup style required' });
 
@@ -2457,28 +2502,20 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
             ? selfie.split(';')[0].split(':')[1] || 'image/jpeg'
             : 'image/jpeg';
 
-        const ai = createAI();
-
         const normalizedIntensity = styleIntensity === 'subtle' || styleIntensity === 'dramatic' || styleIntensity === 'balanced'
             ? styleIntensity
             : 'balanced';
+        const normalizedView = cameraView === 'left' || cameraView === 'right' || cameraView === 'back' || cameraView === 'front'
+            ? cameraView
+            : 'front';
 
-        const prompt = `You are a professional makeup artist and hairstylist AI. Using your expertise, provide a detailed visual description of how this person would look with:\n\nMakeup Style: ${makeupStyle}\nHairstyle: ${hairStyle || 'Natural/Current'}\nOccasion: ${occasion || 'Everyday'}\nIntensity: ${normalizedIntensity}\n\nProvide:\n1. A vivid description of the makeup application (colors, placement, intensity)\n2. Description of the hairstyle changes (texture, volume, color, styling)\n3. Overall look assessment and how it suits their facial features\n4. Specific product recommendations\n5. Application tips for achieving this look\n\nTailor your tone and recommendations to the chosen intensity. Be detailed and specific, as if describing a before/after makeover.`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [
-                {
-                    role: 'user',
-                    parts: [
-                        { text: prompt },
-                        { inlineData: { data: base64Data, mimeType } }
-                    ]
-                }
-            ],
-        });
-
-        const description = (response as any)?.response?.content?.parts?.[0]?.text || 'Virtual look generated.';
+        const description = buildVirtualLookDescription(
+            String(makeupStyle),
+            String(hairStyle || ''),
+            String(occasion || ''),
+            normalizedIntensity,
+            normalizedView
+        );
 
         const shouldGenerateImage = generateImage !== false;
         const editedImage = shouldGenerateImage
@@ -2487,7 +2524,8 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
                 String(makeupStyle),
                 String(hairStyle || ''),
                 String(occasion || ''),
-                normalizedIntensity
+                normalizedIntensity,
+                normalizedView
             )
             : selfie;
 

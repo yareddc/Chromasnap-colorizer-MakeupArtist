@@ -2,6 +2,7 @@
 import React, { useRef, useState } from 'react';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
+import PhotoEditorModal from './PhotoEditorModal';
 
 interface ImageUploaderProps {
   onImageSelected: (base64: string) => void;
@@ -12,6 +13,7 @@ interface ImageUploaderProps {
 const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoading, onSampleSelect }) => {
   const [dragActive, setDragActive] = useState(false);
   const [showSourcePicker, setShowSourcePicker] = useState(false);
+  const [pendingEditImage, setPendingEditImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const openFilePicker = () => {
@@ -29,12 +31,13 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoadin
     if (file) {
       processFile(file);
     }
+    event.target.value = '';
   };
 
   const processFile = (file: File) => {
     const reader = new FileReader();
     reader.onloadend = () => {
-      onImageSelected(reader.result as string);
+      setPendingEditImage(reader.result as string);
     };
     reader.readAsDataURL(file);
   }
@@ -50,7 +53,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoadin
       });
 
       if (image.dataUrl) {
-        onImageSelected(image.dataUrl);
+        setPendingEditImage(image.dataUrl);
       }
     } catch (error) {
       console.error('Camera cancelled or failed:', error);
@@ -168,6 +171,18 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoadin
           Try sample image
         </button>
       </div>
+
+      {pendingEditImage && (
+        <PhotoEditorModal
+          image={pendingEditImage}
+          title="Edit Colorizer Photo"
+          onCancel={() => setPendingEditImage(null)}
+          onApply={(editedImage) => {
+            onImageSelected(editedImage);
+            setPendingEditImage(null);
+          }}
+        />
+      )}
 
     </div>
   );

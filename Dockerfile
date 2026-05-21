@@ -34,6 +34,8 @@ COPY index.html ./
 COPY types.ts ./
 COPY vite.config.ts ./
 COPY tsconfig.json ./
+COPY postcss.config.cjs ./
+COPY tailwind.config.cjs ./
 COPY metadata.json ./
 COPY public ./public
 

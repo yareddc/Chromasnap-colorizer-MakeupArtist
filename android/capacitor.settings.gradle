@@ -8,5 +8,11 @@ project(':capacitor-firebase-authentication').projectDir = new File('../node_mod
 include ':capacitor-camera'
 project(':capacitor-camera').projectDir = new File('../node_modules/@capacitor/camera/android')
 
+include ':capacitor-filesystem'
+project(':capacitor-filesystem').projectDir = new File('../node_modules/@capacitor/filesystem/android')
+
+include ':capacitor-share'
+project(':capacitor-share').projectDir = new File('../node_modules/@capacitor/share/android')
+
 include ':chromasnap-image-processor'
 project(':chromasnap-image-processor').projectDir = new File('../capacitor-plugin/android')

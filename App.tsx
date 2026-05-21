@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
 import ComparisonView from './components/ComparisonView';
@@ -1241,6 +1241,77 @@ const App: React.FC = () => {
     }
   };
 
+  const handleGenerateTryOnAngle = useCallback(async (angle: Hair360Angle): Promise<string | null> => {
+    if (angle === 'front') {
+      return tryAfterImage || trySelfie;
+    }
+    if (!tryAfterImage && !trySelfie) {
+      return null;
+    }
+
+    try {
+      const sourceImage = tryAfterImage || trySelfie || '';
+      const result = await runBeautyActionWithRetry(() => generateVirtualMakeup(
+        sourceImage,
+        tryMakeupStyle,
+        tryHairStyle,
+        buildVirtualMakeupOccasionContext(tryOccasion, beautyNotes),
+        {
+          styleIntensity: tryStyleIntensity,
+          cameraView: angle,
+        }
+      ));
+
+      return ensureFreshPreviewUrl(result.editedImage || sourceImage);
+    } catch (error: any) {
+      setTryMessage(friendlyError(error, `try-on-${angle}-view`));
+      return null;
+    }
+  }, [
+    tryAfterImage,
+    trySelfie,
+    tryMakeupStyle,
+    tryHairStyle,
+    tryOccasion,
+    beautyNotes,
+    tryStyleIntensity,
+  ]);
+
+  const handleGenerateBarbershopAngle = useCallback(async (angle: Hair360Angle): Promise<string | null> => {
+    if (angle === 'front') {
+      return barbershopAfterImage || barbershopSelfie;
+    }
+    if (!barbershopAfterImage && !barbershopSelfie) {
+      return null;
+    }
+
+    try {
+      const sourceImage = barbershopAfterImage || barbershopSelfie || '';
+      const result = await runBeautyActionWithRetry(() => generateVirtualMakeup(
+        sourceImage,
+        barbershopMakeupStyle,
+        barbershopHaircut,
+        buildVirtualMakeupOccasionContext('barbershop visit', barbershopNotes),
+        {
+          styleIntensity: barbershopStyleIntensity,
+          cameraView: angle,
+        }
+      ));
+
+      return ensureFreshPreviewUrl(result.editedImage || sourceImage);
+    } catch (error: any) {
+      setBarbershopMessage(friendlyError(error, `barbershop-${angle}-view`));
+      return null;
+    }
+  }, [
+    barbershopAfterImage,
+    barbershopSelfie,
+    barbershopMakeupStyle,
+    barbershopHaircut,
+    barbershopNotes,
+    barbershopStyleIntensity,
+  ]);
+
   const handleDownloadTryOn = async () => {
     const imageToDownload = tryAfterImage || trySelfie;
     if (!imageToDownload) return;
@@ -2384,20 +2455,15 @@ const App: React.FC = () => {
           </div>
 
           <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h4 className="text-xs sm:text-sm font-bold text-amber-100 uppercase tracking-[0.15em]">Virtual Try-On Studio</h4>
-                <p className="text-[10px] text-amber-200/70 leading-relaxed">Preview makeup & hairstyles for occasions</p>
-              </div>
-              {trySelfie && (
+            {trySelfie && (
+              <div className="flex justify-end">
                 <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200">
                   Photo Ready
                 </span>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Upload Photo</label>
               {trySelfie && (
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
@@ -2421,6 +2487,7 @@ const App: React.FC = () => {
                       <MultiAngleAfterPreview
                         image={tryAfterImage}
                         alt="After virtual try-on"
+                        requestAngleImage={handleGenerateTryOnAngle}
                         className="w-full h-56 sm:h-64 object-cover"
                       />
                     ) : (
@@ -2550,6 +2617,7 @@ const App: React.FC = () => {
                       <MultiAngleAfterPreview
                         image={barbershopAfterImage}
                         alt="After barbershop look"
+                        requestAngleImage={handleGenerateBarbershopAngle}
                         className="w-full h-56 sm:h-64 object-cover"
                       />
                     ) : (

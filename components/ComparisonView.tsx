@@ -1,5 +1,6 @@
 
 import React, { useState, useRef } from 'react';
+import { downloadAsset } from '../services/downloadService';
 
 interface ComparisonViewProps {
   original: string;
@@ -94,10 +95,7 @@ const ComparisonView: React.FC<ComparisonViewProps> = ({ original, colorized }) 
         <p className="text-slate-400 text-sm sm:text-base leading-relaxed">Slide to compare</p>
         <button 
           onClick={() => {
-            const link = document.createElement('a');
-            link.href = colorized;
-            link.download = `chromasnap-${Date.now()}.png`;
-            link.click();
+            void downloadAsset(colorized, `chromasnap-${Date.now()}.png`);
           }}
           className="flex items-center gap-2 min-h-[44px] px-3 py-2 rounded-xl border border-slate-700 text-indigo-400 font-semibold hover:text-indigo-300 hover:border-indigo-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
         >

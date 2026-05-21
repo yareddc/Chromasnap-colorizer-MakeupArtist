@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { downloadAsset } from '../services/downloadService';
 
 interface VideoResultProps {
   videoUrl: string;
@@ -32,14 +33,7 @@ const VideoResult: React.FC<VideoResultProps> = ({ videoUrl, onDownload }) => {
               void onDownload();
               return;
             }
-            const link = document.createElement('a');
-            link.href = videoUrl;
-            link.download = 'chromasnap-animation.mp4';
-            link.rel = 'noopener noreferrer';
-            link.target = '_blank';
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
+            void downloadAsset(videoUrl, 'chromasnap-animation.mp4');
           }}
           className="flex items-center gap-2 text-indigo-400 font-semibold hover:text-indigo-300 transition-colors"
         >

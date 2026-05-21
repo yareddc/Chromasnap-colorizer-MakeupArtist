@@ -6,6 +6,7 @@ interface MultiAngleAfterPreviewProps {
   image: string;
   alt: string;
   className?: string;
+  requestAngleImage?: (angle: Angle) => Promise<string | null>;
 }
 
 const ANGLES: Array<{ id: Angle; label: string }> = [
@@ -15,67 +16,49 @@ const ANGLES: Array<{ id: Angle; label: string }> = [
   { id: 'back', label: 'Back' },
 ];
 
-const drawVariant = (source: HTMLImageElement, angle: Angle): string => {
-  const width = source.naturalWidth;
-  const height = source.naturalHeight;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return source.src;
-  }
-
-  ctx.save();
-  ctx.translate(width / 2, height / 2);
-
-  if (angle === 'left') {
-    ctx.rotate((-10 * Math.PI) / 180);
-    ctx.scale(1.12, 1.04);
-  } else if (angle === 'right') {
-    ctx.rotate((10 * Math.PI) / 180);
-    ctx.scale(1.12, 1.04);
-  } else if (angle === 'back') {
-    ctx.scale(-1.08, 1.03);
-  } else {
-    ctx.scale(1, 1);
-  }
-
-  ctx.drawImage(source, -width / 2, -height / 2, width, height);
-  ctx.restore();
-
-  return canvas.toDataURL('image/jpeg', 0.92);
-};
-
-const MultiAngleAfterPreview: React.FC<MultiAngleAfterPreviewProps> = ({ image, alt, className }) => {
+const MultiAngleAfterPreview: React.FC<MultiAngleAfterPreviewProps> = ({ image, alt, className, requestAngleImage }) => {
   const [activeAngle, setActiveAngle] = useState<Angle>('front');
-  const [variants, setVariants] = useState<Record<Angle, string>>({
+  const [variants, setVariants] = useState<Record<Angle, string | null>>({
     front: image,
-    left: image,
-    right: image,
-    back: image,
+    left: null,
+    right: null,
+    back: null,
+  });
+  const [loadingByAngle, setLoadingByAngle] = useState<Record<Angle, boolean>>({
+    front: false,
+    left: false,
+    right: false,
+    back: false,
   });
 
   useEffect(() => {
     setActiveAngle('front');
-    const img = new Image();
-    img.onload = () => {
-      setVariants({
-        front: drawVariant(img, 'front'),
-        left: drawVariant(img, 'left'),
-        right: drawVariant(img, 'right'),
-        back: drawVariant(img, 'back'),
-      });
-    };
-    img.onerror = () => {
-      setVariants({ front: image, left: image, right: image, back: image });
-    };
-    img.src = image;
-  }, [image]);
+    setVariants({ front: image, left: null, right: null, back: null });
+    setLoadingByAngle({ front: false, left: false, right: false, back: false });
+  }, [image, requestAngleImage]);
+
+  const loadAngleVariant = async (angle: Angle) => {
+    if (angle === 'front') {
+      setActiveAngle('front');
+      return;
+    }
+
+    setActiveAngle(angle);
+    if (!requestAngleImage || variants[angle] || loadingByAngle[angle]) {
+      return;
+    }
+
+    setLoadingByAngle((prev) => ({ ...prev, [angle]: true }));
+    try {
+      const generated = await requestAngleImage(angle);
+      setVariants((prev) => ({ ...prev, [angle]: generated || null }));
+    } finally {
+      setLoadingByAngle((prev) => ({ ...prev, [angle]: false }));
+    }
+  };
 
   const activeImage = useMemo(() => variants[activeAngle] || image, [activeAngle, image, variants]);
+  const isGeneratingAngle = loadingByAngle[activeAngle] && activeAngle !== 'front';
 
   return (
     <div className="space-y-2">
@@ -84,7 +67,7 @@ const MultiAngleAfterPreview: React.FC<MultiAngleAfterPreviewProps> = ({ image, 
           <button
             key={angle.id}
             type="button"
-            onClick={() => setActiveAngle(angle.id)}
+            onClick={() => { void loadAngleVariant(angle.id); }}
             className={`rounded-md px-2 py-1 text-[9px] font-bold uppercase tracking-wider border transition-colors ${
               activeAngle === angle.id
                 ? 'bg-violet-500/20 border-violet-400/60 text-violet-100'
@@ -95,8 +78,14 @@ const MultiAngleAfterPreview: React.FC<MultiAngleAfterPreviewProps> = ({ image, 
           </button>
         ))}
       </div>
-      <img src={activeImage} alt={`${alt} (${activeAngle} view)`} className={className} />
-      <p className="text-[9px] text-slate-400 text-center">Multi-angle preview is simulated from the generated after image.</p>
+      {isGeneratingAngle ? (
+        <div className="h-56 sm:h-64 flex items-center justify-center text-[10px] text-slate-300 px-3 text-center border border-violet-500/30 rounded-xl bg-slate-950/60">
+          Rendering {activeAngle} view from the generated look...
+        </div>
+      ) : (
+        <img src={activeImage} alt={`${alt} (${activeAngle} view)`} className={className} />
+      )}
+      <p className="text-[9px] text-slate-400 text-center">Left, right, and back views are generated on demand for perspective consistency.</p>
     </div>
   );
 };

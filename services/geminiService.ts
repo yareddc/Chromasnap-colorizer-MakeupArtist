@@ -588,7 +588,11 @@ export const generateVirtualMakeup = async (
   makeupStyle: string,
   hairStyle: string,
   occasion: string,
-  options?: { generateImage?: boolean; styleIntensity?: 'subtle' | 'balanced' | 'dramatic' }
+  options?: {
+    generateImage?: boolean;
+    styleIntensity?: 'subtle' | 'balanced' | 'dramatic';
+    cameraView?: 'front' | 'left' | 'right' | 'back';
+  }
 ): Promise<{ editedImage: string; description: string }> => {
   const response = await fetchWithTimeout(API_ENDPOINTS.GENERATE_VIRTUAL_MAKEUP, {
     method: 'POST',
@@ -601,6 +605,7 @@ export const generateVirtualMakeup = async (
       occasion,
       generateImage: options?.generateImage ?? true,
       styleIntensity: options?.styleIntensity || 'balanced',
+      cameraView: options?.cameraView || 'front',
     }),
   }, 120000);
 

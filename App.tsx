@@ -2202,7 +2202,6 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account Settings</h3>
-              <p className="text-xs leading-relaxed text-slate-400">All account actions are available from the top-right hamburger menu.</p>
             </div>
             <button
               onClick={() => setShowAccountDrawer(false)}
@@ -2390,7 +2389,6 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-amber-100 uppercase tracking-[0.18em]">Beauty Tools</h3>
-              <p className="text-xs leading-relaxed text-slate-400">Advanced tools moved out of the main Beauty Lab canvas.</p>
             </div>
             <button
               onClick={() => setShowBeautyToolsDrawer(false)}
@@ -2674,46 +2672,11 @@ const App: React.FC = () => {
           id="dashboard-panel"
           className="w-full rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-[#0f172a] via-[#111827] to-[#1f2937] p-4 sm:p-6 shadow-2xl shadow-cyan-500/10"
         >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 auto-rows-[140px]">
-            <div className="lg:col-span-6 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-400/10 to-slate-900/70 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest text-indigo-200/80 font-bold">Image Engine</div>
-                  <div className="mt-2 text-lg font-extrabold text-white">Colorize and Animate</div>
-                  <p className="mt-2 text-xs text-indigo-100/80">Choose a dedicated action instead of a combined command.</p>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <button
-                  onClick={() => {
-                    setMediaMode('colorize');
-                    handleWorkspaceTabChange('colorizer');
-                  }}
-                  className="rounded-2xl border border-indigo-300/40 bg-indigo-500/20 px-4 py-4 text-left transition-transform hover:-translate-y-0.5"
-                >
-                  <div className="text-[10px] uppercase tracking-widest text-indigo-200/80 font-bold">Colorize</div>
-                  <div className="mt-2 text-base font-extrabold text-white">Restore Color</div>
-                  <p className="mt-2 text-xs text-indigo-100/80">Rebuild natural tones from black and white images.</p>
-                </button>
-                <button
-                  onClick={() => {
-                    setMediaMode('animate');
-                    handleWorkspaceTabChange('animate');
-                  }}
-                  className="rounded-2xl border border-cyan-300/40 bg-cyan-500/20 px-4 py-4 text-left transition-transform hover:-translate-y-0.5"
-                >
-                  <div className="text-[10px] uppercase tracking-widest text-cyan-200/80 font-bold">Animate</div>
-                  <div className="mt-2 text-base font-extrabold text-white">Create Motion</div>
-                  <p className="mt-2 text-xs text-cyan-100/80">Turn a restored photo into a cinematic animation.</p>
-                </button>
-              </div>
-            </div>
-
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:auto-rows-[140px]">
             <button
               onClick={() => handleWorkspaceTabChange('beauty-lab')}
               className="lg:col-span-3 rounded-3xl border border-rose-400/40 bg-gradient-to-br from-rose-500/15 via-rose-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
             >
-              <div className="text-[10px] uppercase tracking-widest text-rose-200/80 font-bold">Salon AI</div>
               <div className="mt-2 text-lg font-extrabold text-white">Beauty Lab</div>
               <p className="mt-2 text-xs text-rose-100/80">Try-on studio, consultation, and profile tools.</p>
             </button>
@@ -2722,7 +2685,6 @@ const App: React.FC = () => {
               onClick={() => handleWorkspaceTabChange('barbershop')}
               className="lg:col-span-4 rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 via-emerald-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
             >
-              <div className="text-[10px] uppercase tracking-widest text-emerald-200/80 font-bold">Dedicated Feature</div>
               <div className="mt-2 text-lg font-extrabold text-white">Barbershop Visit</div>
               <p className="mt-2 text-xs text-emerald-100/80">Haircut previews with isolated session context.</p>
             </button>
@@ -2731,7 +2693,6 @@ const App: React.FC = () => {
               onClick={() => handleWorkspaceTabChange('outfit')}
               className="lg:col-span-4 rounded-3xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-pink-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
             >
-              <div className="text-[10px] uppercase tracking-widest text-fuchsia-200/80 font-bold">Night Out Prep</div>
               <div className="mt-2 text-lg font-extrabold text-white">Outfit Studio</div>
               <p className="mt-2 text-xs text-fuchsia-100/80">Virtual outfit try-on aligned with your makeup and haircut choices.</p>
             </button>
@@ -2747,11 +2708,7 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account Center</h3>
-              <p className="text-xs leading-relaxed text-slate-400">Manage subscription, usage, and security from one page.</p>
             </div>
-            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-amber-400/40 bg-amber-500/10 text-amber-200">
-              Feature Page
-            </span>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
@@ -2774,26 +2731,26 @@ const App: React.FC = () => {
               onClick={() => { setAccountTab('overview'); setShowAccountDrawer(true); }}
               className="px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
             >
-              Open Account Overview
+              Overview
             </button>
             <button
               onClick={() => { setAccountTab('account-details'); setShowAccountDrawer(true); }}
               className="px-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
             >
-              Open Account Details
+              Details
             </button>
             <button
               onClick={() => { void refreshSubscription(); }}
               disabled={billingLoading}
               className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
             >
-              {billingLoading ? 'Refreshing...' : 'Refresh Billing'}
+              {billingLoading ? 'Refreshing...' : 'Refresh'}
             </button>
             <button
               onClick={() => { setAccountTab('delete-account'); setShowAccountDrawer(true); }}
               className="px-4 py-3 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
             >
-              Danger Zone
+              Delete
             </button>
           </div>
         </div>
@@ -2807,11 +2764,7 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Beauty Lab</h3>
-              <p className="text-xs leading-relaxed text-slate-400">Salon workflow tab for makeup and beauty service planning.</p>
             </div>
-            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-rose-400/40 bg-rose-500/10 text-rose-200">
-              New Tab
-            </span>
           </div>
 
           <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 space-y-3">
@@ -2957,7 +2910,7 @@ const App: React.FC = () => {
                   }}
                   className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-400 hover:text-slate-300 transition-colors border border-slate-700 hover:border-slate-600"
                 >
-                  Clear & Upload New Photo
+                    New Photo
                 </button>
               </>
             )}
@@ -2973,11 +2926,7 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Barbershop Visit</h3>
-              <p className="text-xs leading-relaxed text-slate-400">Dedicated haircut-focused feature with standalone actions and results.</p>
             </div>
-            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200">
-              Own Feature
-            </span>
           </div>
 
           <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 space-y-3">
@@ -3162,7 +3111,7 @@ const App: React.FC = () => {
                 }}
                 className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white transition-colors border border-emerald-700/70 hover:border-emerald-500"
               >
-                Clear Barbershop Session
+                Reset Session
               </button>
             )}
           </div>
@@ -3177,11 +3126,7 @@ const App: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Outfit Studio</h3>
-              <p className="text-xs leading-relaxed text-slate-400">Upload a full-body selfie and preview outfits that align with your Beauty Lab and Barbershop styling.</p>
             </div>
-            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-200">
-              VTO Flow
-            </span>
           </div>
 
           <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-4 space-y-3">
@@ -3446,7 +3391,7 @@ const App: React.FC = () => {
                 }}
                 className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white transition-colors border border-fuchsia-700/70 hover:border-fuchsia-500"
               >
-                Clear Outfit Session
+                Reset Session
               </button>
             )}
           </div>
@@ -3602,9 +3547,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-              {activeWorkspaceTab === 'animate' ? 'Animate page is active.' : 'Colorize page is active.'} Palette: {selectedTheme}
-            </div>
           </div>
         )}
 
@@ -3738,9 +3680,6 @@ const App: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">
-                    {activeWorkspaceTab === 'animate' ? 'Animate page is active' : 'Colorize page is active'} | Palette: {selectedTheme}
-                  </div>
                 </>
               )}
 
@@ -3751,7 +3690,7 @@ const App: React.FC = () => {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Upload New Image
+                New Image
               </button>
             </div>
 
@@ -3811,11 +3750,8 @@ const App: React.FC = () => {
       </div>
       </main>
 
-      <footer className="py-6 px-4 text-center border-t border-slate-900 bg-slate-900/20 space-y-3">
-        <div className="flex flex-wrap justify-center gap-2 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
-          <span className="px-2.5 py-1 rounded-full border border-slate-800">Transparent usage</span>
-        </div>
-        <p className="text-slate-400 text-[10px] uppercase tracking-widest font-bold">ChromaSnap AI • Restoration Studio</p>
+      <footer className="py-6 px-4 text-center border-t border-slate-900 bg-slate-900/20">
+        <p className="text-slate-400 text-[10px] uppercase tracking-widest font-bold">ChromaSnap AI</p>
       </footer>
 
       {pendingPhotoEdit && (

@@ -6,11 +6,11 @@ on:
       android_version_code:
         description: Android version code to build
         required: false
-        default: '20'
+        default: '25'
       android_version_name:
         description: Android version name to build
         required: false
-        default: '1.2.1'
+        default: '1.2.6'
 
 jobs:
   build-signed-aab:
@@ -120,8 +120,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION_CODE="24"
-          VERSION_NAME="1.2.5"
+          VERSION_CODE="25"
+          VERSION_NAME="1.2.6"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "Resolved Android versionCode=$VERSION_CODE versionName=$VERSION_NAME"

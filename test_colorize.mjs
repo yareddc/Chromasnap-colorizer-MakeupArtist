@@ -1,6 +1,23 @@
 import fs from 'fs';
 import path from 'path';
 
+const API_BASE = process.env.E2E_API_BASE || 'http://localhost:3001';
+const E2E_USER_ID = process.env.E2E_USER_ID || 'video-test-user';
+const E2E_AUTH_TOKEN = (process.env.E2E_AUTH_TOKEN || '').trim();
+
+const buildAuthHeaders = () => {
+    const headers = {
+        'Content-Type': 'application/json',
+        'x-user-id': E2E_USER_ID,
+    };
+
+    if (E2E_AUTH_TOKEN) {
+        headers.Authorization = `Bearer ${E2E_AUTH_TOKEN}`;
+    }
+
+    return headers;
+};
+
 async function testColorize() {
     const imagePath = path.resolve('public', 'Eritrean man.jpeg');
     console.log(`Reading image from: ${imagePath}`);
@@ -18,13 +35,13 @@ async function testColorize() {
         theme: 'Natural'
     };
 
-    console.log('Sending request to http://localhost:3001/api/process/colorize ...');
+    console.log(`Sending request to ${API_BASE}/api/process/colorize ...`);
     const startTime = Date.now();
 
     try {
-        const response = await fetch('http://localhost:3001/api/process/colorize', {
+        const response = await fetch(`${API_BASE}/api/process/colorize`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: buildAuthHeaders(),
             body: JSON.stringify(payload)
         });
 

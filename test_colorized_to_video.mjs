@@ -1,8 +1,21 @@
 import fs from 'fs';
 import path from 'path';
 
-const API_BASE = 'http://localhost:3001';
-const USER_ID = 'video-test-user';
+const API_BASE = process.env.E2E_API_BASE || 'http://localhost:3001';
+const USER_ID = process.env.E2E_USER_ID || 'video-test-user';
+const E2E_AUTH_TOKEN = (process.env.E2E_AUTH_TOKEN || '').trim();
+
+const buildAuthHeaders = () => {
+  const headers = {
+    'x-user-id': USER_ID,
+  };
+
+  if (E2E_AUTH_TOKEN) {
+    headers.Authorization = `Bearer ${E2E_AUTH_TOKEN}`;
+  }
+
+  return headers;
+};
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -20,7 +33,7 @@ async function testColorizedToVideo() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-user-id': USER_ID,
+      ...buildAuthHeaders(),
     },
     body: JSON.stringify({ image: imageDataUrl }),
   });
@@ -43,7 +56,7 @@ async function testColorizedToVideo() {
     await sleep(5000);
 
     const statusResponse = await fetch(`${API_BASE}/api/process/animate/status/${jobId}`, {
-      headers: { 'x-user-id': USER_ID },
+      headers: buildAuthHeaders(),
     });
 
     const statusBody = await statusResponse.text();
@@ -60,7 +73,7 @@ async function testColorizedToVideo() {
 
     if (statusData.status === 'done') {
       const resultResponse = await fetch(`${API_BASE}/api/process/animate/result/${jobId}`, {
-        headers: { 'x-user-id': USER_ID },
+        headers: buildAuthHeaders(),
       });
 
       if (!resultResponse.ok) {

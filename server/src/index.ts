@@ -143,8 +143,10 @@ const ACTION_TOKEN_COST: Record<string, number> = {
     animate_start: 20,
     beauty_consult: 3,
     virtual_makeup: 5,
+    outfit_tryon: 6,
     occasion_recommend: 3,
     beauty_profile_analysis: 2,
+    complexion_report: 2,
 };
 
 const BILLING_HEADER = 'x-user-id';
@@ -1545,6 +1547,104 @@ const buildVirtualLookDescription = (
     ].join(' ');
 };
 
+const runOutfitTryOnImageEdit = async (
+    selfie: string,
+    outfitStyle: string,
+    occasion: string,
+    colorPalette: string,
+    salonContext: string,
+    mode: 'style' | 'garment',
+    garmentLabel: string,
+    garmentImage: string | null,
+    variantIndex: number,
+    totalVariants: number
+): Promise<string> => {
+    const base64Image = await normalizeImageToPngBase64(selfie);
+    const normalizedGarmentImage = garmentImage ? await normalizeImageToPngBase64(garmentImage) : null;
+    const ai = createAI();
+
+    const variationLabel = totalVariants > 1
+        ? `This is variation ${variantIndex + 1} of ${totalVariants}; keep it distinct while following the same brief.`
+        : 'Generate a single best look.';
+
+    const editPrompt = [
+        'Transform this full-body selfie with a photorealistic virtual outfit try-on.',
+        `Mode: ${mode}.`,
+        `Outfit style: ${outfitStyle || 'smart casual'}.`,
+        `Occasion: ${occasion || 'night out'}.`,
+        `Color palette direction: ${colorPalette || 'coordinated neutrals'}.`,
+        `Salon alignment notes: ${salonContext || 'match existing grooming style'}.`,
+        mode === 'garment'
+            ? `Garment reference focus: ${garmentLabel || 'match the uploaded garment reference'}.`
+            : 'Use style-led outfit composition without garment reference lock.',
+        variationLabel,
+        'Hard constraints:',
+        '- Keep the same person identity, body shape, skin tone identity, pose, framing, and background.',
+        '- Replace or restyle clothing only. Do not alter face identity or body proportions.',
+        mode === 'garment'
+            ? '- Match the garment silhouette/material details from the reference image as closely as possible while preserving realism.'
+            : '- Create an outfit matching the requested style and color palette.',
+        '- Preserve natural fabric folds, fit, and lighting realism.',
+        '- Avoid visual artifacts, extra limbs, or warped anatomy.',
+        '- Return one photorealistic edited image.',
+    ].join('\n');
+
+    const parts: Array<{ inlineData?: { data: string; mimeType: string }; text?: string }> = [
+        { inlineData: { data: base64Image, mimeType: 'image/png' } },
+    ];
+
+    if (normalizedGarmentImage) {
+        parts.push({ inlineData: { data: normalizedGarmentImage, mimeType: 'image/png' } });
+    }
+
+    parts.push({ text: editPrompt });
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: [{
+            role: 'user',
+            parts,
+        }],
+        config: {
+            responseModalities: ['IMAGE'],
+            temperature: 0.35,
+        },
+    });
+
+    const imageBase64 = extractGeminiInlineImageBase64(response);
+    if (!imageBase64) {
+        throw new Error('Outfit try-on image generation returned no image');
+    }
+
+    return `data:image/png;base64,${imageBase64}`;
+};
+
+const buildOutfitTryOnDescription = (
+    outfitStyle: string,
+    occasion: string,
+    colorPalette: string,
+    salonContext: string,
+    mode: 'style' | 'garment',
+    garmentLabel: string,
+    matchCurrentSalonLook: boolean
+): string => {
+    const cleanStyle = String(outfitStyle || 'smart casual').trim() || 'smart casual';
+    const cleanOccasion = String(occasion || 'night out').trim() || 'night out';
+    const cleanPalette = String(colorPalette || 'coordinated neutrals').trim() || 'coordinated neutrals';
+    const cleanSalonContext = String(salonContext || 'match existing grooming style').trim() || 'match existing grooming style';
+    const cleanGarmentLabel = String(garmentLabel || '').trim();
+
+    return [
+        `Generated ${cleanStyle} outfit concept for ${cleanOccasion}.`,
+        mode === 'garment'
+            ? `Garment reference mode: ${cleanGarmentLabel || 'aligned to uploaded garment reference'}.`
+            : 'Style-driven mode without garment locking.',
+        `Palette direction: ${cleanPalette}.`,
+        matchCurrentSalonLook ? `Salon alignment: ${cleanSalonContext}.` : 'Salon alignment was disabled for this generation.',
+        'Description is constrained to user-selected styling inputs to avoid speculative claims.',
+    ].join(' ');
+};
+
 // --- Endpoints ---
 
 app.post('/api/auth/register', authWriteLimiter, async (req, res) => {
@@ -2539,6 +2639,71 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
     }
 });
 
+app.post('/api/generate/outfit-tryon', requireBilling('outfit_tryon'), async (req, res) => {
+    try {
+        const { selfie, outfitStyle, occasion, colorPalette, salonContext, generateImage, mode, garmentLabel, garmentImage, matchCurrentSalonLook, batchCount } = req.body;
+        if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+        if (!outfitStyle) return res.status(400).json({ error: 'Outfit style required' });
+
+        const normalizedMode: 'style' | 'garment' = mode === 'garment' ? 'garment' : 'style';
+        const normalizedBatchCount = Number.isFinite(Number(batchCount))
+            ? Math.max(1, Math.min(3, Number(batchCount)))
+            : 3;
+        const normalizedMatchSalonLook = matchCurrentSalonLook !== false;
+
+        if (normalizedMode === 'garment' && !garmentImage && !garmentLabel) {
+            return res.status(400).json({ error: 'Garment reference image or label is required in garment mode' });
+        }
+
+        const effectiveSalonContext = normalizedMatchSalonLook ? String(salonContext || '') : '';
+
+        const description = buildOutfitTryOnDescription(
+            String(outfitStyle),
+            String(occasion || ''),
+            String(colorPalette || ''),
+            effectiveSalonContext,
+            normalizedMode,
+            String(garmentLabel || ''),
+            normalizedMatchSalonLook
+        );
+
+        const shouldGenerateImage = generateImage !== false;
+        const looks = shouldGenerateImage
+            ? await Promise.all(Array.from({ length: normalizedBatchCount }).map(async (_, index) => {
+                const generatedImage = await runOutfitTryOnImageEdit(
+                    selfie,
+                    String(outfitStyle),
+                    String(occasion || ''),
+                    String(colorPalette || ''),
+                    effectiveSalonContext,
+                    normalizedMode,
+                    String(garmentLabel || ''),
+                    typeof garmentImage === 'string' ? garmentImage : null,
+                    index,
+                    normalizedBatchCount
+                );
+
+                return {
+                    title: normalizedBatchCount === 1 ? 'Primary Look' : `Look ${index + 1}`,
+                    editedImage: generatedImage,
+                    description,
+                };
+            }))
+            : [{ title: 'Primary Look', editedImage: selfie, description }];
+
+        const editedImage = looks[0]?.editedImage || selfie;
+
+        res.json({
+            editedImage,
+            description,
+            looks,
+        });
+    } catch (error: any) {
+        console.error('Outfit try-on generation failed:', error);
+        res.status(500).json({ error: error.message || 'Outfit try-on generation failed' });
+    }
+});
+
 app.post('/api/recommend/occasion-look', requireBilling('occasion_recommend'), async (req, res) => {
     try {
         const { selfie, occasion } = req.body;
@@ -2769,6 +2934,82 @@ Return ONLY the JSON object, nothing else.`;
     } catch (error: any) {
         console.error('Beauty profile analysis failed:', error);
         res.status(500).json({ error: error.message || 'Beauty profile analysis failed' });
+    }
+});
+
+app.post('/api/analyze/complexion-report', requireBilling('complexion_report'), async (req, res) => {
+    try {
+        const { selfie } = req.body;
+        if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+
+        const hasPrefix = typeof selfie === 'string' && selfie.includes(',');
+        const base64Data = hasPrefix ? selfie.split(',')[1] : selfie;
+        const mimeType = hasPrefix
+            ? selfie.split(';')[0].split(':')[1] || 'image/jpeg'
+            : 'image/jpeg';
+
+        const ai = createAI();
+
+        const prompt = `You are a professional cosmetic complexion analyst for beauty and makeup planning. Analyze only what is visually observable from the face photo in natural lighting conditions. Do not diagnose diseases, skin disorders, or medical conditions. Return ONLY strict JSON using this schema:\n\n{
+  "hydrationLevel": "low|balanced|high",
+  "rednessLevel": "low|moderate|high",
+  "poreVisibility": "low|moderate|high",
+  "toneUniformity": "uneven|mostly-even|even",
+  "summary": "2-3 short sentences focused on cosmetic complexion observations",
+  "colorCorrector": "single practical suggestion for makeup color correction",
+  "recommendedMakeupStyle": "natural|bold|smokey-eye|glam|editorial|dewy",
+  "recommendedStyleIntensity": "subtle|balanced|dramatic",
+  "beautyLabTips": ["tip1", "tip2", "tip3"],
+  "disclaimer": "non-diagnostic cosmetic disclaimer"
+}\n\nSafety rule: Avoid any medical language such as diagnosis, treatment, disease, acne severity grading, inflammation disorder names, or prescription suggestions. Keep output cosmetic and beauty-focused only.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{
+                role: 'user',
+                parts: [
+                    { text: prompt },
+                    { inlineData: { data: base64Data, mimeType } },
+                ],
+            }],
+        });
+
+        let rawText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        if (!rawText) {
+            return res.status(500).json({ error: 'Failed to generate complexion report' });
+        }
+
+        rawText = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+        let parsed: any;
+        try {
+            parsed = JSON.parse(rawText);
+        } catch {
+            return res.status(500).json({ error: 'Invalid complexion report format received' });
+        }
+
+        const normalizeEnum = <T extends string>(value: any, allowed: T[], fallback: T): T =>
+            allowed.includes(String(value) as T) ? (String(value) as T) : fallback;
+
+        const payload = {
+            hydrationLevel: normalizeEnum(parsed?.hydrationLevel, ['low', 'balanced', 'high'], 'balanced'),
+            rednessLevel: normalizeEnum(parsed?.rednessLevel, ['low', 'moderate', 'high'], 'moderate'),
+            poreVisibility: normalizeEnum(parsed?.poreVisibility, ['low', 'moderate', 'high'], 'moderate'),
+            toneUniformity: normalizeEnum(parsed?.toneUniformity, ['uneven', 'mostly-even', 'even'], 'mostly-even'),
+            summary: String(parsed?.summary || 'Complexion appears suitable for adaptive beauty styling.'),
+            colorCorrector: String(parsed?.colorCorrector || 'Use a lightweight neutralizing primer where needed.'),
+            recommendedMakeupStyle: normalizeEnum(parsed?.recommendedMakeupStyle, ['natural', 'bold', 'smokey-eye', 'glam', 'editorial', 'dewy'], 'natural'),
+            recommendedStyleIntensity: normalizeEnum(parsed?.recommendedStyleIntensity, ['subtle', 'balanced', 'dramatic'], 'balanced'),
+            beautyLabTips: Array.isArray(parsed?.beautyLabTips)
+                ? parsed.beautyLabTips.filter((item: unknown) => typeof item === 'string').slice(0, 5)
+                : [],
+            disclaimer: String(parsed?.disclaimer || 'Cosmetic complexion guidance only. This report is not a medical diagnosis.'),
+        };
+
+        res.json(payload);
+    } catch (error: any) {
+        console.error('Complexion report failed:', error);
+        res.status(500).json({ error: error.message || 'Complexion report failed' });
     }
 });
 

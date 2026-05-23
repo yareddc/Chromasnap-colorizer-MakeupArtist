@@ -1,5 +1,23 @@
 import { Capacitor } from '@capacitor/core';
 
+type NativeFilesystemPlugin = {
+  writeFile(options: {
+    path: string;
+    data: string;
+    directory: string;
+    recursive?: boolean;
+  }): Promise<{ uri: string }>;
+};
+
+type NativeSharePlugin = {
+  share(options: {
+    title: string;
+    text: string;
+    url: string;
+    dialogTitle: string;
+  }): Promise<void>;
+};
+
 const blobToBase64 = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -93,22 +111,26 @@ const downloadForWeb = async (sourceUrl: string, filename: string) => {
 };
 
 const downloadForNative = async (sourceUrl: string, filename: string) => {
-  const [{ Filesystem, Directory }, { Share }] = await Promise.all([
-    import('@capacitor/filesystem'),
-    import('@capacitor/share'),
-  ]);
+  const plugins = Capacitor.Plugins as {
+    Filesystem?: NativeFilesystemPlugin & { Directory: { Cache: string } };
+    Share?: NativeSharePlugin;
+  };
+
+  if (!plugins.Filesystem || !plugins.Share) {
+    throw new Error('Native download plugins are not available.');
+  }
 
   const blob = await fetchAsBlob(sourceUrl, filename);
   const base64Data = await blobToBase64(blob);
 
-  const writeResult = await Filesystem.writeFile({
+  const writeResult = await plugins.Filesystem.writeFile({
     path: `downloads/${filename}`,
     data: base64Data,
-    directory: Directory.Cache,
+    directory: plugins.Filesystem.Directory.Cache,
     recursive: true,
   });
 
-  await Share.share({
+  await plugins.Share.share({
     title: 'ChromaSnap Download',
     text: filename,
     url: writeResult.uri,

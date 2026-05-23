@@ -11,6 +11,7 @@ import PhotoEditorModal from './components/PhotoEditorModal';
 import MultiAngleAfterPreview from './components/MultiAngleAfterPreview';
 import { AuthUser, ColorizedImage, AnimatedResult, ProcessingState, SubscriptionAccount, SubscriptionPlan, SubscriptionUsageItem } from './types';
 import {
+  analyzeComplexionReport,
   clearAuthToken,
   colorizeImage,
   confirmPasswordReset,
@@ -18,6 +19,7 @@ import {
   checkImageSafety,
   analyzeBeautyProfile,
   consultBeautyAdvisor,
+  generateOutfitTryOn,
   generateVirtualMakeup,
   recommendOccasionLook,
   fetchAuthMe,
@@ -39,7 +41,7 @@ import {
   topUpTokens,
   verifyGooglePlayPurchase,
 } from './services/geminiService';
-import type { BeautyProfileAnalysis } from './services/geminiService';
+import type { BeautyProfileAnalysis, ComplexionReport } from './services/geminiService';
 import {
   checkGoogleRedirectResult,
   confirmPhoneOtp,
@@ -74,29 +76,6 @@ const PALETTES = [
   { id: 'Technicolor', name: 'Technicolor', colors: 'from-rose-600 to-rose-400' }
 ];
 
-const PALETTE_COMMAND_KEYWORDS: Array<{ theme: string; keywords: string[] }> = [
-  { theme: 'Natural', keywords: ['natural', 'realistic', 'true color'] },
-  { theme: 'Cinematic', keywords: ['cinematic', 'film', 'movie'] },
-  { theme: 'Vivid', keywords: ['vivid', 'vibrant', 'bold color'] },
-  { theme: 'Vintage', keywords: ['vintage', 'retro', 'old film'] },
-  { theme: 'Technicolor', keywords: ['technicolor', 'techni', 'saturated'] },
-];
-
-const detectColorizerCommandIntent = (commandText: string, fallbackTheme: string) => {
-  const command = commandText.trim().toLowerCase();
-  const detectedTheme = PALETTE_COMMAND_KEYWORDS.find(({ keywords }) =>
-    keywords.some((keyword) => command.includes(keyword))
-  )?.theme;
-  const isAnimationCommand =
-    command.includes('animate') || command.includes('video') || command.includes('motion');
-
-  return {
-    isAnimationCommand,
-    detectedTheme,
-    effectiveTheme: detectedTheme || fallbackTheme,
-  };
-};
-
 const SAMPLE_IMAGE_ASSET_URL = '/bw_smoke_test.jpg';
 
 const resolveEnvProductId = (...keys: (keyof ImportMetaEnv)[]): string | undefined => {
@@ -124,10 +103,20 @@ const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
     'chromasnap_topup_1000',
 };
 
-type WorkspaceTab = 'dashboard' | 'colorizer' | 'beauty-lab' | 'barbershop' | 'account';
+type WorkspaceTab = 'dashboard' | 'colorizer' | 'animate' | 'beauty-lab' | 'barbershop' | 'outfit' | 'account';
 type Hair360Angle = 'front' | 'left' | 'right' | 'back';
 type LookRecommendation = { style: string; makeup: string; hair: string; description: string };
-type PendingPhotoEditTarget = 'try-on' | 'barbershop';
+type PendingPhotoEditTarget = 'try-on' | 'barbershop' | 'outfit';
+type OutfitLookVariant = { title: string; editedImage: string; description: string };
+type ComplexionHistoryEntry = {
+  timestamp: number;
+  hydrationLevel: 'low' | 'balanced' | 'high';
+  rednessLevel: 'low' | 'moderate' | 'high';
+  poreVisibility: 'low' | 'moderate' | 'high';
+  toneUniformity: 'uneven' | 'mostly-even' | 'even';
+  recommendedMakeupStyle: 'natural' | 'bold' | 'smokey-eye' | 'glam' | 'editorial' | 'dewy';
+  recommendedStyleIntensity: 'subtle' | 'balanced' | 'dramatic';
+};
 
 const blobToDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -163,7 +152,6 @@ const App: React.FC = () => {
     isProcessing: false,
     statusMessage: '',
   });
-  const [colorizerCommand, setColorizerCommand] = useState('');
   const [activeUserId, setActiveUserId] = useState<string>(() => getCurrentUserId());
   const [userIdInput, setUserIdInput] = useState<string>(activeUserId);
   const [subscriptionAccount, setSubscriptionAccount] = useState<SubscriptionAccount | null>(null);
@@ -224,6 +212,22 @@ const App: React.FC = () => {
   const [barbershopRecommendationLoading, setBarbershopRecommendationLoading] = useState(false);
   const [barbershopGenerateLoading, setBarbershopGenerateLoading] = useState(false);
   const [barbershopMessage, setBarbershopMessage] = useState<string | null>(null);
+  const [outfitSelfie, setOutfitSelfie] = useState<string | null>(null);
+  const [outfitAfterImage, setOutfitAfterImage] = useState<string | null>(null);
+  const [outfitLooks, setOutfitLooks] = useState<OutfitLookVariant[] | null>(null);
+  const [outfitActiveLookIndex, setOutfitActiveLookIndex] = useState(0);
+  const [outfitStyle, setOutfitStyle] = useState('formal-evening');
+  const [outfitMode, setOutfitMode] = useState<'style' | 'garment'>('style');
+  const [outfitOccasion, setOutfitOccasion] = useState('night out');
+  const [outfitColorPalette, setOutfitColorPalette] = useState('match makeup palette');
+  const [outfitBatchCount, setOutfitBatchCount] = useState<1 | 2 | 3>(3);
+  const [outfitMatchCurrentSalonLook, setOutfitMatchCurrentSalonLook] = useState(true);
+  const [outfitNotes, setOutfitNotes] = useState('');
+  const [outfitGarmentLabel, setOutfitGarmentLabel] = useState('tailored blazer set');
+  const [outfitGarmentImage, setOutfitGarmentImage] = useState<string | null>(null);
+  const [outfitLoading, setOutfitLoading] = useState(false);
+  const [outfitMessage, setOutfitMessage] = useState<string | null>(null);
+  const [showOutfitPhotoPicker, setShowOutfitPhotoPicker] = useState(false);
   const [hair360Length, setHair360Length] = useState<'short' | 'medium' | 'long'>('medium');
   const [hair360Volume, setHair360Volume] = useState<'low' | 'balanced' | 'high'>('balanced');
   const [hair360Fringe, setHair360Fringe] = useState<'none' | 'curtain' | 'side-swept' | 'full'>('none');
@@ -235,9 +239,20 @@ const App: React.FC = () => {
   const [profileAnalysisResult, setProfileAnalysisResult] = useState<BeautyProfileAnalysis | null>(null);
   const [profileAnalysisLoading, setProfileAnalysisLoading] = useState(false);
   const [profileAnalysisMessage, setProfileAnalysisMessage] = useState<string | null>(null);
+  const [complexionReport, setComplexionReport] = useState<ComplexionReport | null>(null);
+  const [complexionReportLoading, setComplexionReportLoading] = useState(false);
+  const [complexionReportMessage, setComplexionReportMessage] = useState<string | null>(null);
+  const [complexionHistory, setComplexionHistory] = useState<ComplexionHistoryEntry[]>([]);
   const [pendingPhotoEdit, setPendingPhotoEdit] = useState<{ target: PendingPhotoEditTarget; image: string } | null>(null);
   const [showBeautyPhotoPicker, setShowBeautyPhotoPicker] = useState(false);
   const [showBarbershopPhotoPicker, setShowBarbershopPhotoPicker] = useState(false);
+  const tryUploadInputRef = useRef<HTMLInputElement>(null);
+  const tryCameraInputRef = useRef<HTMLInputElement>(null);
+  const barbershopUploadInputRef = useRef<HTMLInputElement>(null);
+  const barbershopCameraInputRef = useRef<HTMLInputElement>(null);
+  const outfitUploadInputRef = useRef<HTMLInputElement>(null);
+  const outfitCameraInputRef = useRef<HTMLInputElement>(null);
+  const outfitGarmentUploadInputRef = useRef<HTMLInputElement>(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountDrawer, setShowAccountDrawer] = useState(false);
   const [showBeautyToolsDrawer, setShowBeautyToolsDrawer] = useState(false);
@@ -247,7 +262,8 @@ const App: React.FC = () => {
   const pinchZoomStateRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
   const isDeveloperMode = import.meta.env.DEV || import.meta.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true';
-  const commandIntent = detectColorizerCommandIntent(colorizerCommand, selectedTheme);
+  const [mediaMode, setMediaMode] = useState<'colorize' | 'animate'>('colorize');
+  const complexionHistoryStorageKey = `chromasnap_complexion_history_${authUser?.username || activeUserId || 'guest'}`;
 
   const currentPlan = subscriptionPlans.find((plan) => plan.id === (subscriptionAccount?.tier ?? 'free'));
   const planMonthlyTokens = currentPlan?.monthlyTokens ?? 1;
@@ -321,6 +337,53 @@ const App: React.FC = () => {
     if (!authUser) return;
     refreshSubscription();
   }, [activeUserId, authUser]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(complexionHistoryStorageKey);
+      if (!raw) {
+        setComplexionHistory([]);
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setComplexionHistory([]);
+        return;
+      }
+
+      const valid = parsed
+        .filter((entry: unknown) => !!entry && typeof entry === 'object')
+        .map((entry: any) => ({
+          timestamp: Number(entry.timestamp) || Date.now(),
+          hydrationLevel: entry.hydrationLevel === 'low' || entry.hydrationLevel === 'high' || entry.hydrationLevel === 'balanced' ? entry.hydrationLevel : 'balanced',
+          rednessLevel: entry.rednessLevel === 'low' || entry.rednessLevel === 'high' || entry.rednessLevel === 'moderate' ? entry.rednessLevel : 'moderate',
+          poreVisibility: entry.poreVisibility === 'low' || entry.poreVisibility === 'high' || entry.poreVisibility === 'moderate' ? entry.poreVisibility : 'moderate',
+          toneUniformity: entry.toneUniformity === 'uneven' || entry.toneUniformity === 'even' || entry.toneUniformity === 'mostly-even' ? entry.toneUniformity : 'mostly-even',
+          recommendedMakeupStyle:
+            entry.recommendedMakeupStyle === 'natural' || entry.recommendedMakeupStyle === 'bold' || entry.recommendedMakeupStyle === 'smokey-eye' || entry.recommendedMakeupStyle === 'glam' || entry.recommendedMakeupStyle === 'editorial' || entry.recommendedMakeupStyle === 'dewy'
+              ? entry.recommendedMakeupStyle
+              : 'natural',
+          recommendedStyleIntensity:
+            entry.recommendedStyleIntensity === 'subtle' || entry.recommendedStyleIntensity === 'dramatic' || entry.recommendedStyleIntensity === 'balanced'
+              ? entry.recommendedStyleIntensity
+              : 'balanced',
+        }))
+        .slice(0, 20);
+
+      setComplexionHistory(valid);
+    } catch {
+      setComplexionHistory([]);
+    }
+  }, [complexionHistoryStorageKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(complexionHistoryStorageKey, JSON.stringify(complexionHistory.slice(0, 20)));
+    } catch {
+      // Ignore local persistence failures.
+    }
+  }, [complexionHistory, complexionHistoryStorageKey]);
 
   useEffect(() => {
     if (!showAccountMenu) return;
@@ -462,36 +525,10 @@ const App: React.FC = () => {
     }
   };
 
-  const handleGoogleLogin = async () => {
-    setAuthLoading(true);
-    setAuthMessage(null);
-    try {
-      if (!isFirebaseAvailable()) {
-        throw new Error('Google login is not configured yet (missing Firebase env vars).');
-      }
-      const idToken = await signInWithGoogle();
-      const { user } = await socialLogin({ idToken, provider: 'google' });
-      setAuthUser(user);
-      const storedId = setCurrentUserId(user.username);
-      setActiveUserId(storedId);
-      setUserIdInput(storedId);
-      setAuthMessage('Signed in with Google.');
-    } catch (error: any) {
-      // Redirect flow triggered — page will navigate to Google, result handled on return
-      if (error?.message === '__redirect__') {
-        setAuthMessage('Redirecting to Google sign-in…');
-        return;
-      }
-      setAuthMessage(friendlyError(error, 'googleLogin'));
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
   const handleSendPhoneOtp = async () => {
     const normalizedPhoneNumber = socialPhoneNumber.trim();
     if (!normalizedPhoneNumber) {
-      setAuthMessage('Enter a phone number before sending an OTP.');
+      setAuthMessage('Enter your phone number before sending an OTP.');
       return;
     }
 
@@ -901,7 +938,23 @@ const App: React.FC = () => {
     if (!sourceImage) return;
 
     const safety = result?.safetyCheck || await checkImageSafety(sourceImage);
-    if (!safety?.isSafe || safety?.containsMinors) return;
+    if (safety?.containsMinors) {
+      setProcessing({
+        isProcessing: false,
+        statusMessage: '',
+        error: 'Animation is disabled for images containing minors due to safety policies.'
+      });
+      return;
+    }
+
+    if (!safety?.isSafe) {
+      setProcessing({
+        isProcessing: false,
+        statusMessage: '',
+        error: 'This image is restricted by safety policy and cannot be animated.'
+      });
+      return;
+    }
 
     setProcessing({
       isProcessing: true,
@@ -927,38 +980,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRunColorizerCommand = async () => {
-    if (!selectedImage && !result?.colorized) {
-      setProcessing((prev) => ({
-        ...prev,
-        error: 'Upload an image first to run a command.',
-      }));
-      return;
-    }
-
-    const command = colorizerCommand.trim().toLowerCase();
-    if (!command) {
-      setProcessing((prev) => ({
-        ...prev,
-        error: 'Type a command like "animate this" or "colorize with cinematic palette".',
-      }));
-      return;
-    }
-
-    const { isAnimationCommand, detectedTheme: paletteFromCommand } = detectColorizerCommandIntent(command, selectedTheme);
-
-    if (paletteFromCommand && paletteFromCommand !== selectedTheme) {
-      setSelectedTheme(paletteFromCommand);
-    }
-
-    if (isAnimationCommand) {
-      await handleAnimate();
-      return;
-    }
-
-    await handleColorize(paletteFromCommand);
-  };
-
   const reset = () => {
     setSelectedImage(null);
     setUploadPreviewZoom(1);
@@ -966,6 +987,7 @@ const App: React.FC = () => {
     setResult(null);
     setVideoResult(null);
     setProcessing({ isProcessing: false, statusMessage: '', error: undefined });
+    setMediaMode('colorize');
   };
 
   const handleDownloadResult = async () => {
@@ -997,10 +1019,14 @@ const App: React.FC = () => {
     }
     const targetId = tab === 'dashboard'
       ? 'dashboard-panel'
+      : tab === 'animate'
+        ? 'animate-panel'
       : tab === 'beauty-lab'
         ? 'beauty-lab-panel'
         : tab === 'barbershop'
           ? 'barbershop-panel'
+      : tab === 'outfit'
+          ? 'outfit-panel'
           : tab === 'account'
             ? 'account-panel'
             : 'colorizer-panel';
@@ -1116,6 +1142,33 @@ const App: React.FC = () => {
     event.target.value = '';
   };
 
+  const handleOutfitSelfieCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64String = e.target?.result as string;
+      setPendingPhotoEdit({ target: 'outfit', image: base64String });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
+  const handleOutfitGarmentCapture = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64String = e.target?.result as string;
+      setOutfitGarmentImage(base64String);
+      setOutfitMessage('Garment reference uploaded. Generate to apply this exact item direction.');
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  };
+
   const handleApplyPendingPhotoEdit = (editedImage: string) => {
     if (!pendingPhotoEdit) return;
 
@@ -1126,11 +1179,17 @@ const App: React.FC = () => {
       setTryMessage(null);
       setHair360Previews(null);
       setHair360Message(null);
-    } else {
+    } else if (pendingPhotoEdit.target === 'barbershop') {
       setBarbershopSelfie(editedImage);
       setBarbershopAfterImage(null);
       setBarbershopResults(null);
       setBarbershopMessage(null);
+    } else {
+      setOutfitSelfie(editedImage);
+      setOutfitAfterImage(null);
+      setOutfitLooks(null);
+      setOutfitActiveLookIndex(0);
+      setOutfitMessage(null);
     }
 
     setPendingPhotoEdit(null);
@@ -1240,6 +1299,63 @@ const App: React.FC = () => {
       setBarbershopMessage(friendlyError(error, 'barbershop-virtual-look'));
     } finally {
       setBarbershopGenerateLoading(false);
+    }
+  };
+
+  const buildOutfitSalonAlignmentContext = () => {
+    if (!outfitMatchCurrentSalonLook) {
+      return '';
+    }
+  };
+
+  const handleGenerateOutfitLook = async () => {
+    if (!outfitSelfie) {
+      setOutfitMessage('Please upload a full-body selfie first');
+      return;
+    }
+
+    setOutfitLoading(true);
+    setOutfitMessage(null);
+    setOutfitLooks(null);
+    setOutfitActiveLookIndex(0);
+
+    try {
+      const result = await runBeautyActionWithRetry(() =>
+        generateOutfitTryOn(
+          outfitSelfie,
+          outfitStyle,
+          outfitOccasion,
+          outfitColorPalette,
+          buildOutfitSalonAlignmentContext(),
+          {
+            mode: outfitMode,
+            garmentLabel: outfitGarmentLabel,
+            garmentImageBase64: outfitGarmentImage || undefined,
+            matchCurrentSalonLook: outfitMatchCurrentSalonLook,
+            batchCount: outfitBatchCount,
+          }
+        )
+      );
+
+      const normalizedLooks: OutfitLookVariant[] = Array.isArray(result.looks) && result.looks.length
+        ? result.looks.map((look, index) => ({
+          title: look.title || `Look ${index + 1}`,
+          editedImage: ensureFreshPreviewUrl(look.editedImage || result.editedImage || outfitSelfie),
+          description: look.description || result.description || '',
+        }))
+        : [{
+          title: 'Primary Look',
+          editedImage: ensureFreshPreviewUrl(result.editedImage || outfitSelfie),
+          description: result.description || '',
+        }];
+
+      setOutfitLooks(normalizedLooks);
+      setOutfitAfterImage(normalizedLooks[0]?.editedImage || ensureFreshPreviewUrl(result.editedImage || outfitSelfie));
+      setOutfitMessage(result.description || 'Outfit generated! Compare options before heading out.');
+    } catch (error: any) {
+      setOutfitMessage(friendlyError(error, 'outfit-try-on'));
+    } finally {
+      setOutfitLoading(false);
     }
   };
 
@@ -1358,6 +1474,36 @@ const App: React.FC = () => {
     await triggerDownload(imageToDownload, `${filename}.jpg`);
   };
 
+  const handleDownloadOutfit = async () => {
+    const imageToDownload = outfitAfterImage || outfitSelfie;
+    if (!imageToDownload) return;
+
+    const toSlug = (value: string) =>
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 24) || 'na';
+
+    const filename = [
+      'chromasnap-outfit',
+      toSlug(outfitMode),
+      toSlug(outfitStyle),
+      toSlug(outfitOccasion),
+      toSlug(outfitColorPalette),
+      Date.now().toString(),
+    ].join('-');
+
+    await triggerDownload(imageToDownload, `${filename}.jpg`);
+  };
+
+  const handleSelectOutfitLook = (index: number) => {
+    if (!outfitLooks || !outfitLooks[index]) return;
+    setOutfitActiveLookIndex(index);
+    setOutfitAfterImage(outfitLooks[index].editedImage);
+    setOutfitMessage(outfitLooks[index].description || 'Outfit look selected.');
+  };
+
   const handleDownloadAnimation = async () => {
     if (!videoResult?.videoUrl) return;
     await triggerDownload(videoResult.videoUrl, `chromasnap-animation-${Date.now()}.mp4`);
@@ -1432,6 +1578,94 @@ const App: React.FC = () => {
     } finally {
       setProfileAnalysisLoading(false);
     }
+  };
+
+  const handleAnalyzeComplexionReport = async () => {
+    if (!trySelfie) {
+      setComplexionReportMessage('Please upload a close-up selfie first');
+      return;
+    }
+
+    setComplexionReportLoading(true);
+    setComplexionReportMessage(null);
+    setComplexionReport(null);
+
+    try {
+      const report = await runBeautyActionWithRetry(() => analyzeComplexionReport(trySelfie));
+      setComplexionReport(report);
+      setComplexionHistory((current) => [
+        {
+          timestamp: Date.now(),
+          hydrationLevel: report.hydrationLevel,
+          rednessLevel: report.rednessLevel,
+          poreVisibility: report.poreVisibility,
+          toneUniformity: report.toneUniformity,
+          recommendedMakeupStyle: report.recommendedMakeupStyle,
+          recommendedStyleIntensity: report.recommendedStyleIntensity,
+        },
+        ...current,
+      ].slice(0, 20));
+      setComplexionReportMessage('Complexion report ready. You can apply this directly in Beauty Lab.');
+    } catch (error: any) {
+      setComplexionReportMessage(friendlyError(error, 'complexion-report'));
+    } finally {
+      setComplexionReportLoading(false);
+    }
+  };
+
+  const handleApplyComplexionToBeautyLab = () => {
+    if (!complexionReport) return;
+
+    setTryMakeupStyle(complexionReport.recommendedMakeupStyle);
+    setTryStyleIntensity(complexionReport.recommendedStyleIntensity);
+
+    const tipText = complexionReport.beautyLabTips.slice(0, 3).join(' | ');
+    const notePrefix = `Complexion focus: hydration ${complexionReport.hydrationLevel}, redness ${complexionReport.rednessLevel}, pores ${complexionReport.poreVisibility}, tone ${complexionReport.toneUniformity}. Color corrector: ${complexionReport.colorCorrector}.`;
+    const nextNotes = [notePrefix, tipText, beautyNotes].filter(Boolean).join(' ');
+    setBeautyNotes(nextNotes.slice(0, 1200));
+
+    setComplexionReportMessage('Applied complexion recommendations to Beauty Lab controls.');
+  };
+
+  const metricScore = {
+    hydration: (value: 'low' | 'balanced' | 'high') => (value === 'low' ? 1 : value === 'balanced' ? 2 : 3),
+    redness: (value: 'low' | 'moderate' | 'high') => (value === 'low' ? 3 : value === 'moderate' ? 2 : 1),
+    pores: (value: 'low' | 'moderate' | 'high') => (value === 'low' ? 3 : value === 'moderate' ? 2 : 1),
+    uniformity: (value: 'uneven' | 'mostly-even' | 'even') => (value === 'uneven' ? 1 : value === 'mostly-even' ? 2 : 3),
+  };
+
+  const weeklyComplexionTrend = complexionHistory.slice(0, 7).reverse();
+
+  const calculateTrendStatus = (): { status: 'improving' | 'stable' | 'declining'; label: string; color: string } => {
+    if (complexionHistory.length < 2) return { status: 'stable', label: 'Insufficient data', color: 'text-slate-400' };
+    
+    const lastThree = complexionHistory.slice(0, 3).reverse();
+    const scores = lastThree.map(entry => {
+      const avgScore = (metricScore.hydration(entry.hydrationLevel) + metricScore.redness(entry.rednessLevel) + metricScore.pores(entry.poreVisibility) + metricScore.uniformity(entry.toneUniformity)) / 4;
+      return avgScore;
+    });
+    
+    if (scores.length === 1) return { status: 'stable', label: 'Single report', color: 'text-slate-400' };
+    
+    const oldestScore = scores[0];
+    const newestScore = scores[scores.length - 1];
+    const difference = newestScore - oldestScore;
+    const threshold = 0.3;
+    
+    if (difference > threshold) {
+      return { status: 'improving', label: 'Improving', color: 'text-emerald-400' };
+    } else if (difference < -threshold) {
+      return { status: 'declining', label: 'Declining', color: 'text-orange-400' };
+    } else {
+      return { status: 'stable', label: 'Stable', color: 'text-slate-300' };
+    }
+  };
+
+  const trendStatus = calculateTrendStatus();
+
+  const clearComplexionHistory = () => {
+    setComplexionHistory([]);
+    setComplexionReportMessage('Complexion history cleared.');
   };
 
   const isRestricted = result && result.safetyCheck && !result.safetyCheck.isSafe;
@@ -1797,6 +2031,12 @@ const App: React.FC = () => {
             Colorizer
           </button>
           <button
+            onClick={() => handleWorkspaceTabChange('animate')}
+            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'animate' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            Animate
+          </button>
+          <button
             onClick={() => handleWorkspaceTabChange('beauty-lab')}
             className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'beauty-lab' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
           >
@@ -1807,6 +2047,12 @@ const App: React.FC = () => {
             className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'barbershop' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
           >
             Barbershop
+          </button>
+          <button
+            onClick={() => handleWorkspaceTabChange('outfit')}
+            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'outfit' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+          >
+            Outfit Studio
           </button>
           <button
             onClick={() => handleWorkspaceTabChange('account')}
@@ -1862,7 +2108,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <main className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full">
+      <main className="flex-1 w-full p-4 sm:p-6">
         {processing.isProcessing && (
           <LoadingOverlay
             message={processing.statusMessage}
@@ -1897,6 +2143,16 @@ const App: React.FC = () => {
               Colorizer
             </button>
             <button
+              onClick={() => handleWorkspaceTabChange('animate')}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                activeWorkspaceTab === 'animate'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
+                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+              }`}
+            >
+              Animate
+            </button>
+            <button
               onClick={() => handleWorkspaceTabChange('beauty-lab')}
               className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
                 activeWorkspaceTab === 'beauty-lab'
@@ -1915,6 +2171,16 @@ const App: React.FC = () => {
               }`}
             >
               Barbershop
+            </button>
+            <button
+              onClick={() => handleWorkspaceTabChange('outfit')}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+                activeWorkspaceTab === 'outfit'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
+                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+              }`}
+            >
+              Outfit Studio
             </button>
             <button
               onClick={() => handleWorkspaceTabChange('account')}
@@ -2251,6 +2517,13 @@ const App: React.FC = () => {
               {profileAnalysisLoading ? 'Analyzing...' : 'Analyze Profile'}
             </button>
             <button
+              onClick={handleAnalyzeComplexionReport}
+              disabled={complexionReportLoading || !trySelfie}
+              className="px-4 py-3 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+            >
+              {complexionReportLoading ? 'Scanning...' : 'Complexion Report'}
+            </button>
+            <button
               onClick={() => void handleBeautyConsultation()}
               disabled={beautyConsultationLoading || !trySelfie || !beautyNotes.trim()}
               className="px-4 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:bg-slate-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
@@ -2270,6 +2543,9 @@ const App: React.FC = () => {
           )}
           {profileAnalysisMessage && (
             <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-xs text-cyan-100">{profileAnalysisMessage}</div>
+          )}
+          {complexionReportMessage && (
+            <div className="rounded-xl border border-teal-500/30 bg-teal-500/10 p-3 text-xs text-teal-100">{complexionReportMessage}</div>
           )}
 
           {tryResults && tryResults.length > 0 && (
@@ -2322,6 +2598,73 @@ const App: React.FC = () => {
               <div><span className="text-cyan-200 font-semibold">Hair: </span>{profileAnalysisResult.hair.texture}</div>
             </div>
           )}
+
+          {complexionReport && (
+            <div className="rounded-xl border border-teal-500/30 bg-slate-950/60 p-3 space-y-2 text-[11px] text-slate-300">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-teal-300">Smart Skincare & Complexion Tracker</div>
+                <button
+                  onClick={handleApplyComplexionToBeautyLab}
+                  className="px-2.5 py-1 rounded-md bg-teal-600 hover:bg-teal-500 text-white text-[10px] font-bold uppercase tracking-wider"
+                >
+                  Apply to Beauty Lab
+                </button>
+              </div>
+              <div><span className="text-teal-200 font-semibold">Hydration: </span>{complexionReport.hydrationLevel}</div>
+              <div><span className="text-teal-200 font-semibold">Redness: </span>{complexionReport.rednessLevel}</div>
+              <div><span className="text-teal-200 font-semibold">Pore Visibility: </span>{complexionReport.poreVisibility}</div>
+              <div><span className="text-teal-200 font-semibold">Tone Uniformity: </span>{complexionReport.toneUniformity}</div>
+              <div><span className="text-teal-200 font-semibold">Color Corrector: </span>{complexionReport.colorCorrector}</div>
+              <div><span className="text-teal-200 font-semibold">Suggested Makeup: </span>{complexionReport.recommendedMakeupStyle} ({complexionReport.recommendedStyleIntensity})</div>
+              <div className="rounded-lg border border-teal-500/20 bg-teal-500/5 p-2 text-[10px] text-teal-100 whitespace-pre-wrap">{complexionReport.summary}</div>
+              {complexionReport.beautyLabTips.length > 0 && (
+                <div className="space-y-1">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-teal-300">Beauty Lab Tips</div>
+                  {complexionReport.beautyLabTips.slice(0, 4).map((tip, idx) => (
+                    <div key={idx} className="text-[10px] text-slate-300">- {tip}</div>
+                  ))}
+                </div>
+              )}
+              <div className="text-[10px] text-slate-400">{complexionReport.disclaimer}</div>
+            </div>
+          )}
+
+          {weeklyComplexionTrend.length > 0 && (
+            <div className="rounded-xl border border-teal-500/25 bg-slate-950/60 p-3 space-y-2 text-[11px] text-slate-300">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-teal-300">Weekly Complexion Trend</div>
+                  <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${trendStatus.status === 'improving' ? 'border-emerald-500/40 bg-emerald-500/10' : trendStatus.status === 'declining' ? 'border-orange-500/40 bg-orange-500/10' : 'border-slate-500/40 bg-slate-500/10'} ${trendStatus.color}`}>
+                    {trendStatus.label}
+                  </span>
+                </div>
+                <button
+                  onClick={clearComplexionHistory}
+                  className="px-2 py-1 rounded-md border border-teal-500/40 text-teal-200 hover:text-white hover:border-teal-300 text-[10px] font-semibold uppercase tracking-wider"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="space-y-2">
+                {weeklyComplexionTrend.map((entry) => {
+                  const avgScore = Math.round(((metricScore.hydration(entry.hydrationLevel) + metricScore.redness(entry.rednessLevel) + metricScore.pores(entry.poreVisibility) + metricScore.uniformity(entry.toneUniformity)) / 12) * 100);
+                  const dateLabel = new Date(entry.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                  return (
+                    <div key={entry.timestamp} className="space-y-1">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-slate-300">{dateLabel}</span>
+                        <span className="text-teal-200">{entry.recommendedMakeupStyle} · {entry.recommendedStyleIntensity}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                        <div className="h-2 bg-teal-500" style={{ width: `${avgScore}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="text-[10px] text-slate-400">Trend score blends hydration, redness, pore visibility, and tone uniformity for cosmetic planning only.</div>
+            </div>
+          )}
         </div>
 
         <div className="w-full space-y-6 sm:space-y-8 xl:col-start-2">
@@ -2331,25 +2674,40 @@ const App: React.FC = () => {
           id="dashboard-panel"
           className="w-full rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-[#0f172a] via-[#111827] to-[#1f2937] p-4 sm:p-6 shadow-2xl shadow-cyan-500/10"
         >
-          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-            <div>
-              <h3 className="text-base sm:text-lg font-black tracking-[0.16em] uppercase text-white">Workspace Hub</h3>
-              <p className="text-xs text-slate-300 mt-1">2026 Bento navigation. Open any feature card to enter its dedicated page.</p>
-            </div>
-            <div className="inline-flex items-center rounded-full border border-cyan-300/40 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-100">
-              Android Ready Layout
-            </div>
-          </div>
-
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 auto-rows-[140px]">
-            <button
-              onClick={() => handleWorkspaceTabChange('colorizer')}
-              className="lg:col-span-3 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-400/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
-            >
-              <div className="text-[10px] uppercase tracking-widest text-indigo-200/80 font-bold">Image Engine</div>
-              <div className="mt-2 text-lg font-extrabold text-white">Colorizer Studio</div>
-              <p className="mt-2 text-xs text-indigo-100/80">Upload, enhance, animate, and export.</p>
-            </button>
+            <div className="lg:col-span-6 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-400/10 to-slate-900/70 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-indigo-200/80 font-bold">Image Engine</div>
+                  <div className="mt-2 text-lg font-extrabold text-white">Colorize and Animate</div>
+                  <p className="mt-2 text-xs text-indigo-100/80">Choose a dedicated action instead of a combined command.</p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <button
+                  onClick={() => {
+                    setMediaMode('colorize');
+                    handleWorkspaceTabChange('colorizer');
+                  }}
+                  className="rounded-2xl border border-indigo-300/40 bg-indigo-500/20 px-4 py-4 text-left transition-transform hover:-translate-y-0.5"
+                >
+                  <div className="text-[10px] uppercase tracking-widest text-indigo-200/80 font-bold">Colorize</div>
+                  <div className="mt-2 text-base font-extrabold text-white">Restore Color</div>
+                  <p className="mt-2 text-xs text-indigo-100/80">Rebuild natural tones from black and white images.</p>
+                </button>
+                <button
+                  onClick={() => {
+                    setMediaMode('animate');
+                    handleWorkspaceTabChange('animate');
+                  }}
+                  className="rounded-2xl border border-cyan-300/40 bg-cyan-500/20 px-4 py-4 text-left transition-transform hover:-translate-y-0.5"
+                >
+                  <div className="text-[10px] uppercase tracking-widest text-cyan-200/80 font-bold">Animate</div>
+                  <div className="mt-2 text-base font-extrabold text-white">Create Motion</div>
+                  <p className="mt-2 text-xs text-cyan-100/80">Turn a restored photo into a cinematic animation.</p>
+                </button>
+              </div>
+            </div>
 
             <button
               onClick={() => handleWorkspaceTabChange('beauty-lab')}
@@ -2370,12 +2728,12 @@ const App: React.FC = () => {
             </button>
 
             <button
-              onClick={() => handleWorkspaceTabChange('account')}
-              className="lg:col-span-2 rounded-3xl border border-amber-300/40 bg-gradient-to-br from-amber-500/15 via-amber-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              onClick={() => handleWorkspaceTabChange('outfit')}
+              className="lg:col-span-4 rounded-3xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-pink-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
             >
-              <div className="text-[10px] uppercase tracking-widest text-amber-200/80 font-bold">Control Center</div>
-              <div className="mt-2 text-base font-extrabold text-white">Account</div>
-              <p className="mt-2 text-xs text-amber-100/80">Plans, usage, refresh, and security actions.</p>
+              <div className="text-[10px] uppercase tracking-widest text-fuchsia-200/80 font-bold">Night Out Prep</div>
+              <div className="mt-2 text-lg font-extrabold text-white">Outfit Studio</div>
+              <p className="mt-2 text-xs text-fuchsia-100/80">Virtual outfit try-on aligned with your makeup and haircut choices.</p>
             </button>
           </div>
         </div>
@@ -2470,7 +2828,7 @@ const App: React.FC = () => {
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-amber-300 border-b border-amber-500/20">Before</div>
-                    <img src={trySelfie} alt="Before selfie" className="w-full h-56 sm:h-64 object-cover" />
+                    <img src={trySelfie} alt="Before selfie" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
                   </div>
                   <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 border-b border-amber-500/20 flex items-center justify-between gap-2">
@@ -2490,10 +2848,10 @@ const App: React.FC = () => {
                         image={tryAfterImage}
                         alt="After virtual try-on"
                         requestAngleImage={handleGenerateTryOnAngle}
-                        className="w-full h-56 sm:h-64 object-cover"
+                        className="w-full h-80 sm:h-96 object-contain bg-slate-950"
                       />
                     ) : (
-                      <div className="h-56 sm:h-64 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                      <div className="h-80 sm:h-96 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
                         Generate a look to preview your after result here.
                       </div>
                     )}
@@ -2506,6 +2864,7 @@ const App: React.FC = () => {
                 onChange={handleTrySelfieCapture}
                 className="hidden"
                 id="try-on-upload-input"
+                ref={tryUploadInputRef}
               />
               <input
                 type="file"
@@ -2514,6 +2873,7 @@ const App: React.FC = () => {
                 onChange={handleTrySelfieCapture}
                 className="hidden"
                 id="try-on-camera-input"
+                ref={tryCameraInputRef}
               />
             </div>
 
@@ -2527,25 +2887,31 @@ const App: React.FC = () => {
                   rows={4}
                   className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 pb-10 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
                 />
-                <div className="absolute bottom-2 left-2">
+                <div className="absolute bottom-2 left-2 z-20">
                   <button
                     type="button"
                     onClick={() => setShowBeautyPhotoPicker((v) => !v)}
-                    className="w-8 h-8 rounded-full bg-amber-600 hover:bg-amber-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
+                    className="relative z-10 w-8 h-8 rounded-full bg-amber-600 hover:bg-amber-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
                     title="Add photo"
                   >+</button>
                   {showBeautyPhotoPicker && (
                     <div className="absolute bottom-10 left-0 z-30 w-44 rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl p-2 space-y-1 backdrop-blur">
-                      <label
-                        htmlFor="try-on-upload-input"
+                      <button
+                        type="button"
                         className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                        onClick={() => setShowBeautyPhotoPicker(false)}
-                      >Upload Photo</label>
-                      <label
-                        htmlFor="try-on-camera-input"
+                        onClick={() => {
+                          setShowBeautyPhotoPicker(false);
+                          tryUploadInputRef.current?.click();
+                        }}
+                      >Upload Photo</button>
+                      <button
+                        type="button"
                         className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                        onClick={() => setShowBeautyPhotoPicker(false)}
-                      >Use Camera</label>
+                        onClick={() => {
+                          setShowBeautyPhotoPicker(false);
+                          tryCameraInputRef.current?.click();
+                        }}
+                      >Use Camera</button>
                     </div>
                   )}
                 </div>
@@ -2621,7 +2987,7 @@ const App: React.FC = () => {
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">Before</div>
-                    <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-56 sm:h-64 object-cover" />
+                    <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
                   </div>
                   <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
                     <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">After</div>
@@ -2630,10 +2996,10 @@ const App: React.FC = () => {
                         image={barbershopAfterImage}
                         alt="After barbershop look"
                         requestAngleImage={handleGenerateBarbershopAngle}
-                        className="w-full h-56 sm:h-64 object-cover"
+                        className="w-full h-80 sm:h-96 object-contain bg-slate-950"
                       />
                     ) : (
-                      <div className="h-56 sm:h-64 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                      <div className="h-80 sm:h-96 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
                         Generate a barbershop look to preview your after result.
                       </div>
                     )}
@@ -2646,6 +3012,7 @@ const App: React.FC = () => {
                 onChange={handleBarbershopSelfieCapture}
                 className="hidden"
                 id="barbershop-upload-input"
+                ref={barbershopUploadInputRef}
               />
               <input
                 type="file"
@@ -2654,6 +3021,7 @@ const App: React.FC = () => {
                 onChange={handleBarbershopSelfieCapture}
                 className="hidden"
                 id="barbershop-camera-input"
+                ref={barbershopCameraInputRef}
               />
             </div>
 
@@ -2711,25 +3079,31 @@ const App: React.FC = () => {
                     rows={3}
                     className="w-full rounded-xl bg-slate-950/60 border border-emerald-400/40 px-3 py-3 pb-10 text-xs text-emerald-100 focus:outline-none focus:border-emerald-300"
                   />
-                  <div className="absolute bottom-2 left-2">
+                  <div className="absolute bottom-2 left-2 z-20">
                     <button
                       type="button"
                       onClick={() => setShowBarbershopPhotoPicker((v) => !v)}
-                      className="w-8 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
+                      className="relative z-10 w-8 h-8 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
                       title="Add photo"
                     >+</button>
                     {showBarbershopPhotoPicker && (
                       <div className="absolute bottom-10 left-0 z-30 w-44 rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl p-2 space-y-1 backdrop-blur">
-                        <label
-                          htmlFor="barbershop-upload-input"
+                        <button
+                          type="button"
                           className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                          onClick={() => setShowBarbershopPhotoPicker(false)}
-                        >Upload Photo</label>
-                        <label
-                          htmlFor="barbershop-camera-input"
+                          onClick={() => {
+                            setShowBarbershopPhotoPicker(false);
+                            barbershopUploadInputRef.current?.click();
+                          }}
+                        >Upload Photo</button>
+                        <button
+                          type="button"
                           className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                          onClick={() => setShowBarbershopPhotoPicker(false)}
-                        >Use Camera</label>
+                          onClick={() => {
+                            setShowBarbershopPhotoPicker(false);
+                            barbershopCameraInputRef.current?.click();
+                          }}
+                        >Use Camera</button>
                       </div>
                     )}
                   </div>
@@ -2795,16 +3169,311 @@ const App: React.FC = () => {
         </div>
         )}
 
-        <div id="colorizer-panel" className="w-full" />
+        {activeWorkspaceTab === 'outfit' && (
+        <div
+          id="outfit-panel"
+          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-fuchsia-500/50 bg-fuchsia-500/5 shadow-lg shadow-fuchsia-500/10"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Outfit Studio</h3>
+              <p className="text-xs leading-relaxed text-slate-400">Upload a full-body selfie and preview outfits that align with your Beauty Lab and Barbershop styling.</p>
+            </div>
+            <span className="text-[10px] uppercase tracking-widest font-bold px-2.5 py-1 rounded-full border border-fuchsia-400/40 bg-fuchsia-500/10 text-fuchsia-200">
+              VTO Flow
+            </span>
+          </div>
 
-        {activeWorkspaceTab === 'colorizer' && !selectedImage && !result && (
+          <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-4 space-y-3">
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Full-Body Selfie</label>
+              {outfitSelfie && (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-xl overflow-hidden border border-fuchsia-500/30 bg-slate-950/50">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">Before</div>
+                    <img src={outfitSelfie} alt="Before outfit selfie" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
+                  </div>
+                  <div className="rounded-xl overflow-hidden border border-fuchsia-500/30 bg-slate-950/50">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">After</div>
+                    {outfitAfterImage ? (
+                      <img src={outfitAfterImage} alt="After outfit try-on" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
+                    ) : (
+                      <div className="h-80 sm:h-96 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                        Generate an outfit to preview your final look before heading out.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleOutfitSelfieCapture}
+                className="hidden"
+                id="outfit-upload-input"
+                ref={outfitUploadInputRef}
+              />
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleOutfitSelfieCapture}
+                className="hidden"
+                id="outfit-camera-input"
+                ref={outfitCameraInputRef}
+              />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleOutfitGarmentCapture}
+                className="hidden"
+                id="outfit-garment-upload-input"
+                ref={outfitGarmentUploadInputRef}
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Generation Mode</label>
+                <select
+                  value={outfitMode}
+                  onChange={(e) => setOutfitMode(e.target.value as 'style' | 'garment')}
+                  className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
+                >
+                  <option value="style">Style + Palette Mode</option>
+                  <option value="garment">Specific Garment Mode</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Batch Looks</label>
+                <select
+                  value={outfitBatchCount}
+                  onChange={(e) => setOutfitBatchCount(Number(e.target.value) as 1 | 2 | 3)}
+                  className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
+                >
+                  <option value={1}>1 look</option>
+                  <option value={2}>2 looks</option>
+                  <option value={3}>3 looks</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Outfit Style</label>
+                <select
+                  value={outfitStyle}
+                  onChange={(e) => setOutfitStyle(e.target.value)}
+                  className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
+                >
+                  <option value="formal-evening">Formal Evening</option>
+                  <option value="smart-casual">Smart Casual</option>
+                  <option value="streetwear">Streetwear</option>
+                  <option value="business-chic">Business Chic</option>
+                  <option value="cocktail">Cocktail</option>
+                  <option value="traditional-elegant">Traditional Elegant</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Occasion</label>
+                <select
+                  value={outfitOccasion}
+                  onChange={(e) => setOutfitOccasion(e.target.value)}
+                  className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
+                >
+                  <option value="night out">Night Out</option>
+                  <option value="salon visit">Salon Visit</option>
+                  <option value="dinner date">Dinner Date</option>
+                  <option value="wedding guest">Wedding Guest</option>
+                  <option value="event party">Event Party</option>
+                </select>
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Color Palette</label>
+                <select
+                  value={outfitColorPalette}
+                  onChange={(e) => setOutfitColorPalette(e.target.value)}
+                  className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
+                >
+                  <option value="match makeup palette">Match Makeup Palette</option>
+                  <option value="neutral luxe">Neutral Luxe</option>
+                  <option value="bold contrast">Bold Contrast</option>
+                  <option value="earth tones">Earth Tones</option>
+                  <option value="cool monochrome">Cool Monochrome</option>
+                </select>
+              </div>
+
+              {outfitMode === 'garment' && (
+                <>
+                  <div className="space-y-2 sm:col-span-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Garment Label</label>
+                    <input
+                      value={outfitGarmentLabel}
+                      onChange={(e) => setOutfitGarmentLabel(e.target.value)}
+                      placeholder="e.g. black tuxedo with satin lapel"
+                      className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
+                    />
+                  </div>
+                  <div className="space-y-2 sm:col-span-2">
+                    <button
+                      type="button"
+                      onClick={() => outfitGarmentUploadInputRef.current?.click()}
+                      className="px-4 py-3 rounded-xl bg-fuchsia-800/70 hover:bg-fuchsia-700 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+                    >
+                      Upload Garment Reference
+                    </button>
+                    {outfitGarmentImage && (
+                      <div className="rounded-xl overflow-hidden border border-fuchsia-500/30 bg-slate-950/50">
+                        <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">Garment Reference</div>
+                        <img src={outfitGarmentImage} alt="Garment reference" className="w-full h-44 object-contain bg-slate-950" />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="space-y-2 sm:col-span-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Salon Alignment</label>
+                <label className="inline-flex items-center gap-2 text-xs text-fuchsia-100">
+                  <input
+                    type="checkbox"
+                    checked={outfitMatchCurrentSalonLook}
+                    onChange={(e) => setOutfitMatchCurrentSalonLook(e.target.checked)}
+                    className="h-4 w-4 rounded border-fuchsia-400/40 bg-slate-950/60"
+                  />
+                  Match current Beauty Lab + Barbershop look
+                </label>
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Salon Alignment Notes</label>
+                <div className="relative">
+                  <textarea
+                    value={outfitNotes}
+                    onChange={(event) => setOutfitNotes(event.target.value)}
+                    placeholder={outfitMatchCurrentSalonLook ? 'Optional notes: preferred fit, modesty level, or fabrics' : 'Enable match toggle to include salon alignment notes'}
+                    rows={3}
+                    disabled={!outfitMatchCurrentSalonLook}
+                    className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 pb-10 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300 disabled:opacity-50"
+                  />
+                  <div className="absolute bottom-2 left-2 z-20">
+                    <button
+                      type="button"
+                      onClick={() => setShowOutfitPhotoPicker((v) => !v)}
+                      className="relative z-10 w-8 h-8 rounded-full bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
+                      title="Add photo"
+                    >+</button>
+                    {showOutfitPhotoPicker && (
+                      <div className="absolute bottom-10 left-0 z-30 w-44 rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl p-2 space-y-1 backdrop-blur">
+                        <button
+                          type="button"
+                          className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                          onClick={() => {
+                            setShowOutfitPhotoPicker(false);
+                            outfitUploadInputRef.current?.click();
+                          }}
+                        >Upload Photo</button>
+                        <button
+                          type="button"
+                          className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
+                          onClick={() => {
+                            setShowOutfitPhotoPicker(false);
+                            outfitCameraInputRef.current?.click();
+                          }}
+                        >Use Camera</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                onClick={handleGenerateOutfitLook}
+                disabled={outfitLoading || !outfitSelfie}
+                className="px-4 py-3 rounded-xl bg-fuchsia-700 hover:bg-fuchsia-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+              >
+                {outfitLoading ? 'Generating...' : 'Generate Outfit'}
+              </button>
+              <button
+                onClick={handleDownloadOutfit}
+                disabled={!outfitSelfie}
+                className="px-4 py-3 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+              >
+                Download
+              </button>
+            </div>
+
+            {outfitMessage && (
+              <div className="rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 p-3 text-xs text-fuchsia-100">{outfitMessage}</div>
+            )}
+
+            {outfitLooks && outfitLooks.length > 1 && (
+              <div className="rounded-xl border border-fuchsia-500/30 bg-slate-950/60 p-3 space-y-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Generated Outfit Options</div>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {outfitLooks.map((look, idx) => (
+                    <button
+                      key={`${look.title}-${idx}`}
+                      onClick={() => handleSelectOutfitLook(idx)}
+                      className={`rounded-xl border px-3 py-2 text-left transition-colors ${
+                        outfitActiveLookIndex === idx
+                          ? 'border-fuchsia-300 bg-fuchsia-500/20 text-fuchsia-100'
+                          : 'border-fuchsia-500/30 bg-slate-900/50 text-slate-200 hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="text-[10px] font-bold uppercase tracking-widest">{look.title}</div>
+                      <div className="mt-1 text-[10px] text-slate-300 line-clamp-2">{look.description || 'Generated look'}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {outfitSelfie && (
+              <button
+                onClick={() => {
+                  setOutfitSelfie(null);
+                  setOutfitAfterImage(null);
+                  setOutfitLooks(null);
+                  setOutfitActiveLookIndex(0);
+                  setOutfitMessage(null);
+                  setOutfitNotes('');
+                  setOutfitGarmentImage(null);
+                }}
+                className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white transition-colors border border-fuchsia-700/70 hover:border-fuchsia-500"
+              >
+                Clear Outfit Session
+              </button>
+            )}
+          </div>
+        </div>
+        )}
+
+        <div id="colorizer-panel" className="w-full" />
+        <div id="animate-panel" className="w-full" />
+
+        {(activeWorkspaceTab === 'colorizer' || activeWorkspaceTab === 'animate') && !selectedImage && !result && (
           <div className="w-full text-center space-y-6">
             <div className="space-y-2">
               <h2 className="text-3xl sm:text-4xl md:text-5xl leading-tight font-black tracking-tight text-white">
-                Breathe life into <span className="text-indigo-500">History</span>.
+                {activeWorkspaceTab === 'animate' ? (
+                  <>
+                    Create <span className="text-cyan-400">Animate</span> clips from still photos.
+                  </>
+                ) : (
+                  <>
+                    Restore <span className="text-indigo-500">Color</span> with precision.
+                  </>
+                )}
               </h2>
               <p className="text-slate-400 max-w-md mx-auto text-base sm:text-lg leading-relaxed">
-                Upload your black and white photos and watch our AI reconstruct the natural colors and even animate them.
+                {activeWorkspaceTab === 'animate'
+                  ? 'Upload a portrait or scene and generate a cinematic motion clip in one tap.'
+                  : 'Upload a black and white photo to rebuild natural tones and preserve detail.'}
               </p>
               <div className="flex flex-wrap justify-center gap-2 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
                 <span className="px-2.5 py-1 rounded-full border border-slate-800">Fast processing</span>
@@ -2821,7 +3490,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeWorkspaceTab === 'colorizer' && selectedImage && !result && (
+        {(activeWorkspaceTab === 'colorizer' || activeWorkspaceTab === 'animate') && selectedImage && !result && (
           <div className="w-full flex flex-col items-center gap-6 animate-in slide-in-from-bottom-4 duration-500">
             <div className="relative w-full max-w-lg rounded-3xl overflow-hidden border border-slate-800 shadow-2xl group bg-slate-900">
               <div
@@ -2904,6 +3573,26 @@ const App: React.FC = () => {
               </div>
             </div>
 
+            <div className="w-full max-w-md grid grid-cols-2 gap-3 px-1 sm:px-0">
+              {activeWorkspaceTab === 'animate' ? (
+                <button
+                  onClick={() => void handleAnimate()}
+                  disabled={processing.isProcessing}
+                  className="col-span-2 px-4 py-3 min-h-[44px] rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Animate
+                </button>
+              ) : (
+                <button
+                  onClick={() => void handleColorize()}
+                  disabled={processing.isProcessing}
+                  className="col-span-2 px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Colorize
+                </button>
+              )}
+            </div>
+
             {processing.error && (
               <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm flex items-center gap-3 w-full max-w-md">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2913,38 +3602,13 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {!processing.isProcessing && (
-              <div className="w-full max-w-md space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Command</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={colorizerCommand}
-                    onChange={(event) => setColorizerCommand(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        void handleRunColorizerCommand();
-                      }
-                    }}
-                    placeholder="Type: animate this image  or  colorize with cinematic palette"
-                    className="flex-1 rounded-xl bg-slate-900 border border-slate-700 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-indigo-400"
-                  />
-                  <button
-                    onClick={() => void handleRunColorizerCommand()}
-                    className="px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
-                  >
-                    Run
-                  </button>
-                </div>
-                <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">
-                  {commandIntent.isAnimationCommand ? 'Detected: Animate' : 'Detected: Colorize'} | Palette: {commandIntent.effectiveTheme}
-                </div>
-              </div>
-            )}
+            <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+              {activeWorkspaceTab === 'animate' ? 'Animate page is active.' : 'Colorize page is active.'} Palette: {selectedTheme}
+            </div>
           </div>
         )}
 
-        {activeWorkspaceTab === 'colorizer' && result && (
+        {(activeWorkspaceTab === 'colorizer' || activeWorkspaceTab === 'animate') && result && (
           <div className="w-full flex flex-col items-center gap-8 animate-in fade-in zoom-in-95 duration-700">
             <ComparisonView
               original={result.original}
@@ -2958,6 +3622,17 @@ const App: React.FC = () => {
               >
                 Download HD
               </button>
+              {activeWorkspaceTab === 'colorizer' && (
+                <button
+                  onClick={() => {
+                    setMediaMode('animate');
+                    handleWorkspaceTabChange('animate');
+                  }}
+                  className="px-4 py-3 min-h-[44px] rounded-xl bg-cyan-600 text-white text-xs font-semibold hover:bg-cyan-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+                >
+                  Animate This Photo
+                </button>
+              )}
               <button
                 onClick={handleShareResult}
                 disabled={!navigator.share}
@@ -3017,7 +3692,7 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              {containsMinors ? (
+              {activeWorkspaceTab === 'animate' && containsMinors ? (
                 <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-sm text-center">
                   <div className="flex items-center justify-center gap-3 font-bold text-amber-500 uppercase tracking-tight mb-2">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3029,7 +3704,7 @@ const App: React.FC = () => {
                     Images containing minors cannot be animated for safety reasons.
                   </p>
                 </div>
-              ) : isRestricted ? (
+              ) : activeWorkspaceTab === 'animate' && isRestricted ? (
                 <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-sm space-y-2">
                   <div className="flex items-center gap-3 font-bold text-amber-500 uppercase tracking-tight">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -3042,32 +3717,31 @@ const App: React.FC = () => {
                   </p>
                 </div>
               ) : (
-                <div className="w-full space-y-2">
-                  <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Command</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={colorizerCommand}
-                      onChange={(event) => setColorizerCommand(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          void handleRunColorizerCommand();
-                        }
-                      }}
-                      placeholder="Type: animate this image or colorize in vintage palette"
-                      className="flex-1 rounded-xl bg-slate-900 border border-slate-700 px-3 py-3 text-xs text-slate-100 focus:outline-none focus:border-indigo-400"
-                    />
-                    <button
-                      onClick={() => void handleRunColorizerCommand()}
-                      className="px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95"
-                    >
-                      Run
-                    </button>
+                <>
+                  <div className="grid gap-3 sm:grid-cols-1">
+                    {activeWorkspaceTab === 'animate' ? (
+                      <button
+                        onClick={() => void handleAnimate()}
+                        disabled={processing.isProcessing}
+                        className="px-4 py-3 min-h-[44px] rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                      >
+                        Animate
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => void handleColorize()}
+                        disabled={processing.isProcessing}
+                        className="px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                      >
+                        Colorize
+                      </button>
+                    )}
                   </div>
+
                   <div className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">
-                    {commandIntent.isAnimationCommand ? 'Detected: Animate' : 'Detected: Colorize'} | Palette: {commandIntent.effectiveTheme}
+                    {activeWorkspaceTab === 'animate' ? 'Animate page is active' : 'Colorize page is active'} | Palette: {selectedTheme}
                   </div>
-                </div>
+                </>
               )}
 
               <button
@@ -3147,7 +3821,7 @@ const App: React.FC = () => {
       {pendingPhotoEdit && (
         <PhotoEditorModal
           image={pendingPhotoEdit.image}
-          title={pendingPhotoEdit.target === 'try-on' ? 'Edit Try-On Photo' : 'Edit Barbershop Photo'}
+          title={pendingPhotoEdit.target === 'try-on' ? 'Edit Try-On Photo' : pendingPhotoEdit.target === 'barbershop' ? 'Edit Barbershop Photo' : 'Edit Outfit Photo'}
           onCancel={() => setPendingPhotoEdit(null)}
           onApply={handleApplyPendingPhotoEdit}
         />

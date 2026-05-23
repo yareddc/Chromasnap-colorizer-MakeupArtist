@@ -633,6 +633,76 @@ export const generateVirtualMakeup = async (
   return { editedImage, description };
 };
 
+export const generateOutfitTryOn = async (
+  selfieBase64: string,
+  outfitStyle: string,
+  occasion: string,
+  colorPalette: string,
+  salonContext: string,
+  options?: {
+    mode?: 'style' | 'garment';
+    garmentLabel?: string;
+    garmentImageBase64?: string;
+    matchCurrentSalonLook?: boolean;
+    batchCount?: 1 | 2 | 3;
+  }
+): Promise<{
+  editedImage: string;
+  description: string;
+  looks?: Array<{ editedImage: string; description: string; title: string }>;
+}> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.GENERATE_OUTFIT_TRY_ON, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({
+      selfie: selfieBase64,
+      outfitStyle,
+      occasion,
+      colorPalette,
+      salonContext,
+      mode: options?.mode || 'style',
+      garmentLabel: options?.garmentLabel || '',
+      garmentImage: options?.garmentImageBase64,
+      matchCurrentSalonLook: options?.matchCurrentSalonLook !== false,
+      batchCount: options?.batchCount || 3,
+      generateImage: true,
+    }),
+  }, 120000);
+
+  if (!response.ok) {
+    console.error(`Outfit try-on generation error (${response.status})`);
+    throw new Error('Outfit try-on generation failed');
+  }
+
+  const result = await parseJsonResponse(response);
+  const editedImage = typeof result?.editedImage === 'string'
+    ? result.editedImage
+    : typeof result?.result === 'string'
+      ? result.result
+      : typeof result?.image === 'string'
+        ? result.image
+        : selfieBase64;
+
+  const description = typeof result?.description === 'string'
+    ? result.description
+    : typeof result?.advice === 'string'
+      ? result.advice
+      : '';
+
+  const looks = Array.isArray(result?.looks)
+    ? result.looks
+      .filter((item: unknown) => !!item && typeof item === 'object')
+      .map((item: any, index: number) => ({
+        editedImage: typeof item?.editedImage === 'string' ? item.editedImage : editedImage,
+        description: typeof item?.description === 'string' ? item.description : description,
+        title: typeof item?.title === 'string' && item.title.trim() ? item.title : `Look ${index + 1}`,
+      }))
+    : undefined;
+
+  return { editedImage, description, looks };
+};
+
 export const recommendOccasionLook = async (
   selfieBase64: string,
   occasion: string
@@ -763,6 +833,70 @@ export const analyzeBeautyProfile = async (
     recommendations: Array.isArray(result?.recommendations)
       ? result.recommendations.filter((item: unknown) => typeof item === 'string')
       : [],
+  };
+};
+
+export type ComplexionReport = {
+  hydrationLevel: 'low' | 'balanced' | 'high';
+  rednessLevel: 'low' | 'moderate' | 'high';
+  poreVisibility: 'low' | 'moderate' | 'high';
+  toneUniformity: 'uneven' | 'mostly-even' | 'even';
+  summary: string;
+  colorCorrector: string;
+  recommendedMakeupStyle: 'natural' | 'bold' | 'smokey-eye' | 'glam' | 'editorial' | 'dewy';
+  recommendedStyleIntensity: 'subtle' | 'balanced' | 'dramatic';
+  beautyLabTips: string[];
+  disclaimer: string;
+};
+
+export const analyzeComplexionReport = async (
+  selfieBase64: string
+): Promise<ComplexionReport> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.ANALYZE_COMPLEXION_REPORT, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({ selfie: selfieBase64 }),
+  }, 120000);
+
+  if (!response.ok) {
+    console.error(`Complexion report analysis error (${response.status})`);
+    throw new Error('Complexion report analysis failed');
+  }
+
+  const result = await parseJsonResponse(response);
+
+  return {
+    hydrationLevel:
+      result?.hydrationLevel === 'low' || result?.hydrationLevel === 'high' || result?.hydrationLevel === 'balanced'
+        ? result.hydrationLevel
+        : 'balanced',
+    rednessLevel:
+      result?.rednessLevel === 'low' || result?.rednessLevel === 'high' || result?.rednessLevel === 'moderate'
+        ? result.rednessLevel
+        : 'moderate',
+    poreVisibility:
+      result?.poreVisibility === 'low' || result?.poreVisibility === 'high' || result?.poreVisibility === 'moderate'
+        ? result.poreVisibility
+        : 'moderate',
+    toneUniformity:
+      result?.toneUniformity === 'uneven' || result?.toneUniformity === 'even' || result?.toneUniformity === 'mostly-even'
+        ? result.toneUniformity
+        : 'mostly-even',
+    summary: String(result?.summary || ''),
+    colorCorrector: String(result?.colorCorrector || ''),
+    recommendedMakeupStyle:
+      result?.recommendedMakeupStyle === 'natural' || result?.recommendedMakeupStyle === 'bold' || result?.recommendedMakeupStyle === 'smokey-eye' || result?.recommendedMakeupStyle === 'glam' || result?.recommendedMakeupStyle === 'editorial' || result?.recommendedMakeupStyle === 'dewy'
+        ? result.recommendedMakeupStyle
+        : 'natural',
+    recommendedStyleIntensity:
+      result?.recommendedStyleIntensity === 'subtle' || result?.recommendedStyleIntensity === 'dramatic' || result?.recommendedStyleIntensity === 'balanced'
+        ? result.recommendedStyleIntensity
+        : 'balanced',
+    beautyLabTips: Array.isArray(result?.beautyLabTips)
+      ? result.beautyLabTips.filter((item: unknown) => typeof item === 'string')
+      : [],
+    disclaimer: String(result?.disclaimer || 'This report is cosmetic guidance only and not a medical diagnosis.'),
   };
 };
 

@@ -10,7 +10,7 @@ type HeaderProps = {
 const Header: React.FC<HeaderProps> = ({ tokenBalance, onMenuToggle, isMenuOpen = false }) => {
   return (
     <header className="py-4 px-4 border-b border-slate-800 bg-slate-950/70 sticky top-0 z-50 backdrop-blur-md">
-      <div className="max-w-7xl mx-auto w-full">
+      <div className="w-full">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <img src="/icon.png" alt="ChromaSnap logo" className="w-10 h-10 rounded-xl shadow-lg shadow-indigo-500/20 object-contain" />

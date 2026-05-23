@@ -57,8 +57,10 @@ export const API_ENDPOINTS = {
   // Beauty Lab endpoints
   CONSULT_BEAUTY_ADVISOR: `${API_BASE_URL}/api/consult/beauty-advisor`,
   GENERATE_VIRTUAL_MAKEUP: `${API_BASE_URL}/api/generate/virtual-makeup`,
+  GENERATE_OUTFIT_TRY_ON: `${API_BASE_URL}/api/generate/outfit-tryon`,
   RECOMMEND_OCCASION_LOOK: `${API_BASE_URL}/api/recommend/occasion-look`,
   ANALYZE_BEAUTY_PROFILE: `${API_BASE_URL}/api/analyze/beauty-profile`,
+  ANALYZE_COMPLEXION_REPORT: `${API_BASE_URL}/api/analyze/complexion-report`,
 
   // Subscription endpoints
   SUBSCRIPTION_PLANS: `${API_BASE_URL}/api/subscription/plans`,

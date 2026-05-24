@@ -37,6 +37,7 @@
     "@chromasnap/image-processor": "file:./capacitor-plugin",
     "@google/genai": "^1.38.0",
     "firebase": "^12.11.0",
+    "jspdf": "^4.2.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },

@@ -1,5 +1,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
 import ComparisonView from './components/ComparisonView';
@@ -132,6 +133,18 @@ const blobToDataUrl = (blob: Blob): Promise<string> =>
     reader.readAsDataURL(blob);
   });
 
+const toDisplayLabel = (value: string): string =>
+  value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+
+const toPdfImageFormat = (dataUrl: string): 'JPEG' | 'PNG' => {
+  if (dataUrl.startsWith('data:image/png')) return 'PNG';
+  return 'JPEG';
+};
+
 const BEAUTY_SERVICES = [
   { id: 'bridal-glam', label: 'Bridal Glam', description: 'Premium full-face glam workflow for bridal clients.' },
   { id: 'soft-day', label: 'Soft Day Look', description: 'Natural finish with skin-tone preserving enhancement.' },
@@ -198,6 +211,19 @@ const App: React.FC = () => {
   const [tryMakeupStyle, setTryMakeupStyle] = useState('bold');
   const [tryStyleIntensity, setTryStyleIntensity] = useState<'subtle' | 'balanced' | 'dramatic'>('balanced');
   const [tryHairStyle, setTryHairStyle] = useState('wavy');
+  const [complexionOpacity, setComplexionOpacity] = useState(72);
+  const [eyesOpacity, setEyesOpacity] = useState(68);
+  const [lipsOpacity, setLipsOpacity] = useState(74);
+  const [complexionShadeProfile, setComplexionShadeProfile] = useState('warm-beige');
+  const [faceShapeContour, setFaceShapeContour] = useState('soft-oval');
+  const [accentBlushProfile, setAccentBlushProfile] = useState('rose');
+  const [eyelinerPattern, setEyelinerPattern] = useState('cat-eye');
+  const [lashOverlayDensity, setLashOverlayDensity] = useState('high-density');
+  const [lipFinish, setLipFinish] = useState('matte');
+  const [wigTrackStyle, setWigTrackStyle] = useState('structured-bob');
+  const [haircutProfile, setHaircutProfile] = useState('butterfly-layers');
+  const [extensionProfile, setExtensionProfile] = useState('clip-in-volume');
+  const [colorLabDualTone, setColorLabDualTone] = useState('balayage');
   const [tryAfterImage, setTryAfterImage] = useState<string | null>(null);
   const [tryResults, setTryResults] = useState<LookRecommendation[] | null>(null);
   const [tryLoading, setTryLoading] = useState(false);
@@ -1218,6 +1244,18 @@ const App: React.FC = () => {
     }
   };
 
+  const beautyLabToolkitContext = [
+    `Complexion ${complexionOpacity}%: shade ${complexionShadeProfile}, contour ${faceShapeContour}, blush ${accentBlushProfile}`,
+    `Eyes ${eyesOpacity}%: liner ${eyelinerPattern}, lashes ${lashOverlayDensity}`,
+    `Lips ${lipsOpacity}%: finish ${lipFinish}`,
+    `Wig track: ${wigTrackStyle}`,
+    `Haircut: ${haircutProfile}`,
+    `Extensions: ${extensionProfile}`,
+    `Color laboratory: ${colorLabDualTone}`,
+  ].join(' | ');
+
+  const beautyLabHairDescriptor = `${wigTrackStyle}, ${haircutProfile}, ${extensionProfile}, ${colorLabDualTone}`;
+
   const handleGenerateVirtualMakeup = async () => {
     if (!trySelfie) {
       setTryMessage('Please upload a selfie first');
@@ -1231,14 +1269,14 @@ const App: React.FC = () => {
       const result = await runBeautyActionWithRetry(() => generateVirtualMakeup(
         trySelfie,
         tryMakeupStyle,
-        tryHairStyle,
-        buildVirtualMakeupOccasionContext(tryOccasion, beautyNotes),
+        beautyLabHairDescriptor,
+        buildVirtualMakeupOccasionContext(tryOccasion, [beautyNotes, beautyLabToolkitContext].filter(Boolean).join(' | ')),
         { styleIntensity: tryStyleIntensity }
       ));
       const singleRec = [{
         style: `${tryMakeupStyle.charAt(0).toUpperCase() + tryMakeupStyle.slice(1)} ${tryStyleIntensity.charAt(0).toUpperCase() + tryStyleIntensity.slice(1)} Look`,
         makeup: result.description.substring(0, 200),
-        hair: tryHairStyle,
+        hair: beautyLabHairDescriptor,
         description: result.description
       }];
       setTryResults(singleRec);
@@ -1372,8 +1410,8 @@ const App: React.FC = () => {
       const result = await runBeautyActionWithRetry(() => generateVirtualMakeup(
         sourceImage,
         tryMakeupStyle,
-        tryHairStyle,
-        buildVirtualMakeupOccasionContext(tryOccasion, beautyNotes),
+        beautyLabHairDescriptor,
+        buildVirtualMakeupOccasionContext(tryOccasion, [beautyNotes, beautyLabToolkitContext].filter(Boolean).join(' | ')),
         {
           styleIntensity: tryStyleIntensity,
           cameraView: angle,
@@ -1389,7 +1427,8 @@ const App: React.FC = () => {
     tryAfterImage,
     trySelfie,
     tryMakeupStyle,
-    tryHairStyle,
+    beautyLabHairDescriptor,
+    beautyLabToolkitContext,
     tryOccasion,
     beautyNotes,
     tryStyleIntensity,
@@ -1451,6 +1490,103 @@ const App: React.FC = () => {
     ].join('-');
 
     await triggerDownload(imageToDownload, `${filename}.jpg`);
+  };
+
+  const handleSaveBeautyConsultationSheet = async () => {
+    if (!trySelfie) {
+      setTryMessage('Please upload a selfie first');
+      return;
+    }
+
+    const beforeImage = trySelfie;
+    const afterImage = tryAfterImage || trySelfie;
+
+    const formulaBreakdown = [
+      `Hair: ${toDisplayLabel(colorLabDualTone)} color profile with ${toDisplayLabel(wigTrackStyle)} wig track, ${toDisplayLabel(haircutProfile)} haircut, and ${toDisplayLabel(extensionProfile)} extension shaping.`,
+      `Complexion: ${toDisplayLabel(complexionShadeProfile)} foundation with ${toDisplayLabel(faceShapeContour)} contour and ${toDisplayLabel(accentBlushProfile)} blush at ${complexionOpacity}% weight.`,
+      `Eyes: ${toDisplayLabel(eyelinerPattern)} liner with ${toDisplayLabel(lashOverlayDensity)} lash overlay at ${eyesOpacity}% weight.`,
+      `Lips: ${toDisplayLabel(lipFinish)} finish at ${lipsOpacity}% weight in ${toDisplayLabel(tryMakeupStyle)} style (${toDisplayLabel(tryStyleIntensity)} intensity).`,
+    ];
+
+    const terminologyPrompt = [
+      `I'm looking for a ${toDisplayLabel(haircutProfile)} shape blended into a ${toDisplayLabel(wigTrackStyle)} direction with ${toDisplayLabel(extensionProfile)} support for movement and fullness.`,
+      `For color, please build a ${toDisplayLabel(colorLabDualTone)} result with controlled tonal lift and a polished salon finish that complements my complexion.`,
+      `For makeup, keep ${toDisplayLabel(eyelinerPattern)} definition with ${toDisplayLabel(lashOverlayDensity)} lashes and a ${toDisplayLabel(lipFinish)} lip, balanced at a ${toDisplayLabel(tryStyleIntensity)} intensity.`
+    ];
+
+    try {
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const margin = 32;
+      const contentWidth = pageWidth - margin * 2;
+      const colGap = 14;
+      const colWidth = (contentWidth - colGap) / 2;
+      const imageTop = 74;
+      const imageHeight = 206;
+
+      pdf.setFillColor(8, 13, 28);
+      pdf.rect(0, 0, pageWidth, pdf.internal.pageSize.getHeight(), 'F');
+
+      pdf.setTextColor(241, 245, 249);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(18);
+      pdf.text('Technical Consultation Sheet', margin, 40);
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.setTextColor(148, 163, 184);
+      pdf.text(`Generated ${new Date().toLocaleString()}`, margin, 56);
+
+      pdf.setDrawColor(71, 85, 105);
+      pdf.roundedRect(margin, imageTop, colWidth, imageHeight, 10, 10, 'S');
+      pdf.roundedRect(margin + colWidth + colGap, imageTop, colWidth, imageHeight, 10, 10, 'S');
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(10);
+      pdf.setTextColor(226, 232, 240);
+      pdf.text('Before', margin + 10, imageTop + 16);
+      pdf.text('After', margin + colWidth + colGap + 10, imageTop + 16);
+
+      pdf.addImage(beforeImage, toPdfImageFormat(beforeImage), margin + 8, imageTop + 24, colWidth - 16, imageHeight - 32);
+      pdf.addImage(afterImage, toPdfImageFormat(afterImage), margin + colWidth + colGap + 8, imageTop + 24, colWidth - 16, imageHeight - 32);
+
+      let cursorY = imageTop + imageHeight + 28;
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(12);
+      pdf.setTextColor(241, 245, 249);
+      pdf.text('Formula Breakdown', margin, cursorY);
+      cursorY += 14;
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.setTextColor(203, 213, 225);
+      formulaBreakdown.forEach((line) => {
+        const wrapped = pdf.splitTextToSize(`- ${line}`, contentWidth);
+        pdf.text(wrapped, margin, cursorY);
+        cursorY += wrapped.length * 12 + 4;
+      });
+
+      cursorY += 8;
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(12);
+      pdf.setTextColor(241, 245, 249);
+      pdf.text('Terminology Prompt', margin, cursorY);
+      cursorY += 14;
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      pdf.setTextColor(203, 213, 225);
+      const promptText = terminologyPrompt.join(' ');
+      const promptLines = pdf.splitTextToSize(promptText, contentWidth);
+      pdf.text(promptLines, margin, cursorY);
+
+      const filename = `beauty-consultation-sheet-${Date.now()}.pdf`;
+      pdf.save(filename);
+      setTryMessage('Technical Consultation Sheet generated successfully.');
+    } catch (error: any) {
+      setTryMessage(friendlyError(error, 'beauty-consultation-sheet'));
+    }
   };
 
   const handleDownloadBarbershop = async () => {
@@ -2781,146 +2917,70 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'beauty-lab' && (
         <div
           id="beauty-lab-panel"
-          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10"
+          className="w-full rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Beauty Lab</h3>
-            </div>
+          <div className="h-[70vh] bg-slate-950/70 flex items-center justify-center">
+            {tryAfterImage || trySelfie ? (
+              <img
+                src={tryAfterImage || trySelfie || ''}
+                alt="Beauty Lab render canvas"
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <div className="text-center px-6 text-slate-400">
+                <div className="text-sm font-semibold uppercase tracking-widest">Beauty Lab & Style Studio</div>
+                <p className="mt-3 text-xs">Upload a face photo to begin styling.</p>
+              </div>
+            )}
           </div>
 
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 space-y-3">
-            {trySelfie && (
-              <div className="flex justify-end">
-                <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200">
-                  Photo Ready
-                </span>
-              </div>
-            )}
+          <div className="h-[30vh] border-t border-rose-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleTrySelfieCapture}
+              className="hidden"
+              id="try-on-upload-input"
+              ref={tryUploadInputRef}
+            />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleTrySelfieCapture}
+              className="hidden"
+              id="try-on-camera-input"
+              ref={tryCameraInputRef}
+            />
 
-            <div className="space-y-2">
+            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+              <button
+                onClick={() => tryUploadInputRef.current?.click()}
+                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
+              >
+                Upload
+              </button>
+              <button
+                onClick={() => tryCameraInputRef.current?.click()}
+                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
+              >
+                Camera
+              </button>
+              <button
+                onClick={handleGenerateVirtualMakeup}
+                disabled={tryLoading || !trySelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
+              >
+                {tryLoading ? 'Generating...' : 'Generate'}
+              </button>
+              <button
+                onClick={handleSaveBeautyConsultationSheet}
+                disabled={!trySelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
+              >
+                Save Look
+              </button>
               {trySelfie && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-amber-300 border-b border-amber-500/20">Before</div>
-                    <img src={trySelfie} alt="Before selfie" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
-                  </div>
-                  <div className="rounded-xl overflow-hidden border border-amber-500/30 bg-slate-950/50">
-                    <div className="px-2 py-1 border-b border-amber-500/20 flex items-center justify-between gap-2">
-                      <span className="text-[10px] uppercase tracking-wider font-bold text-amber-300">After</span>
-                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ${
-                        tryStyleIntensity === 'dramatic'
-                          ? 'border-fuchsia-400/50 bg-fuchsia-500/15 text-fuchsia-200'
-                          : tryStyleIntensity === 'subtle'
-                            ? 'border-emerald-400/50 bg-emerald-500/15 text-emerald-200'
-                            : 'border-amber-400/50 bg-amber-500/15 text-amber-200'
-                      }`}>
-                        {tryStyleIntensity}
-                      </span>
-                    </div>
-                    {tryAfterImage ? (
-                      <MultiAngleAfterPreview
-                        image={tryAfterImage}
-                        alt="After virtual try-on"
-                        requestAngleImage={handleGenerateTryOnAngle}
-                        className="w-full h-80 sm:h-96 object-contain bg-slate-950"
-                      />
-                    ) : (
-                      <div className="h-80 sm:h-96 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
-                        Generate a look to preview your after result here.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleTrySelfieCapture}
-                className="hidden"
-                id="try-on-upload-input"
-                ref={tryUploadInputRef}
-              />
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleTrySelfieCapture}
-                className="hidden"
-                id="try-on-camera-input"
-                ref={tryCameraInputRef}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Session Notes</label>
-              <div className="relative">
-                <textarea
-                  value={beautyNotes}
-                  onChange={(event) => setBeautyNotes(event.target.value)}
-                  placeholder="Skin tone goals, finish preference, timing, and product notes"
-                  rows={4}
-                  className="w-full rounded-xl bg-slate-950/60 border border-slate-800 px-3 py-3 pb-10 text-xs text-slate-200 focus:outline-none focus:border-rose-500 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                />
-                <div className="absolute bottom-2 left-2 z-20">
-                  <button
-                    type="button"
-                    onClick={() => setShowBeautyPhotoPicker((v) => !v)}
-                    className="relative z-10 w-8 h-8 rounded-full bg-amber-600 hover:bg-amber-500 text-white text-lg font-bold leading-none transition-all active:scale-95 shadow"
-                    title="Add photo"
-                  >+</button>
-                  {showBeautyPhotoPicker && (
-                    <div className="absolute bottom-10 left-0 z-30 w-44 rounded-2xl border border-slate-700 bg-slate-900/95 shadow-2xl p-2 space-y-1 backdrop-blur">
-                      <button
-                        type="button"
-                        className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                        onClick={() => {
-                          setShowBeautyPhotoPicker(false);
-                          tryUploadInputRef.current?.click();
-                        }}
-                      >Upload Photo</button>
-                      <button
-                        type="button"
-                        className="block w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-200 hover:bg-slate-800 transition-colors cursor-pointer"
-                        onClick={() => {
-                          setShowBeautyPhotoPicker(false);
-                          tryCameraInputRef.current?.click();
-                        }}
-                      >Use Camera</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <button
-                  onClick={handleGenerateVirtualMakeup}
-                  disabled={tryLoading || !trySelfie}
-                  className="px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                >
-                  {tryLoading ? 'Generating...' : 'Generate Look'}
-                </button>
-                <button
-                  onClick={handleDownloadTryOn}
-                  disabled={!trySelfie}
-                  className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                >
-                  Download
-                </button>
-              </div>
-            </div>
-
-            {tryMessage && (
-              <div className={`p-3 rounded-xl text-xs ${
-                tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed')
-                  ? 'bg-red-500/10 border border-red-500/30 text-red-200'
-                  : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
-              }`}>
-                {tryMessage}
-              </div>
-            )}
-
-            {trySelfie && (
-              <>
                 <button
                   onClick={() => {
                     setTrySelfie(null);
@@ -2930,11 +2990,283 @@ const App: React.FC = () => {
                     setHair360Previews(null);
                     setHair360Message(null);
                   }}
-                  className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-400 hover:text-slate-300 transition-colors border border-slate-700 hover:border-slate-600"
+                  className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
                 >
-                    New Photo
+                  Reset
                 </button>
-              </>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-rose-200/80">Makeup Base</div>
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                {[
+                  { value: 'natural', label: 'Natural' },
+                  { value: 'bold', label: 'Bold' },
+                  { value: 'smokey-eye', label: 'Smokey' },
+                  { value: 'glam', label: 'Glam' },
+                  { value: 'editorial', label: 'Editorial' },
+                  { value: 'dewy', label: 'Dewy' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setTryMakeupStyle(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      tryMakeupStyle === item.value
+                        ? 'border-rose-300/70 bg-rose-500/25 text-rose-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-rose-200/80">Complexion Toolkit</div>
+                <div className="text-[10px] text-rose-100">{complexionOpacity}%</div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={complexionOpacity}
+                onChange={(event) => setComplexionOpacity(Number(event.target.value))}
+                className="w-full accent-rose-400"
+              />
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                {[
+                  { value: 'warm-beige', label: 'Warm Beige' },
+                  { value: 'neutral-ivory', label: 'Neutral Ivory' },
+                  { value: 'golden-honey', label: 'Golden Honey' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setComplexionShadeProfile(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      complexionShadeProfile === item.value
+                        ? 'border-rose-300/70 bg-rose-500/25 text-rose-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {[
+                  { value: 'soft-oval', label: 'Soft Oval' },
+                  { value: 'sculpted-v', label: 'Sculpted V' },
+                  { value: 'lifted-cheek', label: 'Lifted Cheek' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setFaceShapeContour(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      faceShapeContour === item.value
+                        ? 'border-rose-300/70 bg-rose-500/25 text-rose-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {[
+                  { value: 'rose', label: 'Rose Blush' },
+                  { value: 'peach', label: 'Peach Blush' },
+                  { value: 'berry', label: 'Berry Blush' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setAccentBlushProfile(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      accentBlushProfile === item.value
+                        ? 'border-rose-300/70 bg-rose-500/25 text-rose-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-cyan-200/80">Eyes Toolkit</div>
+                <div className="text-[10px] text-cyan-100">{eyesOpacity}%</div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={eyesOpacity}
+                onChange={(event) => setEyesOpacity(Number(event.target.value))}
+                className="w-full accent-cyan-400"
+              />
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                {[
+                  { value: 'cat-eye', label: 'Cat-Eye' },
+                  { value: 'fox-wing', label: 'Fox-Wing' },
+                  { value: 'soft-smudge', label: 'Soft Smudge' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setEyelinerPattern(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      eyelinerPattern === item.value
+                        ? 'border-cyan-300/70 bg-cyan-500/25 text-cyan-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {[
+                  { value: 'natural-density', label: 'Natural Lash' },
+                  { value: 'high-density', label: 'High-Density Lash' },
+                  { value: 'dramatic-volume', label: 'Dramatic Lash' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setLashOverlayDensity(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      lashOverlayDensity === item.value
+                        ? 'border-cyan-300/70 bg-cyan-500/25 text-cyan-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-pink-200/80">Lips Toolkit</div>
+                <div className="text-[10px] text-pink-100">{lipsOpacity}%</div>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lipsOpacity}
+                onChange={(event) => setLipsOpacity(Number(event.target.value))}
+                className="w-full accent-pink-400"
+              />
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                {[
+                  { value: 'matte', label: 'Matte' },
+                  { value: 'high-gloss', label: 'High Gloss' },
+                  { value: 'vertical-ombre', label: 'Vertical Ombre' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setLipFinish(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      lipFinish === item.value
+                        ? 'border-pink-300/70 bg-pink-500/25 text-pink-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Hair & Wig Cap Studio</div>
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                {[
+                  { value: 'structured-bob', label: 'Bob Wig' },
+                  { value: 'textured-pixie', label: 'Pixie Wig' },
+                  { value: 'protective-braids', label: 'Protective Braids' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => {
+                      setWigTrackStyle(item.value);
+                      setTryHairStyle(item.value);
+                    }}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      wigTrackStyle === item.value
+                        ? 'border-amber-300/70 bg-amber-500/25 text-amber-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {[
+                  { value: 'butterfly-layers', label: 'Butterfly Layers' },
+                  { value: 'precision-bangs', label: 'Bangs' },
+                  { value: 'blunt-cut', label: 'Blunt Cut' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setHaircutProfile(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      haircutProfile === item.value
+                        ? 'border-amber-300/70 bg-amber-500/25 text-amber-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+                {[
+                  { value: 'clip-in-volume', label: 'Clip-In Volume' },
+                  { value: 'dimensional-extensions', label: 'Extensions' },
+                  { value: 'length-shift', label: 'Length Shift' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setExtensionProfile(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      extensionProfile === item.value
+                        ? 'border-amber-300/70 bg-amber-500/25 text-amber-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-violet-200/80">Color Laboratory</div>
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                {[
+                  { value: 'balayage', label: 'Balayage' },
+                  { value: 'ombre-melt', label: 'Ombre Melt' },
+                  { value: 'highlight-ribbon', label: 'Highlights' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setColorLabDualTone(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      colorLabDualTone === item.value
+                        ? 'border-violet-300/70 bg-violet-500/25 text-violet-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {tryMessage && (
+              <div className={`rounded-xl px-3 py-2 text-[10px] ${
+                tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed')
+                  ? 'bg-red-500/10 border border-red-500/30 text-red-200'
+                  : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
+              }`}>
+                {tryMessage}
+              </div>
             )}
           </div>
         </div>

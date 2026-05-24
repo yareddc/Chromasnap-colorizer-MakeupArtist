@@ -2674,8 +2674,30 @@ const App: React.FC = () => {
         >
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:auto-rows-[140px]">
             <button
+              onClick={() => {
+                setMediaMode('colorize');
+                handleWorkspaceTabChange('colorizer');
+              }}
+              className="lg:col-span-3 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+            >
+              <div className="mt-2 text-lg font-extrabold text-white">Colorizer</div>
+              <p className="mt-2 text-xs text-indigo-100/80">Restore color from black-and-white photos.</p>
+            </button>
+
+            <button
+              onClick={() => {
+                setMediaMode('animate');
+                handleWorkspaceTabChange('animate');
+              }}
+              className="lg:col-span-3 rounded-3xl border border-cyan-400/40 bg-gradient-to-br from-cyan-500/15 via-cyan-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+            >
+              <div className="mt-2 text-lg font-extrabold text-white">Animate</div>
+              <p className="mt-2 text-xs text-cyan-100/80">Turn a photo into a cinematic motion clip.</p>
+            </button>
+
+            <button
               onClick={() => handleWorkspaceTabChange('beauty-lab')}
-              className="lg:col-span-3 rounded-3xl border border-rose-400/40 bg-gradient-to-br from-rose-500/15 via-rose-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="lg:col-span-2 rounded-3xl border border-rose-400/40 bg-gradient-to-br from-rose-500/15 via-rose-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Beauty Lab</div>
               <p className="mt-2 text-xs text-rose-100/80">Try-on studio, consultation, and profile tools.</p>
@@ -2683,7 +2705,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => handleWorkspaceTabChange('barbershop')}
-              className="lg:col-span-4 rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 via-emerald-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="lg:col-span-2 rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 via-emerald-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Barbershop Visit</div>
               <p className="mt-2 text-xs text-emerald-100/80">Haircut previews with isolated session context.</p>
@@ -2691,7 +2713,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => handleWorkspaceTabChange('outfit')}
-              className="lg:col-span-4 rounded-3xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-pink-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="lg:col-span-2 rounded-3xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-pink-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Outfit Studio</div>
               <p className="mt-2 text-xs text-fuchsia-100/80">Virtual outfit try-on aligned with your makeup and haircut choices.</p>

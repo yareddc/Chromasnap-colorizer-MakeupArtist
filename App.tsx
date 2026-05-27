@@ -551,6 +551,32 @@ const App: React.FC = () => {
     }
   };
 
+  const handleGoogleLogin = async () => {
+    setAuthLoading(true);
+    setAuthMessage(null);
+    try {
+      if (!isFirebaseAvailable()) {
+        throw new Error('Google login is not configured yet (missing Firebase env vars).');
+      }
+      const idToken = await signInWithGoogle();
+      const { user } = await socialLogin({ idToken, provider: 'google' });
+      setAuthUser(user);
+      const storedId = setCurrentUserId(user.username);
+      setActiveUserId(storedId);
+      setUserIdInput(storedId);
+      setAuthMessage('Signed in with Google.');
+    } catch (error: any) {
+      // Redirect flow triggered: browser will return to this app after Google sign-in.
+      if (error?.message === '__redirect__') {
+        setAuthMessage('Redirecting to Google sign-in...');
+        return;
+      }
+      setAuthMessage(friendlyError(error, 'googleLogin'));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const handleSendPhoneOtp = async () => {
     const normalizedPhoneNumber = socialPhoneNumber.trim();
     if (!normalizedPhoneNumber) {

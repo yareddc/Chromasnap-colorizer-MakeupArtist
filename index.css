@@ -10,6 +10,76 @@ body {
     overflow-x: hidden;
 }
 
+:root {
+    --studio-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --studio-fast: 160ms;
+    --studio-medium: 280ms;
+}
+
+button {
+    transition:
+        transform var(--studio-fast) var(--studio-ease),
+        box-shadow var(--studio-fast) var(--studio-ease),
+        background-color var(--studio-fast) var(--studio-ease),
+        border-color var(--studio-fast) var(--studio-ease),
+        color var(--studio-fast) var(--studio-ease);
+}
+
+button:active:not(:disabled) {
+    transform: translateY(1px) scale(0.985);
+}
+
+.studio-shell-enter {
+    animation: studio-shell-in var(--studio-medium) var(--studio-ease);
+}
+
+.studio-menu-enter {
+    animation: studio-menu-in 220ms var(--studio-ease);
+}
+
+.studio-tile {
+    transition:
+        transform var(--studio-fast) var(--studio-ease),
+        box-shadow var(--studio-fast) var(--studio-ease),
+        filter var(--studio-fast) var(--studio-ease);
+}
+
+.studio-tile:hover {
+    filter: saturate(1.08);
+}
+
+@keyframes studio-shell-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes studio-menu-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    button,
+    .studio-shell-enter,
+    .studio-menu-enter,
+    .studio-tile {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,

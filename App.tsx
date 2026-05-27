@@ -2178,95 +2178,107 @@ const App: React.FC = () => {
       />
 
       {showAccountMenu && (
-        <div ref={accountMenuRef} className="fixed right-4 top-20 z-[60] w-[min(92vw,320px)] rounded-2xl border border-slate-700 bg-slate-950/95 p-2 shadow-2xl backdrop-blur">
-          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Workspace</div>
-          <button
-            onClick={() => handleWorkspaceTabChange('dashboard')}
-            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'dashboard' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Dashboard
-          </button>
-          <button
-            onClick={() => handleWorkspaceTabChange('colorizer')}
-            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'colorizer' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Colorizer
-          </button>
-          <button
-            onClick={() => handleWorkspaceTabChange('animate')}
-            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'animate' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Animate
-          </button>
-          <button
-            onClick={() => handleWorkspaceTabChange('beauty-lab')}
-            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'beauty-lab' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Beauty Lab
-          </button>
-          <button
-            onClick={() => handleWorkspaceTabChange('barbershop')}
-            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'barbershop' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Barbershop
-          </button>
-          <button
-            onClick={() => handleWorkspaceTabChange('outfit')}
-            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'outfit' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Outfit Studio
-          </button>
-          <button
-            onClick={() => handleWorkspaceTabChange('account')}
-            className={`w-full rounded-xl px-3 py-2 text-left text-xs font-semibold transition-colors ${activeWorkspaceTab === 'account' ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
-          >
-            Account
-          </button>
+        <div ref={accountMenuRef} className="studio-menu-enter fixed right-4 top-20 z-[60] w-[min(92vw,336px)] rounded-2xl border border-indigo-500/30 bg-slate-950/92 p-2.5 shadow-2xl shadow-indigo-500/10 backdrop-blur-xl">
+          <div className="rounded-xl border border-indigo-400/30 bg-gradient-to-r from-indigo-500/10 via-slate-950/70 to-cyan-500/10 px-3 py-2 mb-2">
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-200/85">Workspace</div>
+            <div className="text-[10px] text-slate-400 mt-1">Switch studio tabs quickly.</div>
+          </div>
 
-          <div className="my-2 border-t border-slate-800" />
-          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Beauty Tools</div>
-          <button
-            onClick={() => { setShowBeautyToolsDrawer(true); setShowAccountMenu(false); }}
-            disabled={activeWorkspaceTab !== 'beauty-lab'}
-            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
-          >
-            Open Beauty Tools
-          </button>
+          <div className="rounded-xl border border-indigo-400/20 bg-slate-900/45 p-1.5 space-y-1 mb-2">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-indigo-200/75">Core</div>
+            <button
+              onClick={() => handleWorkspaceTabChange('dashboard')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'dashboard' ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50' : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'}`}
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => handleWorkspaceTabChange('colorizer')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'colorizer' ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50' : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'}`}
+            >
+              Colorizer
+            </button>
+            <button
+              onClick={() => handleWorkspaceTabChange('animate')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'animate' ? 'bg-cyan-500/25 text-cyan-100 border border-cyan-400/50' : 'text-slate-300 border border-transparent hover:bg-cyan-500/10 hover:border-cyan-400/30 hover:text-white'}`}
+            >
+              Animate
+            </button>
+          </div>
 
-          <div className="my-2 border-t border-slate-800" />
-          <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Account</div>
-          <button
-            onClick={() => { setAccountTab('overview'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
-            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
-          >
-            Overview
-          </button>
-          <button
-            onClick={() => { setAccountTab('account-details'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
-            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white"
-          >
-            Account Details
-          </button>
-          <button
-            onClick={() => { setShowAccountMenu(false); void refreshSubscription(); }}
-            disabled={billingLoading}
-            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white disabled:opacity-50"
-          >
-            Refresh
-          </button>
-          <div className="my-2 border-t border-slate-800" />
-          <button
-            onClick={() => { setAccountTab('delete-account'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
-            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
-          >
-            Delete Account
-          </button>
-          <button
-            onClick={() => { setShowAccountMenu(false); handleLogout(); }}
-            className="w-full rounded-xl px-3 py-2 text-left text-xs font-semibold text-rose-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
-          >
-            Logout
-          </button>
+          <div className="rounded-xl border border-rose-400/20 bg-slate-900/45 p-1.5 space-y-1 mb-2">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-rose-200/75">Studios</div>
+            <button
+              onClick={() => handleWorkspaceTabChange('beauty-lab')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'beauty-lab' ? 'bg-rose-500/25 text-rose-100 border border-rose-400/50' : 'text-slate-300 border border-transparent hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-white'}`}
+            >
+              Beauty Lab
+            </button>
+            <button
+              onClick={() => handleWorkspaceTabChange('barbershop')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'barbershop' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'text-slate-300 border border-transparent hover:bg-emerald-500/10 hover:border-emerald-400/30 hover:text-white'}`}
+            >
+              Barbershop
+            </button>
+            <button
+              onClick={() => handleWorkspaceTabChange('outfit')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'outfit' ? 'bg-fuchsia-500/25 text-fuchsia-100 border border-fuchsia-400/50' : 'text-slate-300 border border-transparent hover:bg-fuchsia-500/10 hover:border-fuchsia-400/30 hover:text-white'}`}
+            >
+              Outfit Studio
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-amber-400/20 bg-slate-900/45 p-1.5 space-y-1 mb-2">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-200/75">Account</div>
+            <button
+              onClick={() => handleWorkspaceTabChange('account')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'account' ? 'bg-amber-500/25 text-amber-100 border border-amber-400/50' : 'text-slate-300 border border-transparent hover:bg-amber-500/10 hover:border-amber-400/30 hover:text-white'}`}
+            >
+              Account
+            </button>
+            <button
+              onClick={() => { setAccountTab('overview'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
+              className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-slate-300 border border-transparent transition-all hover:bg-amber-500/10 hover:border-amber-400/30 hover:text-white"
+            >
+              Overview
+            </button>
+            <button
+              onClick={() => { setAccountTab('account-details'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
+              className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-slate-300 border border-transparent transition-all hover:bg-amber-500/10 hover:border-amber-400/30 hover:text-white"
+            >
+              Account Details
+            </button>
+            <button
+              onClick={() => { setShowAccountMenu(false); void refreshSubscription(); }}
+              disabled={billingLoading}
+              className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-slate-300 border border-transparent transition-all hover:bg-emerald-500/10 hover:border-emerald-400/30 hover:text-white disabled:opacity-50"
+            >
+              Refresh
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-rose-400/20 bg-slate-900/45 p-1.5 space-y-1">
+            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-rose-200/75">Tools & Session</div>
+            <button
+              onClick={() => { setShowBeautyToolsDrawer(true); setShowAccountMenu(false); }}
+              disabled={activeWorkspaceTab !== 'beauty-lab'}
+              className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-slate-300 border border-transparent transition-all hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-white disabled:opacity-50"
+            >
+              Open Beauty Tools
+            </button>
+            <button
+              onClick={() => { setAccountTab('delete-account'); setShowAccountDrawer(true); setShowAccountMenu(false); }}
+              className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-rose-300 border border-transparent transition-all hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-rose-100"
+            >
+              Delete Account
+            </button>
+            <button
+              onClick={() => { setShowAccountMenu(false); handleLogout(); }}
+              className="w-full rounded-full px-3 py-2 text-left text-xs font-semibold text-rose-300 border border-transparent transition-all hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-rose-100"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       )}
 
@@ -2281,75 +2293,89 @@ const App: React.FC = () => {
         <div className="grid items-start gap-6 xl:grid-cols-[310px_minmax(0,1fr)]">
         <div
           id="workspace-panel"
-          className="hidden xl:block w-full rounded-3xl border border-indigo-500/25 bg-[#111f3d]/80 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[72vh] overflow-y-auto xl:col-start-1 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]"
+          className="studio-shell-enter hidden xl:block w-full rounded-3xl border border-indigo-500/30 bg-slate-900/80 backdrop-blur-xl shadow-2xl shadow-indigo-500/10 p-4 sm:p-5 space-y-3 max-h-[72vh] overflow-y-auto xl:col-start-1 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)]"
         >
-          <div className="rounded-2xl border border-indigo-400/30 bg-slate-950/60 p-2 space-y-1">
+          <div className="rounded-2xl border border-indigo-400/30 bg-gradient-to-r from-indigo-500/10 via-slate-950/70 to-cyan-500/10 px-3 py-2">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-200/85">Workspace</div>
+            <div className="text-[10px] text-slate-400 mt-1">Launch a studio panel from here.</div>
+          </div>
+
+          <div className="rounded-2xl border border-indigo-400/25 bg-slate-950/60 p-2 space-y-1">
+            <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-widest font-bold text-indigo-200/75">Core</div>
             <button
               onClick={() => handleWorkspaceTabChange('dashboard')}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
                 activeWorkspaceTab === 'dashboard'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
-                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 shadow-sm shadow-indigo-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'
               }`}
             >
               Dashboard
             </button>
             <button
               onClick={() => handleWorkspaceTabChange('colorizer')}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
                 activeWorkspaceTab === 'colorizer'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
-                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 shadow-sm shadow-indigo-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'
               }`}
             >
               Colorizer
             </button>
             <button
               onClick={() => handleWorkspaceTabChange('animate')}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
                 activeWorkspaceTab === 'animate'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
-                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+                  ? 'bg-cyan-500/25 text-cyan-100 border border-cyan-400/50 shadow-sm shadow-cyan-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-cyan-500/10 hover:border-cyan-400/30 hover:text-white'
               }`}
             >
               Animate
             </button>
+          </div>
+
+          <div className="rounded-2xl border border-rose-400/20 bg-slate-950/60 p-2 space-y-1">
+            <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-widest font-bold text-rose-200/75">Studios</div>
             <button
               onClick={() => handleWorkspaceTabChange('beauty-lab')}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
                 activeWorkspaceTab === 'beauty-lab'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
-                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+                  ? 'bg-rose-500/25 text-rose-100 border border-rose-400/50 shadow-sm shadow-rose-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-white'
               }`}
             >
               Beauty Lab
             </button>
             <button
               onClick={() => handleWorkspaceTabChange('barbershop')}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
                 activeWorkspaceTab === 'barbershop'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
-                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+                  ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50 shadow-sm shadow-emerald-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-emerald-500/10 hover:border-emerald-400/30 hover:text-white'
               }`}
             >
               Barbershop
             </button>
             <button
               onClick={() => handleWorkspaceTabChange('outfit')}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
                 activeWorkspaceTab === 'outfit'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
-                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+                  ? 'bg-fuchsia-500/25 text-fuchsia-100 border border-fuchsia-400/50 shadow-sm shadow-fuchsia-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-fuchsia-500/10 hover:border-fuchsia-400/30 hover:text-white'
               }`}
             >
               Outfit Studio
             </button>
+          </div>
+
+          <div className="rounded-2xl border border-amber-400/20 bg-slate-950/60 p-2 space-y-1">
+            <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-widest font-bold text-amber-200/75">Account</div>
             <button
               onClick={() => handleWorkspaceTabChange('account')}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm font-semibold transition-colors ${
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
                 activeWorkspaceTab === 'account'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50'
-                  : 'text-slate-300 border border-transparent hover:bg-slate-800/70 hover:text-white'
+                  ? 'bg-amber-500/25 text-amber-100 border border-amber-400/50 shadow-sm shadow-amber-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-amber-500/10 hover:border-amber-400/30 hover:text-white'
               }`}
             >
               Account
@@ -2359,15 +2385,16 @@ const App: React.FC = () => {
 
         <div
           id="account-drawer"
-          className={`${showAccountDrawer ? 'fixed' : 'hidden'} right-4 top-24 z-50 w-[min(92vw,420px)] rounded-3xl border border-slate-800 bg-slate-900/95 shadow-2xl p-4 sm:p-5 space-y-3 max-h-[calc(100vh-7rem)] overflow-y-auto`}
+          className={`${showAccountDrawer ? 'studio-shell-enter fixed' : 'hidden'} right-4 top-24 z-50 w-[min(92vw,420px)] rounded-3xl border border-amber-500/35 bg-slate-900/90 backdrop-blur-xl shadow-2xl shadow-amber-500/10 p-4 sm:p-5 space-y-3 max-h-[calc(100vh-7rem)] overflow-y-auto`}
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account Settings</h3>
+              <h3 className="text-sm sm:text-base font-bold text-amber-100 uppercase tracking-[0.18em]">Account Settings</h3>
+              <p className="text-[10px] uppercase tracking-wider text-amber-200/70 mt-1">Studio Billing Console</p>
             </div>
             <button
               onClick={() => setShowAccountDrawer(false)}
-              className="w-9 h-9 flex items-center justify-center rounded-full border border-slate-700 text-slate-300 hover:border-indigo-400 hover:text-white transition-colors"
+              className="w-9 h-9 flex items-center justify-center rounded-full border border-amber-500/30 text-amber-100/80 hover:border-amber-300 hover:text-white transition-colors"
               aria-label="Close account drawer"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
@@ -2383,20 +2410,20 @@ const App: React.FC = () => {
           {accountTab === 'account-details' && (
             <>
               <div className="grid gap-2">
-                <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">User</div>
+                <div className="rounded-2xl bg-slate-950/60 border border-amber-400/25 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80 mb-1">User</div>
                   <div className="text-xs font-semibold text-slate-200 truncate">{authUser?.username || activeUserId}</div>
                   <div className="text-[10px] text-slate-400 mt-1">Active: {activeUserId}</div>
                 </div>
 
-                <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Balance</div>
+                <div className="rounded-2xl bg-slate-950/60 border border-amber-400/25 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80 mb-1">Balance</div>
                   <div className="text-sm sm:text-base font-semibold text-white leading-tight">{subscriptionAccount?.tokenBalance ?? '--'} tokens</div>
-                  <div className="text-[10px] text-slate-400 uppercase tracking-wider mt-1">Tier: {subscriptionAccount?.tier ?? 'free'}</div>
+                  <div className="text-[10px] text-amber-100/70 uppercase tracking-wider mt-1">Tier: {subscriptionAccount?.tier ?? 'free'}</div>
                 </div>
 
-                <div className="rounded-2xl bg-slate-950/60 border border-slate-800 p-3">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">Cycle</div>
+                <div className="rounded-2xl bg-slate-950/60 border border-amber-400/25 p-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80 mb-1">Cycle</div>
                   <div className="text-xs text-slate-200">Ends {subscriptionAccount?.cycleEndsAt ? new Date(subscriptionAccount.cycleEndsAt).toLocaleDateString() : '--'}</div>
                   <div className="text-[10px] text-slate-400 mt-1">Usage: {usagePercent}%</div>
                 </div>
@@ -2832,15 +2859,19 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'dashboard' && (
         <div
           id="dashboard-panel"
-          className="w-full rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-[#0f172a] via-[#111827] to-[#1f2937] p-4 sm:p-6 shadow-2xl shadow-cyan-500/10"
+          className="studio-shell-enter w-full rounded-3xl border border-cyan-400/30 bg-slate-900/70 backdrop-blur-xl p-4 sm:p-6 shadow-2xl shadow-cyan-500/10 overflow-hidden"
         >
+          <div className="mb-4 rounded-2xl border border-cyan-400/25 bg-gradient-to-r from-cyan-500/10 via-slate-900/20 to-indigo-500/10 px-4 py-3">
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/85">Studio Workspace</div>
+            <div className="mt-1 text-xs text-slate-300">Pick a studio and continue in the same split-canvas workflow.</div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:auto-rows-[140px]">
             <button
               onClick={() => {
                 setMediaMode('colorize');
                 handleWorkspaceTabChange('colorizer');
               }}
-              className="lg:col-span-3 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="studio-tile lg:col-span-3 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-500/20"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Colorizer</div>
               <p className="mt-2 text-xs text-indigo-100/80">Restore color from black-and-white photos.</p>
@@ -2851,7 +2882,7 @@ const App: React.FC = () => {
                 setMediaMode('animate');
                 handleWorkspaceTabChange('animate');
               }}
-              className="lg:col-span-3 rounded-3xl border border-cyan-400/40 bg-gradient-to-br from-cyan-500/15 via-cyan-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="studio-tile lg:col-span-3 rounded-3xl border border-cyan-400/40 bg-gradient-to-br from-cyan-500/15 via-cyan-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-cyan-500/20"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Animate</div>
               <p className="mt-2 text-xs text-cyan-100/80">Turn a photo into a cinematic motion clip.</p>
@@ -2859,7 +2890,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => handleWorkspaceTabChange('beauty-lab')}
-              className="lg:col-span-2 rounded-3xl border border-rose-400/40 bg-gradient-to-br from-rose-500/15 via-rose-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="studio-tile lg:col-span-2 rounded-3xl border border-rose-400/40 bg-gradient-to-br from-rose-500/15 via-rose-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-500/20"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Beauty Lab</div>
               <p className="mt-2 text-xs text-rose-100/80">Try-on studio, consultation, and profile tools.</p>
@@ -2867,7 +2898,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => handleWorkspaceTabChange('barbershop')}
-              className="lg:col-span-2 rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 via-emerald-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="studio-tile lg:col-span-2 rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 via-emerald-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Barbershop Visit</div>
               <p className="mt-2 text-xs text-emerald-100/80">Haircut previews with isolated session context.</p>
@@ -2875,7 +2906,7 @@ const App: React.FC = () => {
 
             <button
               onClick={() => handleWorkspaceTabChange('outfit')}
-              className="lg:col-span-2 rounded-3xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-pink-300/10 to-slate-900/70 p-4 text-left transition-transform hover:-translate-y-0.5"
+              className="studio-tile lg:col-span-2 rounded-3xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-pink-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-fuchsia-500/20"
             >
               <div className="mt-2 text-lg font-extrabold text-white">Outfit Studio</div>
               <p className="mt-2 text-xs text-fuchsia-100/80">Virtual outfit try-on aligned with your makeup and haircut choices.</p>
@@ -2887,55 +2918,60 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'account' && (
         <div
           id="account-panel"
-          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-amber-500/45 bg-amber-500/5 shadow-lg shadow-amber-500/10"
+          className="studio-shell-enter w-full rounded-3xl border transition-all border-amber-500/45 bg-amber-500/5 shadow-lg shadow-amber-500/10 overflow-hidden"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Account Center</h3>
+          <div className="h-[52%] p-4 sm:p-5 bg-slate-950/70">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-amber-100 uppercase tracking-[0.18em]">Account Center</h3>
+                <p className="text-[10px] uppercase tracking-wider text-amber-200/70 mt-1">Studio Billing Snapshot</p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Current User</div>
+                <div className="mt-2 text-sm font-semibold text-white truncate">{authUser?.username || activeUserId}</div>
+              </div>
+              <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Token Balance</div>
+                <div className="mt-2 text-sm font-semibold text-white">{subscriptionAccount?.tokenBalance ?? '--'}</div>
+              </div>
+              <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Plan</div>
+                <div className="mt-2 text-sm font-semibold text-white uppercase">{subscriptionAccount?.tier ?? 'free'}</div>
+              </div>
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Current User</div>
-              <div className="mt-2 text-sm font-semibold text-white truncate">{authUser?.username || activeUserId}</div>
-            </div>
-            <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Token Balance</div>
-              <div className="mt-2 text-sm font-semibold text-white">{subscriptionAccount?.tokenBalance ?? '--'}</div>
-            </div>
-            <div className="rounded-2xl border border-amber-400/25 bg-slate-950/60 p-3">
-              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Plan</div>
-              <div className="mt-2 text-sm font-semibold text-white uppercase">{subscriptionAccount?.tier ?? 'free'}</div>
-            </div>
-          </div>
-
+          <div className="h-[48%] border-t border-amber-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <button
               onClick={() => { setAccountTab('overview'); setShowAccountDrawer(true); }}
-              className="px-4 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+              className="px-4 py-3 rounded-full border border-amber-500/40 bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
             >
               Overview
             </button>
             <button
               onClick={() => { setAccountTab('account-details'); setShowAccountDrawer(true); }}
-              className="px-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+              className="px-4 py-3 rounded-full border border-indigo-500/40 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-100 font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
             >
               Details
             </button>
             <button
               onClick={() => { void refreshSubscription(); }}
               disabled={billingLoading}
-              className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+              className="px-4 py-3 rounded-full border border-emerald-500/40 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
             >
               {billingLoading ? 'Refreshing...' : 'Refresh'}
             </button>
             <button
               onClick={() => { setAccountTab('delete-account'); setShowAccountDrawer(true); }}
-              className="px-4 py-3 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
+              className="px-4 py-3 rounded-full border border-rose-500/40 bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 font-bold text-xs uppercase tracking-wider transition-all active:scale-95"
             >
               Delete
             </button>
+          </div>
           </div>
         </div>
         )}
@@ -2943,7 +2979,7 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'beauty-lab' && (
         <div
           id="beauty-lab-panel"
-          className="w-full rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
+          className="studio-shell-enter w-full rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
         >
           <div className="h-[70vh] bg-slate-950/70 flex items-center justify-center">
             {tryAfterImage || trySelfie ? (
@@ -3301,57 +3337,113 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'barbershop' && (
         <div
           id="barbershop-panel"
-          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-emerald-500/50 bg-emerald-500/5 shadow-lg shadow-emerald-500/10"
+          className="studio-shell-enter w-full rounded-3xl border transition-all border-emerald-500/50 bg-emerald-500/5 shadow-lg shadow-emerald-500/10 overflow-hidden"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Barbershop Visit</h3>
-            </div>
+          <div className="h-[70vh] bg-slate-950/70 flex items-center justify-center">
+            {barbershopSelfie ? (
+              <div className="w-full h-full grid md:grid-cols-2 gap-px bg-slate-800/60">
+                <div className="flex flex-col bg-slate-950/70">
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">Before</div>
+                  <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-full object-contain bg-slate-950" />
+                </div>
+                <div className="flex flex-col bg-slate-950/70">
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">After</div>
+                  {barbershopAfterImage ? (
+                    <MultiAngleAfterPreview
+                      image={barbershopAfterImage}
+                      alt="After barbershop look"
+                      requestAngleImage={handleGenerateBarbershopAngle}
+                      className="w-full h-full object-contain bg-slate-950"
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                      Generate a barbershop look to preview your after result.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center px-6 text-slate-400">
+                <div className="text-sm font-semibold uppercase tracking-widest">Barbershop Visit & Style Studio</div>
+                <p className="mt-3 text-xs">Upload a full-face photo to begin your haircut session.</p>
+              </div>
+            )}
           </div>
 
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-4 space-y-3">
+          <div className="h-[30vh] border-t border-emerald-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+              <button
+                type="button"
+                onClick={() => barbershopUploadInputRef.current?.click()}
+                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-emerald-400"
+              >
+                Upload
+              </button>
+              <button
+                type="button"
+                onClick={() => barbershopCameraInputRef.current?.click()}
+                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-emerald-400"
+              >
+                Camera
+              </button>
+              <button
+                onClick={handleGetBarbershopRecommendations}
+                disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
+              >
+                {barbershopRecommendationLoading ? 'Getting...' : 'Get Ideas'}
+              </button>
+              <button
+                onClick={handleGenerateBarbershopLook}
+                disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-teal-500/40 bg-teal-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-teal-100 hover:bg-teal-500/30 disabled:opacity-50"
+              >
+                {barbershopGenerateLoading ? 'Generating...' : 'Generate Look'}
+              </button>
+              <button
+                onClick={handleDownloadBarbershop}
+                disabled={!barbershopSelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
+              >
+                Download
+              </button>
+              {barbershopSelfie && (
+                <button
+                  onClick={() => {
+                    setBarbershopSelfie(null);
+                    setBarbershopAfterImage(null);
+                    setBarbershopResults(null);
+                    setBarbershopMessage(null);
+                    setBarbershopNotes('');
+                  }}
+                  className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleBarbershopSelfieCapture}
+              className="hidden"
+              id="barbershop-upload-input"
+              ref={barbershopUploadInputRef}
+            />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleBarbershopSelfieCapture}
+              className="hidden"
+              id="barbershop-camera-input"
+              ref={barbershopCameraInputRef}
+            />
+
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-emerald-300">Upload Photo</label>
-              {barbershopSelfie && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">Before</div>
-                    <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
-                  </div>
-                  <div className="rounded-xl overflow-hidden border border-emerald-500/30 bg-slate-950/50">
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">After</div>
-                    {barbershopAfterImage ? (
-                      <MultiAngleAfterPreview
-                        image={barbershopAfterImage}
-                        alt="After barbershop look"
-                        requestAngleImage={handleGenerateBarbershopAngle}
-                        className="w-full h-80 sm:h-96 object-contain bg-slate-950"
-                      />
-                    ) : (
-                      <div className="h-80 sm:h-96 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
-                        Generate a barbershop look to preview your after result.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleBarbershopSelfieCapture}
-                className="hidden"
-                id="barbershop-upload-input"
-                ref={barbershopUploadInputRef}
-              />
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleBarbershopSelfieCapture}
-                className="hidden"
-                id="barbershop-camera-input"
-                ref={barbershopCameraInputRef}
-              />
+              <div className="text-[10px] text-slate-400">Use the buttons above to import a front-facing portrait.</div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -3440,30 +3532,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-3">
-              <button
-                onClick={handleGetBarbershopRecommendations}
-                disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
-                className="px-4 py-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-              >
-                {barbershopRecommendationLoading ? 'Getting...' : 'Get Ideas'}
-              </button>
-              <button
-                onClick={handleGenerateBarbershopLook}
-                disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
-                className="px-4 py-3 rounded-xl bg-teal-700 hover:bg-teal-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-              >
-                {barbershopGenerateLoading ? 'Generating...' : 'Generate Look'}
-              </button>
-              <button
-                onClick={handleDownloadBarbershop}
-                disabled={!barbershopSelfie}
-                className="px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-              >
-                Download
-              </button>
-            </div>
-
             {barbershopMessage && (
               <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-3 text-xs text-emerald-100">{barbershopMessage}</div>
             )}
@@ -3480,20 +3548,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {barbershopSelfie && (
-              <button
-                onClick={() => {
-                  setBarbershopSelfie(null);
-                  setBarbershopAfterImage(null);
-                  setBarbershopResults(null);
-                  setBarbershopMessage(null);
-                  setBarbershopNotes('');
-                }}
-                className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white transition-colors border border-emerald-700/70 hover:border-emerald-500"
-              >
-                Reset Session
-              </button>
-            )}
           </div>
         </div>
         )}
@@ -3501,61 +3555,118 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'outfit' && (
         <div
           id="outfit-panel"
-          className="w-full rounded-3xl border p-4 sm:p-5 space-y-4 transition-all border-fuchsia-500/50 bg-fuchsia-500/5 shadow-lg shadow-fuchsia-500/10"
+          className="studio-shell-enter w-full rounded-3xl border transition-all border-fuchsia-500/50 bg-fuchsia-500/5 shadow-lg shadow-fuchsia-500/10 overflow-hidden"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.18em]">Outfit Studio</h3>
-            </div>
+          <div className="h-[70vh] bg-slate-950/70 flex items-center justify-center">
+            {outfitSelfie ? (
+              <div className="w-full h-full grid md:grid-cols-2 gap-px bg-slate-800/60">
+                <div className="flex flex-col bg-slate-950/70">
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">Before</div>
+                  <img src={outfitSelfie} alt="Before outfit selfie" className="w-full h-full object-contain bg-slate-950" />
+                </div>
+                <div className="flex flex-col bg-slate-950/70">
+                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">After</div>
+                  {outfitAfterImage ? (
+                    <img src={outfitAfterImage} alt="After outfit try-on" className="w-full h-full object-contain bg-slate-950" />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
+                      Generate an outfit to preview your final look before heading out.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center px-6 text-slate-400">
+                <div className="text-sm font-semibold uppercase tracking-widest">Outfit Studio & Style Studio</div>
+                <p className="mt-3 text-xs">Upload a full-body photo to begin styling your wardrobe.</p>
+              </div>
+            )}
           </div>
 
-          <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-4 space-y-3">
+          <div className="h-[30vh] border-t border-fuchsia-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+              <button
+                type="button"
+                onClick={() => outfitUploadInputRef.current?.click()}
+                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-fuchsia-400"
+              >
+                Upload
+              </button>
+              <button
+                type="button"
+                onClick={() => outfitCameraInputRef.current?.click()}
+                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-fuchsia-400"
+              >
+                Camera
+              </button>
+              <button
+                type="button"
+                onClick={() => outfitGarmentUploadInputRef.current?.click()}
+                className="inline-flex shrink-0 items-center rounded-full border border-fuchsia-500/40 bg-fuchsia-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-100 hover:bg-fuchsia-500/30"
+              >
+                Upload Garment
+              </button>
+              <button
+                onClick={handleGenerateOutfitLook}
+                disabled={outfitLoading || !outfitSelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-fuchsia-500/40 bg-fuchsia-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-100 hover:bg-fuchsia-500/30 disabled:opacity-50"
+              >
+                {outfitLoading ? 'Generating...' : 'Generate Outfit'}
+              </button>
+              <button
+                onClick={handleDownloadOutfit}
+                disabled={!outfitSelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-pink-500/40 bg-pink-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-pink-100 hover:bg-pink-500/30 disabled:opacity-50"
+              >
+                Download
+              </button>
+              {outfitSelfie && (
+                <button
+                  onClick={() => {
+                    setOutfitSelfie(null);
+                    setOutfitAfterImage(null);
+                    setOutfitLooks(null);
+                    setOutfitActiveLookIndex(0);
+                    setOutfitMessage(null);
+                    setOutfitNotes('');
+                    setOutfitGarmentImage(null);
+                  }}
+                  className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleOutfitSelfieCapture}
+              className="hidden"
+              id="outfit-upload-input"
+              ref={outfitUploadInputRef}
+            />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleOutfitSelfieCapture}
+              className="hidden"
+              id="outfit-camera-input"
+              ref={outfitCameraInputRef}
+            />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleOutfitGarmentCapture}
+              className="hidden"
+              id="outfit-garment-upload-input"
+              ref={outfitGarmentUploadInputRef}
+            />
+
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Full-Body Selfie</label>
-              {outfitSelfie && (
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-xl overflow-hidden border border-fuchsia-500/30 bg-slate-950/50">
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">Before</div>
-                    <img src={outfitSelfie} alt="Before outfit selfie" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
-                  </div>
-                  <div className="rounded-xl overflow-hidden border border-fuchsia-500/30 bg-slate-950/50">
-                    <div className="px-2 py-1 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">After</div>
-                    {outfitAfterImage ? (
-                      <img src={outfitAfterImage} alt="After outfit try-on" className="w-full h-80 sm:h-96 object-contain bg-slate-950" />
-                    ) : (
-                      <div className="h-80 sm:h-96 flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
-                        Generate an outfit to preview your final look before heading out.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleOutfitSelfieCapture}
-                className="hidden"
-                id="outfit-upload-input"
-                ref={outfitUploadInputRef}
-              />
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleOutfitSelfieCapture}
-                className="hidden"
-                id="outfit-camera-input"
-                ref={outfitCameraInputRef}
-              />
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleOutfitGarmentCapture}
-                className="hidden"
-                id="outfit-garment-upload-input"
-                ref={outfitGarmentUploadInputRef}
-              />
+              <div className="text-[10px] text-slate-400">Use the buttons above to import a full-body portrait or garment reference.</div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -3715,23 +3826,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button
-                onClick={handleGenerateOutfitLook}
-                disabled={outfitLoading || !outfitSelfie}
-                className="px-4 py-3 rounded-xl bg-fuchsia-700 hover:bg-fuchsia-600 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-              >
-                {outfitLoading ? 'Generating...' : 'Generate Outfit'}
-              </button>
-              <button
-                onClick={handleDownloadOutfit}
-                disabled={!outfitSelfie}
-                className="px-4 py-3 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-              >
-                Download
-              </button>
-            </div>
-
             {outfitMessage && (
               <div className="rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 p-3 text-xs text-fuchsia-100">{outfitMessage}</div>
             )}
@@ -3758,22 +3852,6 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {outfitSelfie && (
-              <button
-                onClick={() => {
-                  setOutfitSelfie(null);
-                  setOutfitAfterImage(null);
-                  setOutfitLooks(null);
-                  setOutfitActiveLookIndex(0);
-                  setOutfitMessage(null);
-                  setOutfitNotes('');
-                  setOutfitGarmentImage(null);
-                }}
-                className="w-full px-3 py-2 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white transition-colors border border-fuchsia-700/70 hover:border-fuchsia-500"
-              >
-                Reset Session
-              </button>
-            )}
           </div>
         </div>
         )}

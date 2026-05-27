@@ -1,0 +1,52 @@
+# Start from gitignore rules.
+#!include:.gitignore
+.git
+
+# Dependencies and standard build outputs.
+node_modules/
+dist/
+dist-ssr/
+
+# Local/editor artifacts.
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# Environment and secrets.
+.env
+.env.*
+!.env.example
+!server/.env.example
+server/config/*.json
+*service-account*.json
+*credentials*.json
+
+# Android signing and local config.
+android/key.properties
+android/*.jks
+android/*.keystore
+*.jks
+*.keystore
+android/app/google-services.json
+
+# Generated/local data.
+server/data/usernames.db
+
+# Heavy local artifacts not needed for Cloud Build source.
+_deploy_clean/
+tmp-aab-inspect-fixed/
+tmp-aab-vc23-check/
+github-aab-download-latest-fix/
+chromasnap-v*.aab
+*.aab
+*.zip
+bundletool-all.jar
+
+# Local generated media artifacts.
+public/*.mp4
+public/colorized_*.png
+
+# Keep Firebase emulator state out of build context.
+.firebase/
+firebase-debug.log

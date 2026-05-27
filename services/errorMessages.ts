@@ -58,6 +58,9 @@ const FRIENDLY_MAP: Array<[RegExp | string, string]> = [
   [/failed to increase vibrancy/i,   'Vibrancy enhancement failed. Please try again.'],
   [/failed to sharpen/i,             'Sharpening failed. Please try again.'],
   [/usage limit/i,                   'You\'ve reached your usage limit for this month. Upgrade your plan to continue.'],
+  [/insufficient tokens?/i,          'You\'re out of tokens. Please top up or upgrade your plan to continue.'],
+  [/insufficient token balance/i,    'You\'re out of tokens. Please top up or upgrade your plan to continue.'],
+  [/out of tokens?/i,                'You\'re out of tokens. Please top up or upgrade your plan to continue.'],
   [/not enough tokens/i,             'You\'ve used all your tokens for this month. Upgrade your plan to continue.'],
 
   // Recovery

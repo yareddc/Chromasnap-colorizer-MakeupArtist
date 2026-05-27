@@ -47,6 +47,11 @@ const FRIENDLY_MAP: Array<[RegExp | string, string]> = [
 
   // Account / billing
   [/failed to load subscription/i,   'Could not load your subscription details. Please refresh and try again.'],
+  [/direct token top-up is disabled in production/i, 'Token top-up is only available through Google Play in production. Use the Android app to purchase token packs.'],
+  [/direct token top-up is disabled on android/i, 'Use Google Play Billing in the Android app to purchase token packs.'],
+  [/direct subscription changes are disabled in production/i, 'Plan changes are only available through Google Play in production. Use the Android app to manage your subscription.'],
+  [/direct subscription changes are disabled on android/i, 'Use Google Play Billing in the Android app to manage your subscription.'],
+  [/google play purchase flow/i,      'Use Google Play Billing in the Android app to complete this purchase.'],
   [/failed to delete account/i,      'Account deletion failed. Please try again.'],
   [/password.*incorrect/i,           'Incorrect password.'],
   [/passwords do not match/i,        'The passwords you entered don\'t match.'],

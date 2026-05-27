@@ -34,6 +34,7 @@ export type BillingAccountRecord = {
     tokenBalance: number;
     monthlyRemainingTopUp: number;
     cycleStartedAt: number;
+    updatedAt: string;
 };
 
 export type BillingUsageEventRecord = {
@@ -177,6 +178,13 @@ export const initUsernameDatabase = async () => {
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
     `);
+
+    const billingAccountColumns = await db.all<{ name: string }[]>(`PRAGMA table_info(billing_accounts)`);
+    const billingAccountColumnNames = new Set(billingAccountColumns.map((column) => String(column.name).toLowerCase()));
+
+    if (!billingAccountColumnNames.has('updated_at')) {
+        await db.exec(`ALTER TABLE billing_accounts ADD COLUMN updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`);
+    }
 
     await db.exec(`
         CREATE TABLE IF NOT EXISTS billing_usage_events (
@@ -600,12 +608,14 @@ const mapBillingAccountRow = (row: {
     token_balance: number;
     monthly_remaining_top_up: number;
     cycle_started_at: number;
+    updated_at: string;
 }): BillingAccountRecord => ({
     userId: row.user_id,
     tier: row.tier,
     tokenBalance: Number(row.token_balance || 0),
     monthlyRemainingTopUp: Number(row.monthly_remaining_top_up || 0),
     cycleStartedAt: Number(row.cycle_started_at || 0),
+    updatedAt: String(row.updated_at || ''),
 });
 
 export const getBillingAccountByUserId = async (userId: string): Promise<BillingAccountRecord | null> => {
@@ -619,8 +629,9 @@ export const getBillingAccountByUserId = async (userId: string): Promise<Billing
         token_balance: number;
         monthly_remaining_top_up: number;
         cycle_started_at: number;
+        updated_at: string;
     }>(
-        `SELECT user_id, tier, token_balance, monthly_remaining_top_up, cycle_started_at
+        `SELECT user_id, tier, token_balance, monthly_remaining_top_up, cycle_started_at, updated_at
          FROM billing_accounts WHERE user_id = ?`,
         normalizedUserId
     );
@@ -629,7 +640,7 @@ export const getBillingAccountByUserId = async (userId: string): Promise<Billing
     return mapBillingAccountRow(row);
 };
 
-export const upsertBillingAccount = async (account: BillingAccountRecord) => {
+export const upsertBillingAccount = async (account: BillingAccountRecord): Promise<BillingAccountRecord> => {
     const normalizedUserId = normalizeUsername(account.userId);
     if (!normalizedUserId) {
         throw new Error('Billing userId is required');
@@ -652,6 +663,12 @@ export const upsertBillingAccount = async (account: BillingAccountRecord) => {
         Math.floor(account.cycleStartedAt)
     );
     await queuePersistDatabase();
+
+    const savedAccount = await getBillingAccountByUserId(normalizedUserId);
+    if (!savedAccount) {
+        throw new Error('Failed to load billing account after save');
+    }
+    return savedAccount;
 };
 
 export const listBillingUsageEvents = async (userId: string, limit: number = 200): Promise<BillingUsageEventRecord[]> => {

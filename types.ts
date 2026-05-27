@@ -37,6 +37,8 @@ export interface SubscriptionAccount {
   monthlyRemainingTopUp: number;
   cycleStartedAt: string;
   cycleEndsAt: string;
+  cycleDurationMs: number;
+  updatedAt: string;
 }
 
 export interface SubscriptionUsageItem {

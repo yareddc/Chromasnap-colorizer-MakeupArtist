@@ -82,6 +82,7 @@ type UserAccount = {
     tokenBalance: number;
     monthlyRemainingTopUp: number;
     cycleStartedAt: number;
+    updatedAt: string;
 };
 
 // Firebase Admin (lazy - only initialized when FIREBASE_PROJECT_ID is set)
@@ -233,6 +234,7 @@ const PASSWORD_RESET_WEBHOOK_TIMEOUT_MS = Number.parseInt(process.env.PASSWORD_R
 const PASSWORD_RESET_WEBHOOK_SHARED_SECRET = (process.env.PASSWORD_RESET_WEBHOOK_SHARED_SECRET || '').trim();
 
 const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+const getBillingCycleDurationMs = (tier: SubscriptionTier) => (tier === 'free' ? FREE_TIER_REFRESH_INTERVAL_MS : thirtyDaysMs);
 const parsePositiveIntEnv = (raw: string | undefined, fallback: number) => {
     const parsed = Number.parseInt(String(raw || '').trim(), 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -358,20 +360,22 @@ const verifyGooglePlayPurchase = async (productType: GooglePlayProductType, prod
 
 const resetCycleIfNeeded = async (account: UserAccount) => {
     const plan = PLAN_CONFIG[account.tier];
-    const cycleIntervalMs = account.tier === 'free' ? FREE_TIER_REFRESH_INTERVAL_MS : thirtyDaysMs;
+    const cycleIntervalMs = getBillingCycleDurationMs(account.tier);
     if (Date.now() - account.cycleStartedAt >= cycleIntervalMs) {
         const monthlyTokens = account.tier === 'free' ? FREE_TIER_MONTHLY_TOKENS_OVERRIDE : plan.monthlyTokens;
         const maxTopUp = account.tier === 'free' ? FREE_TIER_MAX_TOPUP_OVERRIDE : plan.maxTopUpPerMonth;
         account.cycleStartedAt = Date.now();
         account.tokenBalance = monthlyTokens;
         account.monthlyRemainingTopUp = maxTopUp;
-        await upsertBillingAccount({
+        const savedAccount = await upsertBillingAccount({
             userId: account.userId,
             tier: account.tier,
             tokenBalance: account.tokenBalance,
             monthlyRemainingTopUp: account.monthlyRemainingTopUp,
             cycleStartedAt: account.cycleStartedAt,
+            updatedAt: account.updatedAt,
         });
+        account.updatedAt = savedAccount.updatedAt;
     }
 };
 
@@ -396,6 +400,7 @@ const getOrCreateUserAccount = async (userId: string): Promise<UserAccount> => {
             tokenBalance: existing.tokenBalance,
             monthlyRemainingTopUp: existing.monthlyRemainingTopUp,
             cycleStartedAt: existing.cycleStartedAt,
+            updatedAt: existing.updatedAt,
         };
         await resetCycleIfNeeded(account);
         return account;
@@ -409,14 +414,17 @@ const getOrCreateUserAccount = async (userId: string): Promise<UserAccount> => {
         tokenBalance: freeMonthlyTokens,
         monthlyRemainingTopUp: freeMaxTopUp,
         cycleStartedAt: Date.now(),
+        updatedAt: new Date().toISOString(),
     };
-    await upsertBillingAccount({
+    const savedAccount = await upsertBillingAccount({
         userId: created.userId,
         tier: created.tier,
         tokenBalance: created.tokenBalance,
         monthlyRemainingTopUp: created.monthlyRemainingTopUp,
         cycleStartedAt: created.cycleStartedAt,
+        updatedAt: created.updatedAt,
     });
+    created.updatedAt = savedAccount.updatedAt;
     void addUsername('subscriber', userId).catch((error) => {
         console.error('Failed to persist subscriber username:', error);
     });
@@ -445,6 +453,7 @@ const chargeTokens = async (account: UserAccount, action: string, cost: number) 
         tokenBalance: account.tokenBalance,
         monthlyRemainingTopUp: account.monthlyRemainingTopUp,
         cycleStartedAt: account.cycleStartedAt,
+        updatedAt: account.updatedAt,
     });
     await addBillingUsageEvent({
         id: randomUUID(),
@@ -461,7 +470,9 @@ const publicAccountView = (account: UserAccount) => ({
     tokenBalance: account.tokenBalance,
     monthlyRemainingTopUp: account.monthlyRemainingTopUp,
     cycleStartedAt: new Date(account.cycleStartedAt).toISOString(),
-    cycleEndsAt: new Date(account.cycleStartedAt + thirtyDaysMs).toISOString(),
+    cycleEndsAt: new Date(account.cycleStartedAt + getBillingCycleDurationMs(account.tier)).toISOString(),
+    cycleDurationMs: getBillingCycleDurationMs(account.tier),
+    updatedAt: account.updatedAt,
 });
 
 const handleBillingError = (res: express.Response, error: any) => {
@@ -2092,25 +2103,29 @@ app.post('/api/billing/google-play/verify', requireAuth, async (req, res) => {
             account.tokenBalance = plan.monthlyTokens;
             account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
             account.cycleStartedAt = Date.now();
-            await upsertBillingAccount({
+            const savedAccount = await upsertBillingAccount({
                 userId: account.userId,
                 tier: account.tier,
                 tokenBalance: account.tokenBalance,
                 monthlyRemainingTopUp: account.monthlyRemainingTopUp,
                 cycleStartedAt: account.cycleStartedAt,
+                updatedAt: account.updatedAt,
             });
+            account.updatedAt = savedAccount.updatedAt;
         } else {
             const topUpTokens = playTopupProductToTokens[normalizedProductId] as number;
 
             account.tokenBalance += topUpTokens;
             account.monthlyRemainingTopUp -= topUpTokens;
-            await upsertBillingAccount({
+            const savedAccount = await upsertBillingAccount({
                 userId: account.userId,
                 tier: account.tier,
                 tokenBalance: account.tokenBalance,
                 monthlyRemainingTopUp: account.monthlyRemainingTopUp,
                 cycleStartedAt: account.cycleStartedAt,
+                updatedAt: account.updatedAt,
             });
+            account.updatedAt = savedAccount.updatedAt;
             await addBillingUsageEvent({
                 id: randomUUID(),
                 userId: account.userId,
@@ -2167,13 +2182,15 @@ app.post('/api/subscription/subscribe', requireAuth, async (req, res) => {
         account.tokenBalance = plan.monthlyTokens;
         account.monthlyRemainingTopUp = plan.maxTopUpPerMonth;
         account.cycleStartedAt = Date.now();
-        await upsertBillingAccount({
+        const savedAccount = await upsertBillingAccount({
             userId: account.userId,
             tier: account.tier,
             tokenBalance: account.tokenBalance,
             monthlyRemainingTopUp: account.monthlyRemainingTopUp,
             cycleStartedAt: account.cycleStartedAt,
+            updatedAt: account.updatedAt,
         });
+        account.updatedAt = savedAccount.updatedAt;
 
         res.json({ account: publicAccountView(account), message: `Subscribed to ${plan.name}` });
     } catch (error: any) {
@@ -2213,13 +2230,15 @@ app.post('/api/subscription/topup', requireAuth, async (req, res) => {
 
         account.tokenBalance += Math.floor(topUp);
         account.monthlyRemainingTopUp -= Math.floor(topUp);
-        await upsertBillingAccount({
+        const savedAccount = await upsertBillingAccount({
             userId: account.userId,
             tier: account.tier,
             tokenBalance: account.tokenBalance,
             monthlyRemainingTopUp: account.monthlyRemainingTopUp,
             cycleStartedAt: account.cycleStartedAt,
+            updatedAt: account.updatedAt,
         });
+        account.updatedAt = savedAccount.updatedAt;
         await addBillingUsageEvent({
             id: randomUUID(),
             userId: account.userId,

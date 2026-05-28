@@ -1357,8 +1357,9 @@ const App: React.FC = () => {
       );
 
       setBarbershopResults(result.recommendations);
-      setBarbershopAfterImage(ensureFreshPreviewUrl(result.afterImage));
-      setBarbershopMessage(result.message);
+      const normalizedAfterImage = ensureFreshPreviewUrl(result.afterImage || barbershopSelfie);
+      setBarbershopAfterImage(normalizedAfterImage);
+      setBarbershopMessage(result.message || 'Barbershop look generated!');
     } catch (error: any) {
       setBarbershopMessage(friendlyError(error, 'barbershop-virtual-look'));
     } finally {
@@ -1497,7 +1498,10 @@ const App: React.FC = () => {
 
   const handleDownloadTryOn = async () => {
     const imageToDownload = tryAfterImage || trySelfie;
-    if (!imageToDownload) return;
+    if (!imageToDownload) {
+      setTryMessage('Generate or upload a photo before downloading.');
+      return;
+    }
 
     const toSlug = (value: string) =>
       value
@@ -1515,7 +1519,11 @@ const App: React.FC = () => {
       Date.now().toString(),
     ].join('-');
 
-    await triggerDownload(imageToDownload, `${filename}.jpg`);
+    try {
+      await triggerDownload(imageToDownload, `${filename}.jpg`);
+    } catch (error: any) {
+      setTryMessage(friendlyError(error, 'beauty-lab-download'));
+    }
   };
 
   const handleSaveBeautyConsultationSheet = async () => {
@@ -1617,7 +1625,10 @@ const App: React.FC = () => {
 
   const handleDownloadBarbershop = async () => {
     const imageToDownload = barbershopAfterImage || barbershopSelfie;
-    if (!imageToDownload) return;
+    if (!imageToDownload) {
+      setBarbershopMessage('Generate or upload a barbershop image before downloading.');
+      return;
+    }
 
     const toSlug = (value: string) =>
       value
@@ -1633,12 +1644,19 @@ const App: React.FC = () => {
       Date.now().toString(),
     ].join('-');
 
-    await triggerDownload(imageToDownload, `${filename}.jpg`);
+    try {
+      await triggerDownload(imageToDownload, `${filename}.jpg`);
+    } catch (error: any) {
+      setBarbershopMessage(friendlyError(error, 'barbershop-download'));
+    }
   };
 
   const handleDownloadOutfit = async () => {
     const imageToDownload = outfitAfterImage || outfitSelfie;
-    if (!imageToDownload) return;
+    if (!imageToDownload) {
+      setOutfitMessage('Generate or upload a photo before downloading.');
+      return;
+    }
 
     const toSlug = (value: string) =>
       value
@@ -1656,7 +1674,11 @@ const App: React.FC = () => {
       Date.now().toString(),
     ].join('-');
 
-    await triggerDownload(imageToDownload, `${filename}.jpg`);
+    try {
+      await triggerDownload(imageToDownload, `${filename}.jpg`);
+    } catch (error: any) {
+      setOutfitMessage(friendlyError(error, 'outfit-download'));
+    }
   };
 
   const handleSelectOutfitLook = (index: number) => {
@@ -2979,9 +3001,9 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'beauty-lab' && (
         <div
           id="beauty-lab-panel"
-          className="studio-shell-enter w-full rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
+          className="studio-shell-enter w-full max-w-5xl mx-auto rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
         >
-          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center">
+          <div className="h-[44vh] sm:h-[56vh] lg:h-[62vh] bg-slate-950/70 flex items-center justify-center">
             {tryAfterImage || trySelfie ? (
               <img
                 src={tryAfterImage || trySelfie || ''}
@@ -2996,7 +3018,7 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-rose-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+          <div className="h-[50vh] sm:h-[40vh] lg:h-[34vh] border-t border-rose-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
             <input
               type="file"
               accept="image/*"
@@ -3036,6 +3058,13 @@ const App: React.FC = () => {
                 {tryLoading ? 'Generating...' : 'Generate'}
               </button>
               <button
+                onClick={handleDownloadTryOn}
+                disabled={!trySelfie}
+                className="inline-flex shrink-0 items-center rounded-full border border-indigo-500/40 bg-indigo-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50"
+              >
+                Download
+              </button>
+              <button
                 onClick={handleSaveBeautyConsultationSheet}
                 disabled={!trySelfie}
                 className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
@@ -3049,6 +3078,7 @@ const App: React.FC = () => {
                     setTryAfterImage(null);
                     setTryResults(null);
                     setTryMessage(null);
+                    setTryLoading(false);
                     setHair360Previews(null);
                     setHair360Message(null);
                   }}
@@ -3402,7 +3432,7 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={handleDownloadBarbershop}
-                disabled={!barbershopSelfie}
+                disabled={!barbershopAfterImage && !barbershopSelfie}
                 className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
               >
                 Download
@@ -3415,6 +3445,8 @@ const App: React.FC = () => {
                     setBarbershopResults(null);
                     setBarbershopMessage(null);
                     setBarbershopNotes('');
+                    setBarbershopGenerateLoading(false);
+                    setBarbershopRecommendationLoading(false);
                   }}
                   className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
                 >
@@ -3533,7 +3565,11 @@ const App: React.FC = () => {
             </div>
 
             {barbershopMessage && (
-              <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 p-3 text-xs text-emerald-100">{barbershopMessage}</div>
+              <div className={`rounded-xl border p-3 text-xs ${
+                barbershopMessage.toLowerCase().includes('error') || barbershopMessage.toLowerCase().includes('failed') || barbershopMessage.toLowerCase().includes('please')
+                  ? 'border-red-500/35 bg-red-500/10 text-red-200'
+                  : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-100'
+              }`}>{barbershopMessage}</div>
             )}
 
             {barbershopResults && barbershopResults.length > 0 && (
@@ -3630,6 +3666,7 @@ const App: React.FC = () => {
                     setOutfitMessage(null);
                     setOutfitNotes('');
                     setOutfitGarmentImage(null);
+                    setOutfitLoading(false);
                   }}
                   className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
                 >
@@ -3827,7 +3864,11 @@ const App: React.FC = () => {
             </div>
 
             {outfitMessage && (
-              <div className="rounded-xl border border-fuchsia-500/35 bg-fuchsia-500/10 p-3 text-xs text-fuchsia-100">{outfitMessage}</div>
+              <div className={`rounded-xl border p-3 text-xs ${
+                outfitMessage.toLowerCase().includes('error') || outfitMessage.toLowerCase().includes('failed') || outfitMessage.toLowerCase().includes('please')
+                  ? 'border-red-500/35 bg-red-500/10 text-red-200'
+                  : 'border-fuchsia-500/35 bg-fuchsia-500/10 text-fuchsia-100'
+              }`}>{outfitMessage}</div>
             )}
 
             {outfitLooks && outfitLooks.length > 1 && (

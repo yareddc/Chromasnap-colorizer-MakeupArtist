@@ -1,6 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
-
-type AspectPreset = 'headshot' | 'portrait' | 'square' | 'wide';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 interface PhotoEditorModalProps {
   image: string;
@@ -9,12 +7,9 @@ interface PhotoEditorModalProps {
   onApply: (editedImage: string) => void;
 }
 
-const ASPECT_PRESETS: Record<AspectPreset, { label: string; ratio: number }> = {
-  headshot: { label: 'Headshot 3:4', ratio: 3 / 4 },
-  portrait: { label: 'Portrait 4:5', ratio: 4 / 5 },
-  square: { label: 'Square 1:1', ratio: 1 },
-  wide: { label: 'Wide 16:9', ratio: 16 / 9 },
-};
+const DEFAULT_ASPECT_RATIO = 3 / 4;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 3;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -22,6 +17,14 @@ const normalizeRotation = (degrees: number) => {
   const normalized = degrees % 360;
   return normalized < 0 ? normalized + 360 : normalized;
 };
+
+const getTouchDistance = (touchA: Touch, touchB: Touch) => {
+  const dx = touchA.clientX - touchB.clientX;
+  const dy = touchA.clientY - touchB.clientY;
+  return Math.hypot(dx, dy);
+};
+
+const clampZoom = (value: number) => clamp(Number(value.toFixed(2)), MIN_ZOOM, MAX_ZOOM);
 
 const buildCropRect = (
   imageWidth: number,
@@ -131,12 +134,14 @@ const renderCroppedImage = (
 
 const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCancel, onApply }) => {
   const [sourceImage, setSourceImage] = useState<HTMLImageElement | null>(null);
-  const [aspectPreset, setAspectPreset] = useState<AspectPreset>('headshot');
   const [zoom, setZoom] = useState(1.2);
   const [focusX, setFocusX] = useState(0);
   const [focusY, setFocusY] = useState(-20);
   const [rotation, setRotation] = useState(0);
   const [isApplying, setIsApplying] = useState(false);
+  const previewFrameRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{ x: number; y: number } | null>(null);
+  const pinchStateRef = useRef<{ distance: number; zoom: number } | null>(null);
 
   useEffect(() => {
     const img = new Image();
@@ -144,7 +149,18 @@ const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCan
     img.src = image;
   }, [image]);
 
-  const aspectRatio = ASPECT_PRESETS[aspectPreset].ratio;
+  const aspectRatio = DEFAULT_ASPECT_RATIO;
+
+  const adjustFocusByPixels = (deltaX: number, deltaY: number) => {
+    const frame = previewFrameRef.current;
+    if (!frame) return;
+
+    const { width, height } = frame.getBoundingClientRect();
+    if (!width || !height) return;
+
+    setFocusX((current) => clamp(current + (deltaX / width) * 200, -100, 100));
+    setFocusY((current) => clamp(current + (deltaY / height) * 200, -100, 100));
+  };
 
   const previewImage = useMemo(() => {
     if (!sourceImage) return image;
@@ -170,8 +186,7 @@ const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCan
     }
   };
 
-  const resetForHeadFocus = () => {
-    setAspectPreset('headshot');
+  const resetCropView = () => {
     setZoom(1.25);
     setFocusX(0);
     setFocusY(-30);
@@ -182,16 +197,92 @@ const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCan
     setRotation((current) => normalizeRotation(current + degrees));
   };
 
+  const handlePreviewWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const step = event.deltaY < 0 ? 0.08 : -0.08;
+    setZoom((current) => clampZoom(current + step));
+  };
+
+  const handlePreviewTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length === 2) {
+      const [a, b] = [event.touches[0], event.touches[1]];
+      pinchStateRef.current = {
+        distance: getTouchDistance(a, b),
+        zoom,
+      };
+      dragStateRef.current = null;
+      return;
+    }
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      dragStateRef.current = { x: touch.clientX, y: touch.clientY };
+      pinchStateRef.current = null;
+    }
+  };
+
+  const handlePreviewTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    if (event.touches.length === 2 && pinchStateRef.current) {
+      const [a, b] = [event.touches[0], event.touches[1]];
+      const distance = getTouchDistance(a, b);
+      if (pinchStateRef.current.distance > 0) {
+        const scale = distance / pinchStateRef.current.distance;
+        setZoom(clampZoom(pinchStateRef.current.zoom * scale));
+      }
+      return;
+    }
+
+    if (event.touches.length === 1 && dragStateRef.current) {
+      const touch = event.touches[0];
+      const deltaX = touch.clientX - dragStateRef.current.x;
+      const deltaY = touch.clientY - dragStateRef.current.y;
+      adjustFocusByPixels(deltaX, deltaY);
+      dragStateRef.current = { x: touch.clientX, y: touch.clientY };
+    }
+  };
+
+  const handlePreviewTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length === 0) {
+      dragStateRef.current = null;
+      pinchStateRef.current = null;
+      return;
+    }
+
+    if (event.touches.length === 1) {
+      const touch = event.touches[0];
+      dragStateRef.current = { x: touch.clientX, y: touch.clientY };
+      pinchStateRef.current = null;
+    }
+  };
+
+  const handlePreviewMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    dragStateRef.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const handlePreviewMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!dragStateRef.current || event.buttons !== 1) return;
+    const deltaX = event.clientX - dragStateRef.current.x;
+    const deltaY = event.clientY - dragStateRef.current.y;
+    adjustFocusByPixels(deltaX, deltaY);
+    dragStateRef.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const stopMouseDrag = () => {
+    dragStateRef.current = null;
+  };
+
   return (
     <div className="fixed inset-0 z-[80] bg-black/75 backdrop-blur-sm flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="w-full max-w-4xl max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl p-3 sm:p-5 space-y-4 overflow-y-auto">
+      <div className="w-full max-w-3xl max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl p-3 sm:p-4 space-y-4 overflow-y-auto">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.16em]">
               {title || 'Edit Photo Before Processing'}
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              Crop, rotate, and shift focus above the neck before running AI processing.
+              Pinch to zoom and drag to crop before running AI processing.
             </p>
           </div>
           <button
@@ -203,38 +294,33 @@ const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCan
           </button>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.35fr_minmax(0,1fr)]">
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_minmax(0,1fr)]">
           <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-3">
-            <div className="w-full rounded-xl overflow-hidden border border-slate-800">
+            <div
+              ref={previewFrameRef}
+              className="w-full rounded-xl overflow-hidden border border-slate-800 touch-none select-none cursor-grab active:cursor-grabbing"
+              onWheel={handlePreviewWheel}
+              onTouchStart={handlePreviewTouchStart}
+              onTouchMove={handlePreviewTouchMove}
+              onTouchEnd={handlePreviewTouchEnd}
+              onTouchCancel={handlePreviewTouchEnd}
+              onMouseDown={handlePreviewMouseDown}
+              onMouseMove={handlePreviewMouseMove}
+              onMouseUp={stopMouseDrag}
+              onMouseLeave={stopMouseDrag}
+            >
               <img
                 src={previewImage}
                 alt="Edited preview"
-                className="w-full max-h-[36vh] sm:max-h-[48vh] object-contain bg-slate-950"
+                className="w-full max-h-[30vh] sm:max-h-[42vh] object-contain bg-slate-950"
               />
+            </div>
+            <div className="mt-2 text-[10px] text-slate-400">
+              Touch: pinch to zoom, drag to reframe. Desktop: scroll to zoom, drag to crop.
             </div>
           </div>
 
           <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-3 sm:p-4 space-y-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Crop Preset</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(Object.keys(ASPECT_PRESETS) as AspectPreset[]).map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setAspectPreset(preset)}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
-                      aspectPreset === preset
-                        ? 'border-indigo-400 bg-indigo-500/15 text-indigo-100'
-                        : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500'
-                    }`}
-                  >
-                    {ASPECT_PRESETS[preset].label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Rotate</label>
               <div className="grid grid-cols-2 gap-2">
@@ -253,76 +339,31 @@ const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCan
                   Rotate Right
                 </button>
               </div>
-              <input
-                type="range"
-                min={0}
-                max={359}
-                step={1}
-                value={rotation}
-                onChange={(event) => setRotation(Number(event.target.value))}
-                className="w-full"
-              />
-              <div className="text-[10px] text-slate-400">{rotation.toFixed(0)}deg (360deg control)</div>
+              <div className="text-[10px] text-slate-400">{rotation.toFixed(0)}deg</div>
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Zoom</label>
-              <input
-                type="range"
-                min={1}
-                max={3}
-                step={0.01}
-                value={zoom}
-                onChange={(event) => setZoom(Number(event.target.value))}
-                className="w-full"
-              />
-              <div className="text-[10px] text-slate-400">{zoom.toFixed(2)}x</div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Horizontal Focus</label>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={focusX}
-                onChange={(event) => setFocusX(Number(event.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Vertical Focus (move up)</label>
-              <input
-                type="range"
-                min={-100}
-                max={100}
-                step={1}
-                value={focusY}
-                onChange={(event) => setFocusY(Number(event.target.value))}
-                className="w-full"
-              />
+              <div className="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-2">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Touch Crop</div>
+                <div className="mt-1 text-[10px] text-slate-400">Zoom: {zoom.toFixed(2)}x</div>
+                <div className="text-[10px] text-slate-500">Position X: {focusX.toFixed(0)} / Y: {focusY.toFixed(0)}</div>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={resetForHeadFocus}
+                onClick={resetCropView}
                 className="px-3 py-2 rounded-xl border border-slate-700 text-xs font-semibold text-slate-200 hover:border-slate-500 transition-colors"
               >
-                Head Focus Preset
+                Reset View
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setZoom(1.2);
-                  setFocusX(0);
-                  setFocusY(-20);
-                }}
+                onClick={() => setRotation(0)}
                 className="px-3 py-2 rounded-xl border border-slate-700 text-xs font-semibold text-slate-200 hover:border-slate-500 transition-colors"
               >
-                Reset
+                Reset Rotation
               </button>
             </div>
 

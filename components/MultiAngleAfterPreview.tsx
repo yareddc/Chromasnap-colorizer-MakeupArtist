@@ -61,7 +61,7 @@ const MultiAngleAfterPreview: React.FC<MultiAngleAfterPreviewProps> = ({ image, 
   const isGeneratingAngle = loadingByAngle[activeAngle] && activeAngle !== 'front';
 
   return (
-    <div className="space-y-2">
+    <div className="h-full min-h-0 flex flex-col gap-2">
       <div className="grid grid-cols-4 gap-1">
         {ANGLES.map((angle) => (
           <button
@@ -78,13 +78,15 @@ const MultiAngleAfterPreview: React.FC<MultiAngleAfterPreviewProps> = ({ image, 
           </button>
         ))}
       </div>
-      {isGeneratingAngle ? (
-        <div className="h-56 sm:h-64 flex items-center justify-center text-[10px] text-slate-300 px-3 text-center border border-violet-500/30 rounded-xl bg-slate-950/60">
-          Rendering {activeAngle} view from the generated look...
-        </div>
-      ) : (
-        <img src={activeImage} alt={`${alt} (${activeAngle} view)`} className={className} />
-      )}
+      <div className="flex-1 min-h-0">
+        {isGeneratingAngle ? (
+          <div className="h-full min-h-[12rem] flex items-center justify-center text-[10px] text-slate-300 px-3 text-center border border-violet-500/30 rounded-xl bg-slate-950/60">
+            Rendering {activeAngle} view from the generated look...
+          </div>
+        ) : (
+          <img src={activeImage} alt={`${alt} (${activeAngle} view)`} className={className} />
+        )}
+      </div>
       <p className="text-[9px] text-slate-400 text-center">Left, right, and back views are generated on demand for perspective consistency.</p>
     </div>
   );

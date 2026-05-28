@@ -2981,7 +2981,7 @@ const App: React.FC = () => {
           id="beauty-lab-panel"
           className="studio-shell-enter w-full rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
         >
-          <div className="h-[70vh] bg-slate-950/70 flex items-center justify-center">
+          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center">
             {tryAfterImage || trySelfie ? (
               <img
                 src={tryAfterImage || trySelfie || ''}
@@ -2996,7 +2996,7 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="h-[30vh] border-t border-rose-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-rose-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
             <input
               type="file"
               accept="image/*"
@@ -3339,7 +3339,7 @@ const App: React.FC = () => {
           id="barbershop-panel"
           className="studio-shell-enter w-full rounded-3xl border transition-all border-emerald-500/50 bg-emerald-500/5 shadow-lg shadow-emerald-500/10 overflow-hidden"
         >
-          <div className="h-[70vh] bg-slate-950/70 flex items-center justify-center">
+          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center">
             {barbershopSelfie ? (
               <div className="w-full h-full grid md:grid-cols-2 gap-px bg-slate-800/60">
                 <div className="flex flex-col bg-slate-950/70">
@@ -3370,7 +3370,7 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="h-[30vh] border-t border-emerald-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-emerald-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
             <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
               <button
                 type="button"
@@ -3557,7 +3557,7 @@ const App: React.FC = () => {
           id="outfit-panel"
           className="studio-shell-enter w-full rounded-3xl border transition-all border-fuchsia-500/50 bg-fuchsia-500/5 shadow-lg shadow-fuchsia-500/10 overflow-hidden"
         >
-          <div className="h-[70vh] bg-slate-950/70 flex items-center justify-center">
+          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center">
             {outfitSelfie ? (
               <div className="w-full h-full grid md:grid-cols-2 gap-px bg-slate-800/60">
                 <div className="flex flex-col bg-slate-950/70">
@@ -3583,7 +3583,7 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="h-[30vh] border-t border-fuchsia-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-fuchsia-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
             <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
               <button
                 type="button"

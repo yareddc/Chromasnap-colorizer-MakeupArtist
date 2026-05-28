@@ -183,8 +183,8 @@ const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCan
   };
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl p-4 sm:p-5 space-y-4">
+    <div className="fixed inset-0 z-[80] bg-black/75 backdrop-blur-sm flex items-start sm:items-center justify-center p-2 sm:p-4 overflow-y-auto">
+      <div className="w-full max-w-4xl max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-2rem)] rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl p-3 sm:p-5 space-y-4 overflow-y-auto">
         <div className="flex items-center justify-between gap-3">
           <div>
             <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-[0.16em]">
@@ -209,12 +209,12 @@ const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({ image, title, onCan
               <img
                 src={previewImage}
                 alt="Edited preview"
-                className="w-full max-h-[55vh] object-contain bg-slate-950"
+                className="w-full max-h-[36vh] sm:max-h-[48vh] object-contain bg-slate-950"
               />
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-4 space-y-4">
+          <div className="rounded-2xl border border-slate-700 bg-slate-950/60 p-3 sm:p-4 space-y-4">
             <div className="space-y-2">
               <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Crop Preset</label>
               <div className="grid grid-cols-2 gap-2">

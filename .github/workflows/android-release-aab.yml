@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       android_version_code:
-        description: Android version code to build
+        description: Optional Android version code override (leave empty for auto)
         required: false
-        default: '25'
+        default: ''
       android_version_name:
         description: Android version name to build
         required: false
@@ -118,10 +118,34 @@ jobs:
       - name: Resolve Android version inputs
         id: resolve_version
         shell: bash
+        env:
+          INPUT_ANDROID_VERSION_CODE: ${{ github.event.inputs.android_version_code }}
+          INPUT_ANDROID_VERSION_NAME: ${{ github.event.inputs.android_version_name }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          VERSION_CODE="25"
-          VERSION_NAME="1.2.6"
+
+          # Auto-generate a monotonic versionCode from workflow run number.
+          # Using a high base avoids collisions with previously published low numbers.
+          AUTO_BASE=100
+          AUTO_VERSION_CODE=$((AUTO_BASE + GITHUB_RUN_NUMBER))
+
+          VERSION_CODE="$AUTO_VERSION_CODE"
+          VERSION_NAME="${INPUT_ANDROID_VERSION_NAME:-1.2.6}"
+
+          if [ -n "${INPUT_ANDROID_VERSION_CODE:-}" ]; then
+            if [[ ! "$INPUT_ANDROID_VERSION_CODE" =~ ^[0-9]+$ ]]; then
+              echo "android_version_code must be a positive integer, got: $INPUT_ANDROID_VERSION_CODE"
+              exit 1
+            fi
+            VERSION_CODE="$INPUT_ANDROID_VERSION_CODE"
+          fi
+
+          if [ "$VERSION_CODE" -le 0 ]; then
+            echo "Resolved Android versionCode must be > 0, got: $VERSION_CODE"
+            exit 1
+          fi
+
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "Resolved Android versionCode=$VERSION_CODE versionName=$VERSION_NAME"

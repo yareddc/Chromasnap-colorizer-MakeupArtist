@@ -1044,7 +1044,11 @@ const App: React.FC = () => {
 
   const handleDownloadResult = async () => {
     if (!result) return;
-    await triggerDownload(result.colorized, `chromasnap-hd-${Date.now()}.png`);
+    try {
+      await triggerDownload(result.colorized, `chromasnap-hd-${Date.now()}.png`);
+    } catch (error: any) {
+      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'download') });
+    }
   };
 
   const handleShareResult = async () => {
@@ -1371,6 +1375,7 @@ const App: React.FC = () => {
     if (!outfitMatchCurrentSalonLook) {
       return '';
     }
+    return outfitNotes.trim();
   };
 
   const handleGenerateOutfitLook = async () => {
@@ -1690,7 +1695,11 @@ const App: React.FC = () => {
 
   const handleDownloadAnimation = async () => {
     if (!videoResult?.videoUrl) return;
-    await triggerDownload(videoResult.videoUrl, `chromasnap-animation-${Date.now()}.mp4`);
+    try {
+      await triggerDownload(videoResult.videoUrl, `chromasnap-animation-${Date.now()}.mp4`);
+    } catch (error: any) {
+      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'animation-download') });
+    }
   };
 
   const handleGenerateHair360Preview = async () => {
@@ -3353,7 +3362,7 @@ const App: React.FC = () => {
 
             {tryMessage && (
               <div className={`rounded-xl px-3 py-2 text-[10px] ${
-                tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed')
+                tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed') || tryMessage.toLowerCase().includes('please')
                   ? 'bg-red-500/10 border border-red-500/30 text-red-200'
                   : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-200'
               }`}>

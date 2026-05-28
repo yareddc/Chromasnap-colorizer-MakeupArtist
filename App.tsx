@@ -1063,7 +1063,7 @@ const App: React.FC = () => {
         files: [file],
       });
     } catch {
-      handleDownloadResult();
+        void handleDownloadResult();
     }
   };
 
@@ -2751,7 +2751,11 @@ const App: React.FC = () => {
           </div>
 
           {tryMessage && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">{tryMessage}</div>
+            <div className={`rounded-xl border p-3 text-xs ${
+              tryMessage.toLowerCase().includes('error') || tryMessage.toLowerCase().includes('failed') || tryMessage.toLowerCase().includes('please')
+                ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-100'
+            }`}>{tryMessage}</div>
           )}
           {beautyConsultationMessage && (
             <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-100">{beautyConsultationMessage}</div>

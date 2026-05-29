@@ -3014,9 +3014,9 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'beauty-lab' && (
         <div
           id="beauty-lab-panel"
-          className="studio-shell-enter w-full max-w-5xl mx-auto rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
+          className="studio-shell-enter w-full max-w-4xl mx-auto min-w-0 rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
         >
-          <div className="h-[44vh] sm:h-[56vh] lg:h-[62vh] bg-slate-950/70 flex items-center justify-center">
+          <div className="h-[44vh] sm:h-[56vh] lg:h-[62vh] bg-slate-950/70 flex items-center justify-center min-w-0">
             {tryAfterImage || trySelfie ? (
               <img
                 src={tryAfterImage || trySelfie || ''}
@@ -3031,7 +3031,7 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="h-[50vh] sm:h-[40vh] lg:h-[34vh] border-t border-rose-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
+          <div className="h-[50vh] sm:h-[40vh] lg:h-[34vh] border-t border-rose-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto min-w-0">
             <input
               type="file"
               accept="image/*"
@@ -3050,37 +3050,37 @@ const App: React.FC = () => {
               ref={tryCameraInputRef}
             />
 
-            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2 sm:overflow-x-auto sm:whitespace-nowrap sm:pb-1">
               <button
                 onClick={() => tryUploadInputRef.current?.click()}
-                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
+                className="inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
               >
                 Upload
               </button>
               <button
                 onClick={() => tryCameraInputRef.current?.click()}
-                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
+                className="inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
               >
                 Camera
               </button>
               <button
                 onClick={handleGenerateVirtualMakeup}
                 disabled={tryLoading || !trySelfie}
-                className="inline-flex shrink-0 items-center rounded-full border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
+                className="inline-flex min-w-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
               >
                 {tryLoading ? 'Generating...' : 'Generate'}
               </button>
               <button
                 onClick={handleDownloadTryOn}
                 disabled={!trySelfie}
-                className="inline-flex shrink-0 items-center rounded-full border border-indigo-500/40 bg-indigo-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50"
+                className="inline-flex min-w-0 items-center justify-center rounded-full border border-indigo-500/40 bg-indigo-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50"
               >
                 Download
               </button>
               <button
                 onClick={handleSaveBeautyConsultationSheet}
                 disabled={!trySelfie}
-                className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
+                className="inline-flex min-w-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
               >
                 Save Look
               </button>
@@ -3095,7 +3095,7 @@ const App: React.FC = () => {
                     setHair360Previews(null);
                     setHair360Message(null);
                   }}
-                  className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
+                  className="inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
                 >
                   Reset
                 </button>

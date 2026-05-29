@@ -62,7 +62,7 @@ const MultiAngleAfterPreview: React.FC<MultiAngleAfterPreviewProps> = ({ image, 
 
   return (
     <div className="h-full min-h-0 flex flex-col gap-2">
-      <div className="grid grid-cols-4 gap-1">
+      <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
         {ANGLES.map((angle) => (
           <button
             key={angle.id}

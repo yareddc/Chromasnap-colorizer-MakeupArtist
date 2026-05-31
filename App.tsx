@@ -1,6 +1,5 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { jsPDF } from 'jspdf';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
 import ComparisonView from './components/ComparisonView';
@@ -140,10 +139,14 @@ const toDisplayLabel = (value: string): string =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 
-const toPdfImageFormat = (dataUrl: string): 'JPEG' | 'PNG' => {
-  if (dataUrl.startsWith('data:image/png')) return 'PNG';
-  return 'JPEG';
-};
+const loadImageElement = (source: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Could not render consultation card images.'));
+    image.src = source;
+  });
 
 const BEAUTY_SERVICES = [
   { id: 'bridal-glam', label: 'Bridal Glam', description: 'Premium full-face glam workflow for bridal clients.' },
@@ -1309,8 +1312,20 @@ const App: React.FC = () => {
         hair: beautyLabHairDescriptor,
         description: result.description
       }];
+      const hasGeneratedAfterImage =
+        typeof result.editedImage === 'string' &&
+        result.editedImage.length > 0 &&
+        result.editedImage !== trySelfie;
+
+      if (!hasGeneratedAfterImage) {
+        setTryAfterImage(null);
+        setTryResults(singleRec);
+        setTryMessage('Look analysis completed, but no edited image was returned. Please try Generate again.');
+        return;
+      }
+
       setTryResults(singleRec);
-      setTryAfterImage(ensureFreshPreviewUrl(result.editedImage || trySelfie));
+      setTryAfterImage(ensureFreshPreviewUrl(result.editedImage));
       setTryMessage('Virtual look generated! Review the description below.');
     } catch (error: any) {
       setTryMessage(friendlyError(error, 'virtual-makeup'));
@@ -1361,7 +1376,18 @@ const App: React.FC = () => {
       );
 
       setBarbershopResults(result.recommendations);
-      const normalizedAfterImage = ensureFreshPreviewUrl(result.afterImage || barbershopSelfie);
+      const hasGeneratedAfterImage =
+        typeof result.afterImage === 'string' &&
+        result.afterImage.length > 0 &&
+        result.afterImage !== barbershopSelfie;
+
+      if (!hasGeneratedAfterImage) {
+        setBarbershopAfterImage(null);
+        setBarbershopMessage('Barbershop style generated, but no after-image was returned. Please try Generate Look again.');
+        return;
+      }
+
+      const normalizedAfterImage = ensureFreshPreviewUrl(result.afterImage);
       setBarbershopAfterImage(normalizedAfterImage);
       setBarbershopMessage(result.message || 'Barbershop look generated!');
     } catch (error: any) {
@@ -1407,20 +1433,40 @@ const App: React.FC = () => {
         )
       );
 
-      const normalizedLooks: OutfitLookVariant[] = Array.isArray(result.looks) && result.looks.length
-        ? result.looks.map((look, index) => ({
-          title: look.title || `Look ${index + 1}`,
-          editedImage: ensureFreshPreviewUrl(look.editedImage || result.editedImage || outfitSelfie),
-          description: look.description || result.description || '',
-        }))
-        : [{
-          title: 'Primary Look',
-          editedImage: ensureFreshPreviewUrl(result.editedImage || outfitSelfie),
-          description: result.description || '',
-        }];
+      const validLooks: OutfitLookVariant[] = Array.isArray(result.looks) && result.looks.length
+        ? result.looks
+          .filter((look) => typeof look?.editedImage === 'string' && look.editedImage.length > 0 && look.editedImage !== outfitSelfie)
+          .map((look, index) => ({
+            title: look.title || `Look ${index + 1}`,
+            editedImage: ensureFreshPreviewUrl(look.editedImage),
+            description: look.description || result.description || '',
+          }))
+        : [];
+
+      const hasPrimaryAfterImage =
+        typeof result.editedImage === 'string' &&
+        result.editedImage.length > 0 &&
+        result.editedImage !== outfitSelfie;
+
+      const normalizedLooks: OutfitLookVariant[] = validLooks.length
+        ? validLooks
+        : hasPrimaryAfterImage
+          ? [{
+            title: 'Primary Look',
+            editedImage: ensureFreshPreviewUrl(result.editedImage),
+            description: result.description || '',
+          }]
+          : [];
+
+      if (!normalizedLooks.length) {
+        setOutfitLooks(null);
+        setOutfitAfterImage(null);
+        setOutfitMessage('Outfit guidance generated, but no after-image was returned. Please try Generate Outfit again.');
+        return;
+      }
 
       setOutfitLooks(normalizedLooks);
-      setOutfitAfterImage(normalizedLooks[0]?.editedImage || ensureFreshPreviewUrl(result.editedImage || outfitSelfie));
+      setOutfitAfterImage(normalizedLooks[0]?.editedImage || null);
       setOutfitMessage(result.description || 'Outfit generated! Compare options before heading out.');
     } catch (error: any) {
       setOutfitMessage(friendlyError(error, 'outfit-try-on'));
@@ -1502,9 +1548,8 @@ const App: React.FC = () => {
   ]);
 
   const handleDownloadTryOn = async () => {
-    const imageToDownload = tryAfterImage || trySelfie;
-    if (!imageToDownload) {
-      setTryMessage('Generate or upload a photo before downloading.');
+    if (!tryAfterImage) {
+      setTryMessage('Generate a finished Beauty Lab look before downloading the final photo.');
       return;
     }
 
@@ -1525,20 +1570,21 @@ const App: React.FC = () => {
     ].join('-');
 
     try {
-      await triggerDownload(imageToDownload, `${filename}.jpg`);
+      await triggerDownload(tryAfterImage, `${filename}.jpg`);
+      setTryMessage('Finished photo downloaded.');
     } catch (error: any) {
       setTryMessage(friendlyError(error, 'beauty-lab-download'));
     }
   };
 
   const handleSaveBeautyConsultationSheet = async () => {
-    if (!trySelfie) {
-      setTryMessage('Please upload a selfie first');
+    if (!trySelfie || !tryAfterImage) {
+      setTryMessage('Upload a selfie and generate a finished look before downloading the consultation card.');
       return;
     }
 
     const beforeImage = trySelfie;
-    const afterImage = tryAfterImage || trySelfie;
+    const afterImage = tryAfterImage;
 
     const formulaBreakdown = [
       `Hair: ${toDisplayLabel(colorLabDualTone)} color profile with ${toDisplayLabel(wigTrackStyle)} wig track, ${toDisplayLabel(haircutProfile)} haircut, and ${toDisplayLabel(extensionProfile)} extension shaping.`,
@@ -1554,84 +1600,96 @@ const App: React.FC = () => {
     ];
 
     try {
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const margin = 32;
-      const contentWidth = pageWidth - margin * 2;
-      const colGap = 14;
-      const colWidth = (contentWidth - colGap) / 2;
-      const imageTop = 74;
-      const imageHeight = 206;
+      const [beforeElement, afterElement] = await Promise.all([
+        loadImageElement(beforeImage),
+        loadImageElement(afterImage),
+      ]);
 
-      pdf.setFillColor(8, 13, 28);
-      pdf.rect(0, 0, pageWidth, pdf.internal.pageSize.getHeight(), 'F');
+      const cardWidth = 1400;
+      const cardHeight = 1800;
+      const horizontalPadding = 72;
+      const canvas = document.createElement('canvas');
+      canvas.width = cardWidth;
+      canvas.height = cardHeight;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('Unable to create consultation card renderer.');
+      }
 
-      pdf.setTextColor(241, 245, 249);
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(18);
-      pdf.text('Technical Consultation Sheet', margin, 40);
+      context.fillStyle = '#0b1220';
+      context.fillRect(0, 0, cardWidth, cardHeight);
 
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.setTextColor(148, 163, 184);
-      pdf.text(`Generated ${new Date().toLocaleString()}`, margin, 56);
+      context.fillStyle = '#f1f5f9';
+      context.font = '700 52px Arial';
+      context.fillText('Technical Consultation Card', horizontalPadding, 88);
 
-      pdf.setDrawColor(71, 85, 105);
-      pdf.roundedRect(margin, imageTop, colWidth, imageHeight, 10, 10, 'S');
-      pdf.roundedRect(margin + colWidth + colGap, imageTop, colWidth, imageHeight, 10, 10, 'S');
+      context.fillStyle = '#94a3b8';
+      context.font = '400 26px Arial';
+      context.fillText(`Generated ${new Date().toLocaleString()}`, horizontalPadding, 126);
 
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(10);
-      pdf.setTextColor(226, 232, 240);
-      pdf.text('Before', margin + 10, imageTop + 16);
-      pdf.text('After', margin + colWidth + colGap + 10, imageTop + 16);
+      const imageTop = 168;
+      const imageHeight = 560;
+      const imageGap = 26;
+      const imageWidth = (cardWidth - horizontalPadding * 2 - imageGap) / 2;
 
-      pdf.addImage(beforeImage, toPdfImageFormat(beforeImage), margin + 8, imageTop + 24, colWidth - 16, imageHeight - 32);
-      pdf.addImage(afterImage, toPdfImageFormat(afterImage), margin + colWidth + colGap + 8, imageTop + 24, colWidth - 16, imageHeight - 32);
+      context.strokeStyle = '#475569';
+      context.lineWidth = 4;
+      context.strokeRect(horizontalPadding, imageTop, imageWidth, imageHeight);
+      context.strokeRect(horizontalPadding + imageWidth + imageGap, imageTop, imageWidth, imageHeight);
 
-      let cursorY = imageTop + imageHeight + 28;
+      context.fillStyle = '#e2e8f0';
+      context.font = '700 28px Arial';
+      context.fillText('Before', horizontalPadding + 24, imageTop + 42);
+      context.fillText('After', horizontalPadding + imageWidth + imageGap + 24, imageTop + 42);
 
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(12);
-      pdf.setTextColor(241, 245, 249);
-      pdf.text('Formula Breakdown', margin, cursorY);
-      cursorY += 14;
+      context.drawImage(beforeElement, horizontalPadding + 16, imageTop + 56, imageWidth - 32, imageHeight - 72);
+      context.drawImage(afterElement, horizontalPadding + imageWidth + imageGap + 16, imageTop + 56, imageWidth - 32, imageHeight - 72);
 
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.setTextColor(203, 213, 225);
+      let textY = imageTop + imageHeight + 70;
+      context.fillStyle = '#f1f5f9';
+      context.font = '700 36px Arial';
+      context.fillText('Formula Breakdown', horizontalPadding, textY);
+      textY += 42;
+
+      context.fillStyle = '#cbd5e1';
+      context.font = '400 24px Arial';
       formulaBreakdown.forEach((line) => {
-        const wrapped = pdf.splitTextToSize(`- ${line}`, contentWidth);
-        pdf.text(wrapped, margin, cursorY);
-        cursorY += wrapped.length * 12 + 4;
+        const wrapped = context.measureText(`- ${line}`).width > cardWidth - horizontalPadding * 2
+          ? [
+              `- ${line.slice(0, 82)}${line.length > 82 ? '...' : ''}`,
+            ]
+          : [`- ${line}`];
+        wrapped.forEach((segment) => {
+          context.fillText(segment, horizontalPadding, textY);
+          textY += 34;
+        });
+        textY += 10;
       });
 
-      cursorY += 8;
-      pdf.setFont('helvetica', 'bold');
-      pdf.setFontSize(12);
-      pdf.setTextColor(241, 245, 249);
-      pdf.text('Terminology Prompt', margin, cursorY);
-      cursorY += 14;
+      textY += 16;
+      context.fillStyle = '#f1f5f9';
+      context.font = '700 36px Arial';
+      context.fillText('Terminology Prompt', horizontalPadding, textY);
+      textY += 42;
 
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(10);
-      pdf.setTextColor(203, 213, 225);
-      const promptText = terminologyPrompt.join(' ');
-      const promptLines = pdf.splitTextToSize(promptText, contentWidth);
-      pdf.text(promptLines, margin, cursorY);
+      context.fillStyle = '#cbd5e1';
+      context.font = '400 24px Arial';
+      const promptSentence = terminologyPrompt.join(' ');
+      const truncatedPrompt = promptSentence.length > 380 ? `${promptSentence.slice(0, 377)}...` : promptSentence;
+      context.fillText(truncatedPrompt, horizontalPadding, textY);
 
-      const filename = `beauty-consultation-sheet-${Date.now()}.pdf`;
-      pdf.save(filename);
-      setTryMessage('Technical Consultation Sheet generated successfully.');
+      const cardDataUrl = canvas.toDataURL('image/png');
+      const filename = `beauty-consultation-card-${Date.now()}.png`;
+      await triggerDownload(cardDataUrl, filename);
+      setTryMessage('Consultation card downloaded.');
     } catch (error: any) {
       setTryMessage(friendlyError(error, 'beauty-consultation-sheet'));
     }
   };
 
   const handleDownloadBarbershop = async () => {
-    const imageToDownload = barbershopAfterImage || barbershopSelfie;
-    if (!imageToDownload) {
-      setBarbershopMessage('Generate or upload a barbershop image before downloading.');
+    if (!barbershopAfterImage) {
+      setBarbershopMessage('Generate a barbershop after image before downloading.');
       return;
     }
 
@@ -1650,16 +1708,16 @@ const App: React.FC = () => {
     ].join('-');
 
     try {
-      await triggerDownload(imageToDownload, `${filename}.jpg`);
+      await triggerDownload(barbershopAfterImage, `${filename}.jpg`);
+      setBarbershopMessage('Barbershop after image downloaded.');
     } catch (error: any) {
       setBarbershopMessage(friendlyError(error, 'barbershop-download'));
     }
   };
 
   const handleDownloadOutfit = async () => {
-    const imageToDownload = outfitAfterImage || outfitSelfie;
-    if (!imageToDownload) {
-      setOutfitMessage('Generate or upload a photo before downloading.');
+    if (!outfitAfterImage) {
+      setOutfitMessage('Generate an outfit after image before downloading.');
       return;
     }
 
@@ -1680,7 +1738,8 @@ const App: React.FC = () => {
     ].join('-');
 
     try {
-      await triggerDownload(imageToDownload, `${filename}.jpg`);
+      await triggerDownload(outfitAfterImage, `${filename}.jpg`);
+      setOutfitMessage('Outfit after image downloaded.');
     } catch (error: any) {
       setOutfitMessage(friendlyError(error, 'outfit-download'));
     }
@@ -3014,7 +3073,7 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'beauty-lab' && (
         <div
           id="beauty-lab-panel"
-          className="studio-shell-enter w-full max-w-4xl mx-auto min-w-0 rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
+          className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
         >
           <div className="h-[44vh] sm:h-[56vh] lg:h-[62vh] bg-slate-950/70 flex items-center justify-center min-w-0">
             {tryAfterImage || trySelfie ? (
@@ -3072,17 +3131,17 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={handleDownloadTryOn}
-                disabled={!trySelfie}
+                disabled={!tryAfterImage}
                 className="inline-flex min-w-0 items-center justify-center rounded-full border border-indigo-500/40 bg-indigo-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50"
               >
-                Download
+                Download Photo
               </button>
               <button
                 onClick={handleSaveBeautyConsultationSheet}
-                disabled={!trySelfie}
+                disabled={!tryAfterImage}
                 className="inline-flex min-w-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
               >
-                Save Look
+                Download Card
               </button>
               {trySelfie && (
                 <button
@@ -3445,7 +3504,7 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={handleDownloadBarbershop}
-                disabled={!barbershopAfterImage && !barbershopSelfie}
+                disabled={!barbershopAfterImage}
                 className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
               >
                 Download
@@ -3664,7 +3723,7 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={handleDownloadOutfit}
-                disabled={!outfitSelfie}
+                disabled={!outfitAfterImage}
                 className="inline-flex shrink-0 items-center rounded-full border border-pink-500/40 bg-pink-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-pink-100 hover:bg-pink-500/30 disabled:opacity-50"
               >
                 Download

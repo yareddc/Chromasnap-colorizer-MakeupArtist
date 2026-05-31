@@ -70,7 +70,7 @@ export const generateBarbershopLook = async (
 
   return {
     recommendations,
-    afterImage: result.editedImage || input.selfieBase64,
+    afterImage: result.editedImage,
     message: 'Barbershop look generated! Review the preview below.',
   };
 };

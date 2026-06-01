@@ -15,7 +15,7 @@ const Header: React.FC<HeaderProps> = ({ tokenBalance, onMenuToggle, isMenuOpen 
           <div className="flex items-center gap-3 min-w-0">
             <img src="/icon.png" alt="ChromaSnap logo" className="w-10 h-10 rounded-xl shadow-lg shadow-indigo-500/20 object-contain" />
             <div className="min-w-0">
-              <h1 className="text-2xl sm:text-4xl font-bold text-indigo-100 truncate">
+              <h1 className="text-xl md:text-2xl font-bold text-indigo-100 truncate">
                 ChromaSnap
               </h1>
               {typeof tokenBalance === 'number' && (

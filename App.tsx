@@ -2948,7 +2948,7 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="w-full space-y-6 sm:space-y-8 xl:col-start-2">
+        <div className="w-full space-y-6 sm:space-y-8 xl:col-start-2 max-w-xl xl:max-w-none mx-auto xl:mx-0">
 
         {activeWorkspaceTab === 'dashboard' && (
         <div

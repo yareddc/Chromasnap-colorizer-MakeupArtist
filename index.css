@@ -3,11 +3,17 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+    overflow-x: hidden;
+    max-width: 100%;
+}
+
 body {
     font-family: 'Inter', sans-serif;
     background-color: #0f172a;
     color: #f8fafc;
     overflow-x: hidden;
+    max-width: 100%;
 }
 
 :root {

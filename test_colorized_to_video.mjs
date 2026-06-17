@@ -1,5 +1,54 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = __dirname;
+const serverEnvPath = path.resolve(repoRoot, 'server', '.env');
+
+const stripWrappingQuotes = (value) => value.replace(/^['"]|['"]$/g, '').trim();
+
+const readEnvValue = (content, key) => {
+  const lines = content.split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0) continue;
+    const envKey = trimmed.slice(0, separatorIndex).trim();
+    if (envKey !== key) continue;
+    return trimmed.slice(separatorIndex + 1).trim();
+  }
+  return '';
+};
+
+const hydrateRuntimeFromServerEnv = () => {
+  if (!fs.existsSync(serverEnvPath)) return;
+  const envFile = fs.readFileSync(serverEnvPath, 'utf8');
+
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    const rawCredsPath = readEnvValue(envFile, 'GOOGLE_APPLICATION_CREDENTIALS');
+    if (rawCredsPath) {
+      const configuredPath = stripWrappingQuotes(rawCredsPath);
+      const resolvedPath = path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.resolve(path.dirname(serverEnvPath), configuredPath);
+      if (fs.existsSync(resolvedPath)) {
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = resolvedPath;
+      }
+    }
+  }
+
+  if (!process.env.GCP_PROJECT_ID) {
+    const projectId = stripWrappingQuotes(readEnvValue(envFile, 'GCP_PROJECT_ID'));
+    if (projectId) {
+      process.env.GCP_PROJECT_ID = projectId;
+    }
+  }
+};
+
+hydrateRuntimeFromServerEnv();
 
 const API_BASE = process.env.E2E_API_BASE || 'http://localhost:3001';
 const USER_ID = process.env.E2E_USER_ID || 'video-test-user';
@@ -20,7 +69,7 @@ const buildAuthHeaders = () => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function testColorizedToVideo() {
-  const imagePath = path.resolve('public', 'colorized_eritrean_man.png');
+  const imagePath = path.resolve(repoRoot, 'public', 'colorized_eritrean_man.png');
   if (!fs.existsSync(imagePath)) {
     throw new Error(`Missing input image: ${imagePath}. Run test_colorize.mjs first.`);
   }
@@ -82,7 +131,7 @@ async function testColorizedToVideo() {
       }
 
       const contentType = resultResponse.headers.get('content-type') || '';
-      const outputPath = path.resolve('public', `colorized_to_video_${Date.now()}.mp4`);
+      const outputPath = path.resolve(repoRoot, 'public', `colorized_to_video_${Date.now()}.mp4`);
 
       if (contentType.includes('video/')) {
         const videoBuffer = Buffer.from(await resultResponse.arrayBuffer());

@@ -2570,15 +2570,13 @@ app.post('/api/consult/beauty-advisor', requireBilling('beauty_consult'), async 
         });
 
         const adviceText = (response as any)?.response?.content?.parts?.[0]?.text || '';
-        if (!adviceText) {
-            return res.status(500).json({ error: 'Failed to generate beauty advice' });
-        }
-
-        const recommendations = extractRecommendations(adviceText);
+        const resolvedAdvice = adviceText || buildFallbackBeautyAdvice(serviceDesc, String(notes || ''));
+        const recommendations = extractRecommendations(resolvedAdvice);
 
         res.json({
-            advice: adviceText,
+            advice: resolvedAdvice,
             recommendations: recommendations,
+            fallback: !adviceText,
         });
     } catch (error: any) {
         console.error('Beauty consultant failed:', error);
@@ -2607,6 +2605,18 @@ const extractRecommendations = (text: string): string[] => {
     }
 
     return recommendations.slice(0, 5);
+};
+
+const buildFallbackBeautyAdvice = (serviceDesc: string, notes: string): string => {
+    const sanitizedNotes = String(notes || '').trim() || 'Client requested a polished, wearable result.';
+    return [
+        `Quick salon guidance for ${serviceDesc}:`,
+        '1. Prep skin with a hydrating primer and lightweight long-wear base matched to neck/chest tone.',
+        '2. Use soft, buildable definition on eyes and brows to preserve natural facial structure.',
+        '3. Add controlled color to cheeks and lips, then set strategic zones for camera-ready longevity.',
+        '4. Finish with blend checks in daylight and indoor light to avoid patchiness and flashback.',
+        `Consultation note captured: ${sanitizedNotes}`,
+    ].join('\n');
 };
 
 app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async (req, res) => {

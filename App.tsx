@@ -37,7 +37,6 @@ import {
   registerUser,
   requestPasswordReset,
   setCurrentUserId,
-  subscribeToPlan,
   topUpTokens,
   verifyGooglePlayPurchase,
 } from './services/geminiService';
@@ -88,13 +87,6 @@ const resolveEnvProductId = (...keys: (keyof ImportMetaEnv)[]): string | undefin
   return undefined;
 };
 
-const PLAY_SUBSCRIPTION_PRODUCT_IDS: Record<'pro' | 'enterprise', string> = {
-  pro: resolveEnvProductId('VITE_PLAY_PRODUCT_SUBSCRIPTION_PRO', 'REACT_APP_PLAY_PRODUCT_SUBSCRIPTION_PRO') || 'chromasnap_pro',
-  enterprise:
-    resolveEnvProductId('VITE_PLAY_PRODUCT_SUBSCRIPTION_ENTERPRISE', 'REACT_APP_PLAY_PRODUCT_SUBSCRIPTION_ENTERPRISE') ||
-    'chromasnap_enterprise',
-};
-
 const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
   100: resolveEnvProductId('VITE_PLAY_PRODUCT_TOPUP_100', 'REACT_APP_PLAY_PRODUCT_TOPUP_100') || 'chromasnap_topup_100',
   500: resolveEnvProductId('VITE_PLAY_PRODUCT_TOPUP_500', 'REACT_APP_PLAY_PRODUCT_TOPUP_500') || 'chromasnap_topup_500',
@@ -143,11 +135,7 @@ const ACCOUNT_PRICING_BUNDLES = [
   { label: 'Outfit Studio generation', tokens: FEATURE_ACTION_TOKEN_COST.outfit_tryon },
 ] as const;
 
-const ACCOUNT_PLAN_FALLBACKS: SubscriptionPlan[] = [
-  { id: 'free', name: 'Free', monthlyTokens: 50, maxTopUpPerMonth: 100 },
-  { id: 'pro', name: 'Pro', monthlyTokens: 1000, maxTopUpPerMonth: 5000 },
-  { id: 'enterprise', name: 'Enterprise', monthlyTokens: 10000, maxTopUpPerMonth: 50000 },
-];
+
 
 type WorkspaceTab = 'dashboard' | 'colorizer' | 'animate' | 'beauty-lab' | 'barbershop' | 'outfit' | 'account';
 type Hair360Angle = 'front' | 'left' | 'right' | 'back';
@@ -400,11 +388,6 @@ const App: React.FC = () => {
   const planMonthlyTokens = currentPlan?.monthlyTokens ?? 1;
   const usedThisCycle = Math.max(0, planMonthlyTokens - (subscriptionAccount?.tokenBalance ?? 0));
   const usagePercent = Math.min(100, Math.round((usedThisCycle / planMonthlyTokens) * 100));
-  const pricingPlans = subscriptionPlans.length ? subscriptionPlans : ACCOUNT_PLAN_FALLBACKS;
-  const playSubscriptionRows = [
-    { tier: 'Pro', productId: PLAY_SUBSCRIPTION_PRODUCT_IDS.pro },
-    { tier: 'Enterprise', productId: PLAY_SUBSCRIPTION_PRODUCT_IDS.enterprise },
-  ];
   const playTopUpRows = Object.entries(PLAY_TOPUP_PRODUCT_IDS)
     .map(([tokens, productId]) => ({ tokens: Number(tokens), productId }))
     .sort((left, right) => left.tokens - right.tokens);
@@ -825,42 +808,6 @@ const App: React.FC = () => {
     }
     const storedId = setCurrentUserId(nextId);
     setActiveUserId(storedId);
-  };
-
-  const handleSubscribeTier = async (tier: SubscriptionPlan['id']) => {
-    setBillingLoading(true);
-    setBillingMessage(null);
-    try {
-      if (isAndroidNativePlatform()) {
-        if (tier === 'free') {
-          throw new Error('Manage free-plan downgrade or cancellation from your Google Play subscriptions page.');
-        }
-
-        const availability = await getGooglePlayBillingAvailability();
-        if (!availability.available) {
-          throw new Error(availability.message || 'Google Play Billing is unavailable on this device/build.');
-        }
-
-        const productId = PLAY_SUBSCRIPTION_PRODUCT_IDS[tier as 'pro' | 'enterprise'];
-        if (!productId) {
-          throw new Error(`Missing product mapping for tier: ${tier}`);
-        }
-
-        const purchase = await purchaseGooglePlayProduct('subs', productId);
-        const account = await verifyGooglePlayPurchase('subs', productId, purchase.purchaseToken);
-        setSubscriptionAccount(account);
-        await refreshSubscription();
-        return;
-      }
-
-      const account = await subscribeToPlan(tier);
-      setSubscriptionAccount(account);
-      await refreshSubscription();
-    } catch (error: any) {
-      setBillingMessage(friendlyError(error, 'changePlan'));
-    } finally {
-      setBillingLoading(false);
-    }
   };
 
   const handleTopUp = async () => {
@@ -2680,32 +2627,8 @@ const App: React.FC = () => {
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Subscription plans</div>
-                  <div className="space-y-2">
-                    {pricingPlans.map((plan) => (
-                      <div key={plan.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/80 bg-slate-900/50 px-3 py-2">
-                        <div>
-                          <div className="font-semibold text-white">{plan.name}</div>
-                          <div className="text-[10px] uppercase tracking-wider text-slate-500">{plan.id}</div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-slate-200">{plan.monthlyTokens} tokens / month</div>
-                          <div className="text-[10px] text-slate-500">Top-up cap {plan.maxTopUpPerMonth}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
                   <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Google Play mappings</div>
                   <div className="space-y-2">
-                    {playSubscriptionRows.map((item) => (
-                      <div key={item.tier} className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-3 py-2">
-                        <div className="font-semibold text-white">{item.tier} subscription</div>
-                        <div className="text-[10px] text-slate-400 break-all">{item.productId}</div>
-                      </div>
-                    ))}
                     {playTopUpRows.map((item) => (
                       <div key={item.productId} className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-3 py-2">
                         <div className="font-semibold text-white">{item.tokens} token top-up</div>
@@ -2801,30 +2724,6 @@ const App: React.FC = () => {
                   </div>
                   <div className="text-[10px] text-slate-400">{usedThisCycle} used of {planMonthlyTokens} monthly tokens</div>
                 </div>
-              </div>
-
-              <div className="grid gap-3">
-                {subscriptionPlans.map((plan) => (
-                  <button
-                    key={plan.id}
-                    onClick={() => handleSubscribeTier(plan.id)}
-                    disabled={billingLoading}
-                    className={`rounded-2xl border px-4 py-4 text-left transition-all min-h-[110px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
-                      subscriptionAccount?.tier === plan.id
-                        ? 'border-indigo-500 bg-indigo-500/10 text-white'
-                        : 'border-slate-800 bg-slate-950/50 text-slate-300 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-semibold">{plan.name}</div>
-                      {plan.id === 'pro' && (
-                        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border border-indigo-400/40 bg-indigo-500/10 text-indigo-300">Most Popular</span>
-                      )}
-                    </div>
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400">{plan.monthlyTokens} tokens / month</div>
-                    <div className="text-[10px] text-slate-400">Top-up cap {plan.maxTopUpPerMonth}</div>
-                  </button>
-                ))}
               </div>
 
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">

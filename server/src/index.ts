@@ -137,17 +137,110 @@ const PLAN_CONFIG: Record<SubscriptionTier, PlanConfig> = {
 };
 
 const ACTION_TOKEN_COST: Record<string, number> = {
-    colorize: 8,
-    upscale: 5,
-    vibrancy: 2,
-    sharpen: 2,
-    animate_start: 20,
-    beauty_consult: 3,
-    virtual_makeup: 5,
-    outfit_tryon: 6,
-    occasion_recommend: 3,
-    beauty_profile_analysis: 2,
-    complexion_report: 2,
+    colorize: 3,
+    upscale: 1,
+    vibrancy: 1,
+    sharpen: 1,
+    animate_start: 54,
+    beauty_consult: 1,
+    virtual_makeup: 3,
+    outfit_tryon: 3,
+    occasion_recommend: 1,
+    beauty_profile_analysis: 1,
+    complexion_report: 1,
+};
+
+const GEMINI_25_FLASH_INPUT_USD_PER_1M = 0.3;
+const GEMINI_25_FLASH_OUTPUT_USD_PER_1M = 2.5;
+const GEMINI_25_FLASH_IMAGE_OUTPUT_USD_PER_IMAGE = 0.039;
+const IMAGEN3_USD_PER_IMAGE = 0.04;
+const VEO_FAST_USD_PER_SECOND = 0.1;
+const VEO_STANDARD_USD_PER_SECOND = 0.4;
+const VEO2_USD_PER_SECOND = 0.35;
+const DEFAULT_VEO_DURATION_SECONDS = 8;
+
+type NormalizedUsageMetadata = {
+    promptTokens: number;
+    candidateTokens: number;
+    totalTokens: number;
+};
+
+const roundUsd = (amount: number) => Number(amount.toFixed(6));
+
+const extractUsageMetadata = (response: any): any => (
+    response?.usageMetadata ||
+    response?.response?.usageMetadata ||
+    response?.response?.response?.usageMetadata ||
+    null
+);
+
+const toFiniteNumber = (value: any): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+const normalizeUsageMetadata = (usage: any): NormalizedUsageMetadata | null => {
+    if (!usage || typeof usage !== 'object') return null;
+    const promptTokens = toFiniteNumber(usage.promptTokenCount ?? usage.inputTokenCount);
+    const candidateTokens = toFiniteNumber(usage.candidatesTokenCount ?? usage.outputTokenCount);
+    const totalTokens = toFiniteNumber(usage.totalTokenCount);
+
+    if (promptTokens <= 0 && candidateTokens <= 0 && totalTokens <= 0) {
+        return null;
+    }
+
+    return {
+        promptTokens,
+        candidateTokens,
+        totalTokens,
+    };
+};
+
+const estimateGemini25FlashTextCostUsd = (usage: NormalizedUsageMetadata | null): number | null => {
+    if (!usage) return null;
+    const promptCost = (usage.promptTokens / 1_000_000) * GEMINI_25_FLASH_INPUT_USD_PER_1M;
+    const outputCost = (usage.candidateTokens / 1_000_000) * GEMINI_25_FLASH_OUTPUT_USD_PER_1M;
+    return roundUsd(promptCost + outputCost);
+};
+
+const estimateAnimationCostUsd = (model: string, durationSeconds: number = DEFAULT_VEO_DURATION_SECONDS): number => {
+    const normalizedModel = String(model || '').toLowerCase();
+    const rate = normalizedModel.includes('veo-2.0')
+        ? VEO2_USD_PER_SECOND
+        : normalizedModel.includes('fast')
+            ? VEO_FAST_USD_PER_SECOND
+            : VEO_STANDARD_USD_PER_SECOND;
+    return roundUsd(rate * durationSeconds);
+};
+
+const logProviderUsageEstimate = (
+    req: express.Request,
+    payload: {
+        action: string;
+        route: string;
+        model: string;
+        estimatedCostUsd?: number | null;
+        usageMetadata?: NormalizedUsageMetadata | null;
+        details?: Record<string, unknown>;
+    }
+) => {
+    if (process.env.LOG_PROVIDER_USAGE === 'false') return;
+
+    const billingReq = req as BillingRequest;
+    const traceId = String(req.headers['x-cloud-trace-context'] || '').split('/')[0] || 'n/a';
+    const userId = billingReq.authUser?.username?.trim() || billingReq.billingUserId || getUserIdFromRequest(req) || 'unknown';
+
+    console.info('[provider-usage]', JSON.stringify({
+        traceId,
+        userId,
+        action: payload.action,
+        route: payload.route,
+        model: payload.model,
+        estimatedCostUsd: payload.estimatedCostUsd ?? null,
+        usageMetadata: payload.usageMetadata || null,
+        details: payload.details || null,
+        timestamp: new Date().toISOString(),
+    }));
 };
 
 const BILLING_HEADER = 'x-user-id';
@@ -1269,7 +1362,10 @@ const generateVeoVertexVideoUri = async (model: string, base64Data: string, mime
 
 };
 
-const generateAnimationVideoUri = async (base64Data: string, mimeType: string): Promise<string> => {
+const generateAnimationVideoUri = async (
+    base64Data: string,
+    mimeType: string
+): Promise<{ videoUri: string; model: string; durationSeconds: number }> => {
     const normalized = await normalizeAnimationImage(base64Data);
     const modelCandidates = getAnimationModelCandidates();
     const errors: string[] = [];
@@ -1284,10 +1380,14 @@ const generateAnimationVideoUri = async (base64Data: string, mimeType: string): 
         try {
             if (model === 'veo-2.0-generate-001' || /veo-3\.1-.*-001/.test(model) || /veo-3\.1-.*-preview/.test(model) || /veo-3\.0-.*/.test(model)) {
                 const uri = await generateVeoVertexVideoUri(model, normalized.imageBytes, normalized.mimeType);
-                if (uri) return uri;
+                if (uri) {
+                    return { videoUri: uri, model, durationSeconds: DEFAULT_VEO_DURATION_SECONDS };
+                }
             } else if (model.startsWith('veo-3.1')) {
                 const uri = await generateVeo31VideoUri(model, normalized.imageBytes, normalized.mimeType);
-                if (uri) return uri;
+                if (uri) {
+                    return { videoUri: uri, model, durationSeconds: DEFAULT_VEO_DURATION_SECONDS };
+                }
             } else {
                 const ai = createAI();
                 let operation = await ai.models.generateVideos({
@@ -1315,7 +1415,9 @@ const generateAnimationVideoUri = async (base64Data: string, mimeType: string): 
 
                 const opErr = (operation as any)?.error?.message || (operation as any)?.response?.error?.message;
                 const videoUri = extractVideoUriFromOperation(operation);
-                if (videoUri) return videoUri;
+                if (videoUri) {
+                    return { videoUri, model, durationSeconds: DEFAULT_VEO_DURATION_SECONDS };
+                }
 
                 const responseShape = {
                     operationName: (operation as any)?.name,
@@ -2438,6 +2540,12 @@ app.post('/api/colorize', requireBilling('colorize'), async (req, res) => {
         const { image } = req.body;
         if (!image) return res.status(400).json({ error: 'Image data required' });
         const dataUrl = await runColorization(image);
+        logProviderUsageEstimate(req, {
+            action: 'colorize',
+            route: '/api/colorize',
+            model: 'imagen-3.0-capability-001|gemini-2.5-flash-image-fallback',
+            estimatedCostUsd: IMAGEN3_USD_PER_IMAGE,
+        });
         res.json({ image: dataUrl });
     } catch (error: any) {
         console.error("Colorization failed:", error);
@@ -2451,6 +2559,12 @@ app.post('/api/process/colorize', requireBilling('colorize'), async (req, res) =
         const { image } = req.body;
         if (!image) return res.status(400).json({ error: 'Image data required' });
         const dataUrl = await runColorization(image);
+        logProviderUsageEstimate(req, {
+            action: 'colorize',
+            route: '/api/process/colorize',
+            model: 'imagen-3.0-capability-001|gemini-2.5-flash-image-fallback',
+            estimatedCostUsd: IMAGEN3_USD_PER_IMAGE,
+        });
         res.json({ result: dataUrl });
     } catch (error: any) {
         console.error('Colorization failed:', error);
@@ -2500,6 +2614,12 @@ app.post('/api/process/upscale', requireBilling('upscale'), async (req, res) => 
 
         const outputBuffer = await pipeline.toBuffer();
         const resultBase64 = outputBuffer.toString('base64');
+        logProviderUsageEstimate(req, {
+            action: 'upscale',
+            route: '/api/process/upscale',
+            model: 'sharp-local',
+            estimatedCostUsd: 0.005,
+        });
         res.json({ result: `data:${mimeType};base64,${resultBase64}` });
     } catch (error: any) {
         console.error('Upscaling failed:', error);
@@ -2524,6 +2644,12 @@ app.post('/api/process/vibrancy', requireBilling('vibrancy'), async (req, res) =
             .toBuffer();
 
         const resultBase64 = outputBuffer.toString('base64');
+        logProviderUsageEstimate(req, {
+            action: 'vibrancy',
+            route: '/api/process/vibrancy',
+            model: 'sharp-local',
+            estimatedCostUsd: 0.002,
+        });
         res.json({ result: `data:${mimeType};base64,${resultBase64}` });
     } catch (error: any) {
         console.error('Vibrancy enhancement failed:', error);
@@ -2572,6 +2698,17 @@ app.post('/api/consult/beauty-advisor', requireBilling('beauty_consult'), async 
         const adviceText = (response as any)?.response?.content?.parts?.[0]?.text || '';
         const resolvedAdvice = adviceText || buildFallbackBeautyAdvice(serviceDesc, String(notes || ''));
         const recommendations = extractRecommendations(resolvedAdvice);
+        const usageMetadata = normalizeUsageMetadata(extractUsageMetadata(response));
+        const estimatedCostUsd = estimateGemini25FlashTextCostUsd(usageMetadata);
+
+        logProviderUsageEstimate(req, {
+            action: 'beauty_consult',
+            route: '/api/consult/beauty-advisor',
+            model: 'gemini-2.5-flash',
+            usageMetadata,
+            estimatedCostUsd,
+            details: { fallback: !adviceText, recommendationsCount: recommendations.length },
+        });
 
         res.json({
             advice: resolvedAdvice,
@@ -2658,6 +2795,19 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
             )
             : selfie;
 
+        const estimatedCostUsd = shouldGenerateImage ? GEMINI_25_FLASH_IMAGE_OUTPUT_USD_PER_IMAGE : 0;
+        logProviderUsageEstimate(req, {
+            action: 'virtual_makeup',
+            route: '/api/generate/virtual-makeup',
+            model: 'gemini-2.5-flash-image',
+            estimatedCostUsd,
+            details: {
+                generatedImage: shouldGenerateImage,
+                cameraView: normalizedView,
+                styleIntensity: normalizedIntensity,
+            },
+        });
+
         res.json({
             editedImage,
             description,
@@ -2721,6 +2871,23 @@ app.post('/api/generate/outfit-tryon', requireBilling('outfit_tryon'), async (re
             : [{ title: 'Primary Look', editedImage: selfie, description }];
 
         const editedImage = looks[0]?.editedImage || selfie;
+
+        const estimatedCostUsd = shouldGenerateImage
+            ? roundUsd(GEMINI_25_FLASH_IMAGE_OUTPUT_USD_PER_IMAGE * looks.length)
+            : 0;
+
+        logProviderUsageEstimate(req, {
+            action: 'outfit_tryon',
+            route: '/api/generate/outfit-tryon',
+            model: 'gemini-2.5-flash-image',
+            estimatedCostUsd,
+            details: {
+                mode: normalizedMode,
+                generatedLooks: looks.length,
+                requestedBatchCount: normalizedBatchCount,
+                generatedImage: shouldGenerateImage,
+            },
+        });
 
         res.json({
             editedImage,
@@ -2790,6 +2957,18 @@ app.post('/api/recommend/occasion-look', requireBilling('occasion_recommend'), a
                 message: 'Showing curated fallback recommendations while AI output is being normalized.',
             });
         }
+
+        const usageMetadata = normalizeUsageMetadata(extractUsageMetadata(response));
+        const estimatedCostUsd = estimateGemini25FlashTextCostUsd(usageMetadata);
+
+        logProviderUsageEstimate(req, {
+            action: 'occasion_recommend',
+            route: '/api/recommend/occasion-look',
+            model: 'gemini-2.5-flash',
+            usageMetadata,
+            estimatedCostUsd,
+            details: { recommendationsCount: recommendations.length },
+        });
 
         res.json({
             recommendations: recommendations,
@@ -2894,6 +3073,9 @@ Return ONLY the JSON object, nothing else.`;
             return res.status(500).json({ error: 'Failed to analyze beauty profile' });
         }
 
+        const usageMetadata = normalizeUsageMetadata(extractUsageMetadata(response));
+        const estimatedCostUsd = estimateGemini25FlashTextCostUsd(usageMetadata);
+
         // Clean up the response - remove markdown code blocks if present
         analysisText = analysisText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
@@ -2960,6 +3142,14 @@ Return ONLY the JSON object, nothing else.`;
             },
             recommendations: Array.isArray(analysis.recommendations) ? analysis.recommendations : [],
         });
+
+        logProviderUsageEstimate(req, {
+            action: 'beauty_profile_analysis',
+            route: '/api/analyze/beauty-profile',
+            model: 'gemini-2.5-flash',
+            usageMetadata,
+            estimatedCostUsd,
+        });
     } catch (error: any) {
         console.error('Beauty profile analysis failed:', error);
         res.status(500).json({ error: error.message || 'Beauty profile analysis failed' });
@@ -3008,6 +3198,9 @@ app.post('/api/analyze/complexion-report', requireBilling('complexion_report'), 
             return res.status(500).json({ error: 'Failed to generate complexion report' });
         }
 
+        const usageMetadata = normalizeUsageMetadata(extractUsageMetadata(response));
+        const estimatedCostUsd = estimateGemini25FlashTextCostUsd(usageMetadata);
+
         rawText = rawText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
         let parsed: any;
@@ -3035,6 +3228,14 @@ app.post('/api/analyze/complexion-report', requireBilling('complexion_report'), 
             disclaimer: String(parsed?.disclaimer || 'Cosmetic complexion guidance only. This report is not a medical diagnosis.'),
         };
 
+        logProviderUsageEstimate(req, {
+            action: 'complexion_report',
+            route: '/api/analyze/complexion-report',
+            model: 'gemini-2.5-flash',
+            usageMetadata,
+            estimatedCostUsd,
+        });
+
         res.json(payload);
     } catch (error: any) {
         console.error('Complexion report failed:', error);
@@ -3059,6 +3260,12 @@ app.post('/api/process/sharpen', requireBilling('sharpen'), async (req, res) => 
             .toBuffer();
 
         const resultBase64 = outputBuffer.toString('base64');
+        logProviderUsageEstimate(req, {
+            action: 'sharpen',
+            route: '/api/process/sharpen',
+            model: 'sharp-local',
+            estimatedCostUsd: 0.002,
+        });
         res.json({ result: `data:${mimeType};base64,${resultBase64}` });
     } catch (error: any) {
         console.error('Sharpening failed:', error);
@@ -3082,8 +3289,15 @@ app.post('/api/process/animate/start', requireBilling('animate_start'), async (r
 
         void (async () => {
             try {
-                const videoUri = await generateAnimationVideoUri(base64Data, mimeType);
-                animationJobs.set(jobId, { status: 'done', createdAt: Date.now(), videoUrl: videoUri, userId });
+                const animationResult = await generateAnimationVideoUri(base64Data, mimeType);
+                animationJobs.set(jobId, { status: 'done', createdAt: Date.now(), videoUrl: animationResult.videoUri, userId });
+                logProviderUsageEstimate(req, {
+                    action: 'animate_start',
+                    route: '/api/process/animate/start',
+                    model: animationResult.model,
+                    estimatedCostUsd: estimateAnimationCostUsd(animationResult.model, animationResult.durationSeconds),
+                    details: { jobId, durationSeconds: animationResult.durationSeconds },
+                });
             } catch (error: any) {
                 animationJobs.set(jobId, {
                     status: 'error',
@@ -3193,15 +3407,23 @@ app.post('/api/process/animate', requireBilling('animate_start'), async (req, re
         const base64Data = hasPrefix ? image.split(',')[1] : image;
         const mimeType = hasPrefix ? (image.split(';')[0].split(':')[1] || 'image/png') : 'image/png';
 
-        const videoUri = await generateAnimationVideoUri(base64Data, mimeType);
+        const animationResult = await generateAnimationVideoUri(base64Data, mimeType);
 
-        let videoResponse = await fetch(videoUri);
+        let videoResponse = await fetch(animationResult.videoUri);
         if (!videoResponse.ok) {
             const token = await getCloudAccessToken();
             if (token) {
-                videoResponse = await fetch(videoUri, { headers: { Authorization: `Bearer ${token}` } });
+                videoResponse = await fetch(animationResult.videoUri, { headers: { Authorization: `Bearer ${token}` } });
             }
         }
+
+        logProviderUsageEstimate(req, {
+            action: 'animate_start',
+            route: '/api/process/animate',
+            model: animationResult.model,
+            estimatedCostUsd: estimateAnimationCostUsd(animationResult.model, animationResult.durationSeconds),
+            details: { durationSeconds: animationResult.durationSeconds },
+        });
 
         if (videoResponse.ok) {
             const buffer = Buffer.from(await videoResponse.arrayBuffer());
@@ -3209,7 +3431,7 @@ app.post('/api/process/animate', requireBilling('animate_start'), async (req, re
             return res.send(buffer);
         }
 
-        return res.json({ videoUrl: videoUri });
+        return res.json({ videoUrl: animationResult.videoUri });
     } catch (error: any) {
         console.error('Animation failed:', error);
         res.status(500).json({ error: error.message || 'Animation failed' });
@@ -3226,8 +3448,15 @@ app.post('/api/animate', requireBilling('animate_start'), async (req, res) => {
         const base64Data = hasPrefix ? image.split(',')[1] : image;
         const mimeType = hasPrefix ? (image.split(';')[0].split(':')[1] || 'image/png') : 'image/png';
 
-        const videoLink = await generateAnimationVideoUri(base64Data, mimeType);
-        res.json({ videoUrl: videoLink });
+        const animationResult = await generateAnimationVideoUri(base64Data, mimeType);
+        logProviderUsageEstimate(req, {
+            action: 'animate_start',
+            route: '/api/animate',
+            model: animationResult.model,
+            estimatedCostUsd: estimateAnimationCostUsd(animationResult.model, animationResult.durationSeconds),
+            details: { durationSeconds: animationResult.durationSeconds },
+        });
+        res.json({ videoUrl: animationResult.videoUri });
     } catch (error: any) {
         console.error("Animation failed:", error);
         res.status(500).json({ error: error.message || 'Animation failed' });

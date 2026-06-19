@@ -103,6 +103,52 @@ const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
     'chromasnap_topup_1000',
 };
 
+const FEATURE_ACTION_TOKEN_COST = {
+  colorize: 3,
+  upscale: 1,
+  vibrancy: 1,
+  sharpen: 1,
+  animate_start: 54,
+  beauty_consult: 1,
+  virtual_makeup: 3,
+  outfit_tryon: 3,
+  occasion_recommend: 1,
+  beauty_profile_analysis: 1,
+  complexion_report: 1,
+} as const;
+
+const ACCOUNT_PRICING_ROWS = [
+  { workspace: 'Colorizer', label: 'Colorize', tokens: FEATURE_ACTION_TOKEN_COST.colorize, note: 'Main image colorization request.' },
+  { workspace: 'Colorizer', label: '4K Upscale', tokens: FEATURE_ACTION_TOKEN_COST.upscale, note: 'Optional enhancement after colorization.' },
+  { workspace: 'Colorizer', label: 'Vibrant', tokens: FEATURE_ACTION_TOKEN_COST.vibrancy, note: 'Optional saturation enhancement.' },
+  { workspace: 'Colorizer', label: 'Sharpen', tokens: FEATURE_ACTION_TOKEN_COST.sharpen, note: 'Optional detail enhancement.' },
+  { workspace: 'Animate', label: 'Animate / Animate This Photo', tokens: FEATURE_ACTION_TOKEN_COST.animate_start, note: 'Charged when the animation job starts.' },
+  { workspace: 'Beauty Lab', label: 'Get Ideas', tokens: FEATURE_ACTION_TOKEN_COST.occasion_recommend, note: 'Occasion-based recommendation set.' },
+  { workspace: 'Beauty Lab', label: 'Consult Notes', tokens: FEATURE_ACTION_TOKEN_COST.beauty_consult, note: 'Written beauty consultation based on your notes.' },
+  { workspace: 'Beauty Lab', label: 'Generate', tokens: FEATURE_ACTION_TOKEN_COST.virtual_makeup, note: 'Creates the Beauty Lab after-image.' },
+  { workspace: 'Beauty Lab', label: 'Generate 360 Preview', tokens: FEATURE_ACTION_TOKEN_COST.virtual_makeup, note: 'Single non-image preview call for the 360 hairstyle summary.' },
+  { workspace: 'Beauty Lab', label: 'Analyze Profile', tokens: FEATURE_ACTION_TOKEN_COST.beauty_profile_analysis, note: 'Face, skin, eye, and hair analysis.' },
+  { workspace: 'Beauty Lab', label: 'Complexion Report', tokens: FEATURE_ACTION_TOKEN_COST.complexion_report, note: 'Complexion scan and recommended adjustments.' },
+  { workspace: 'Barbershop', label: 'Get Ideas', tokens: FEATURE_ACTION_TOKEN_COST.occasion_recommend, note: 'Barbershop recommendation set.' },
+  { workspace: 'Barbershop', label: 'Generate Look', tokens: FEATURE_ACTION_TOKEN_COST.virtual_makeup, note: 'Creates the barbershop after-image.' },
+  { workspace: 'Barbershop', label: 'Left / Right / Back angle', tokens: FEATURE_ACTION_TOKEN_COST.virtual_makeup, note: 'Each non-front angle is billed the first time it is generated, then cached for the session.' },
+  { workspace: 'Outfit Studio', label: 'Generate Outfit', tokens: FEATURE_ACTION_TOKEN_COST.outfit_tryon, note: 'One request charge even if 2 or 3 looks are returned.' },
+] as const;
+
+const ACCOUNT_PRICING_BUNDLES = [
+  { label: 'Colorize image', tokens: FEATURE_ACTION_TOKEN_COST.colorize },
+  { label: 'Animate image', tokens: FEATURE_ACTION_TOKEN_COST.animate_start },
+  { label: 'Barbershop full flow', tokens: FEATURE_ACTION_TOKEN_COST.occasion_recommend + FEATURE_ACTION_TOKEN_COST.virtual_makeup },
+  { label: 'Beauty Lab core flow', tokens: FEATURE_ACTION_TOKEN_COST.occasion_recommend + FEATURE_ACTION_TOKEN_COST.beauty_consult + FEATURE_ACTION_TOKEN_COST.virtual_makeup },
+  { label: 'Outfit Studio generation', tokens: FEATURE_ACTION_TOKEN_COST.outfit_tryon },
+] as const;
+
+const ACCOUNT_PLAN_FALLBACKS: SubscriptionPlan[] = [
+  { id: 'free', name: 'Free', monthlyTokens: 50, maxTopUpPerMonth: 100 },
+  { id: 'pro', name: 'Pro', monthlyTokens: 1000, maxTopUpPerMonth: 5000 },
+  { id: 'enterprise', name: 'Enterprise', monthlyTokens: 10000, maxTopUpPerMonth: 50000 },
+];
+
 type WorkspaceTab = 'dashboard' | 'colorizer' | 'animate' | 'beauty-lab' | 'barbershop' | 'outfit' | 'account';
 type Hair360Angle = 'front' | 'left' | 'right' | 'back';
 type LookRecommendation = { style: string; makeup: string; hair: string; description: string };
@@ -117,6 +163,8 @@ type ComplexionHistoryEntry = {
   recommendedMakeupStyle: 'natural' | 'bold' | 'smokey-eye' | 'glam' | 'editorial' | 'dewy';
   recommendedStyleIntensity: 'subtle' | 'balanced' | 'dramatic';
 };
+
+const NO_HAIRSTYLE_CHANGE_VALUE = 'none';
 
 const blobToDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -147,6 +195,60 @@ const loadImageElement = (source: string): Promise<HTMLImageElement> =>
     image.onerror = () => reject(new Error('Could not render consultation card images.'));
     image.src = source;
   });
+
+const isLikelyBlankGeneratedImage = async (source: string): Promise<boolean> => {
+  try {
+    const image = await loadImageElement(source);
+    if (image.naturalWidth <= 4 || image.naturalHeight <= 4) {
+      return true;
+    }
+
+    const canvas = document.createElement('canvas');
+    const sampleWidth = Math.max(1, Math.min(64, image.naturalWidth));
+    const sampleHeight = Math.max(1, Math.min(64, image.naturalHeight));
+    canvas.width = sampleWidth;
+    canvas.height = sampleHeight;
+
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) {
+      return false;
+    }
+
+    context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+    const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
+
+    let totalLuma = 0;
+    let totalLumaSquared = 0;
+    let visiblePixels = 0;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const alpha = data[i + 3];
+      if (alpha < 16) {
+        continue;
+      }
+
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+      visiblePixels += 1;
+      totalLuma += luma;
+      totalLumaSquared += luma * luma;
+    }
+
+    if (visiblePixels === 0) {
+      return true;
+    }
+
+    const meanLuma = totalLuma / visiblePixels;
+    const variance = totalLumaSquared / visiblePixels - meanLuma * meanLuma;
+
+    return meanLuma > 245 && variance < 20;
+  } catch {
+    return false;
+  }
+};
 
 const BEAUTY_SERVICES = [
   { id: 'bridal-glam', label: 'Bridal Glam', description: 'Premium full-face glam workflow for bridal clients.' },
@@ -298,6 +400,14 @@ const App: React.FC = () => {
   const planMonthlyTokens = currentPlan?.monthlyTokens ?? 1;
   const usedThisCycle = Math.max(0, planMonthlyTokens - (subscriptionAccount?.tokenBalance ?? 0));
   const usagePercent = Math.min(100, Math.round((usedThisCycle / planMonthlyTokens) * 100));
+  const pricingPlans = subscriptionPlans.length ? subscriptionPlans : ACCOUNT_PLAN_FALLBACKS;
+  const playSubscriptionRows = [
+    { tier: 'Pro', productId: PLAY_SUBSCRIPTION_PRODUCT_IDS.pro },
+    { tier: 'Enterprise', productId: PLAY_SUBSCRIPTION_PRODUCT_IDS.enterprise },
+  ];
+  const playTopUpRows = Object.entries(PLAY_TOPUP_PRODUCT_IDS)
+    .map(([tokens, productId]) => ({ tokens: Number(tokens), productId }))
+    .sort((left, right) => left.tokens - right.tokens);
 
   const refreshSubscription = async () => {
     setBillingLoading(true);
@@ -1277,17 +1387,23 @@ const App: React.FC = () => {
     }
   };
 
+  const selectedBeautyHairStyle = tryHairStyle === NO_HAIRSTYLE_CHANGE_VALUE ? 'no hairstyle change' : tryHairStyle;
+
   const beautyLabToolkitContext = [
     `Complexion ${complexionOpacity}%: shade ${complexionShadeProfile}, contour ${faceShapeContour}, blush ${accentBlushProfile}`,
     `Eyes ${eyesOpacity}%: liner ${eyelinerPattern}, lashes ${lashOverlayDensity}`,
     `Lips ${lipsOpacity}%: finish ${lipFinish}`,
+    `Primary hair direction: ${selectedBeautyHairStyle}`,
     `Wig track: ${wigTrackStyle}`,
     `Haircut: ${haircutProfile}`,
     `Extensions: ${extensionProfile}`,
     `Color laboratory: ${colorLabDualTone}`,
   ].join(' | ');
 
-  const beautyLabHairDescriptor = `${wigTrackStyle}, ${haircutProfile}, ${extensionProfile}, ${colorLabDualTone}`;
+  const beautyLabHairDescriptor =
+    tryHairStyle === NO_HAIRSTYLE_CHANGE_VALUE
+      ? 'Keep original hairstyle unchanged. Preserve current cut, texture, and silhouette while applying makeup edits only.'
+      : `${selectedBeautyHairStyle}, ${wigTrackStyle}, ${haircutProfile}, ${extensionProfile}, ${colorLabDualTone}`;
 
   const handleGenerateVirtualMakeup = async () => {
     if (!trySelfie) {
@@ -1324,8 +1440,17 @@ const App: React.FC = () => {
         return;
       }
 
+      const normalizedAfterImage = ensureFreshPreviewUrl(result.editedImage);
+      const appearsBlank = await isLikelyBlankGeneratedImage(normalizedAfterImage);
+      if (appearsBlank) {
+        setTryAfterImage(null);
+        setTryResults(singleRec);
+        setTryMessage('The generated image looked blank. Please try Generate again with a different selfie angle or style settings.');
+        return;
+      }
+
       setTryResults(singleRec);
-      setTryAfterImage(ensureFreshPreviewUrl(result.editedImage));
+      setTryAfterImage(normalizedAfterImage);
       setTryMessage('Virtual look generated! Review the description below.');
     } catch (error: any) {
       setTryMessage(friendlyError(error, 'virtual-makeup'));
@@ -1388,6 +1513,13 @@ const App: React.FC = () => {
       }
 
       const normalizedAfterImage = ensureFreshPreviewUrl(result.afterImage);
+      const appearsBlank = await isLikelyBlankGeneratedImage(normalizedAfterImage);
+      if (appearsBlank) {
+        setBarbershopAfterImage(null);
+        setBarbershopMessage('The generated barbershop image looked blank. Please try Generate Look again with adjusted settings.');
+        return;
+      }
+
       setBarbershopAfterImage(normalizedAfterImage);
       setBarbershopMessage(result.message || 'Barbershop look generated!');
     } catch (error: any) {
@@ -1434,13 +1566,21 @@ const App: React.FC = () => {
       );
 
       const validLooks: OutfitLookVariant[] = Array.isArray(result.looks) && result.looks.length
-        ? result.looks
-          .filter((look) => typeof look?.editedImage === 'string' && look.editedImage.length > 0 && look.editedImage !== outfitSelfie)
-          .map((look, index) => ({
+        ? (await Promise.all(result.looks.map(async (look, index) => {
+          if (typeof look?.editedImage !== 'string' || look.editedImage.length === 0 || look.editedImage === outfitSelfie) {
+            return null;
+          }
+          const normalizedImage = ensureFreshPreviewUrl(look.editedImage);
+          const appearsBlank = await isLikelyBlankGeneratedImage(normalizedImage);
+          if (appearsBlank) {
+            return null;
+          }
+          return {
             title: look.title || `Look ${index + 1}`,
-            editedImage: ensureFreshPreviewUrl(look.editedImage),
+            editedImage: normalizedImage,
             description: look.description || result.description || '',
-          }))
+          };
+        }))).filter((look): look is OutfitLookVariant => look !== null)
         : [];
 
       const hasPrimaryAfterImage =
@@ -1448,20 +1588,25 @@ const App: React.FC = () => {
         result.editedImage.length > 0 &&
         result.editedImage !== outfitSelfie;
 
-      const normalizedLooks: OutfitLookVariant[] = validLooks.length
-        ? validLooks
-        : hasPrimaryAfterImage
-          ? [{
+      let primaryLook: OutfitLookVariant[] = [];
+      if (hasPrimaryAfterImage) {
+        const normalizedPrimary = ensureFreshPreviewUrl(result.editedImage);
+        const primaryLooksBlank = await isLikelyBlankGeneratedImage(normalizedPrimary);
+        if (!primaryLooksBlank) {
+          primaryLook = [{
             title: 'Primary Look',
-            editedImage: ensureFreshPreviewUrl(result.editedImage),
+            editedImage: normalizedPrimary,
             description: result.description || '',
-          }]
-          : [];
+          }];
+        }
+      }
+
+      const normalizedLooks: OutfitLookVariant[] = validLooks.length ? validLooks : primaryLook;
 
       if (!normalizedLooks.length) {
         setOutfitLooks(null);
         setOutfitAfterImage(null);
-        setOutfitMessage('Outfit guidance generated, but no after-image was returned. Please try Generate Outfit again.');
+        setOutfitMessage('Outfit guidance generated, but the returned image looked blank or unusable. Please try Generate Outfit again.');
         return;
       }
 
@@ -2494,7 +2639,90 @@ const App: React.FC = () => {
           </div>
 
           {accountTab === 'overview' && (
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-300" />
+            <div className="space-y-4 text-xs text-slate-300">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                {ACCOUNT_PRICING_BUNDLES.map((item) => (
+                  <div key={item.label} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-3">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{item.label}</div>
+                    <div className="mt-2 text-lg font-semibold text-white">{item.tokens} tokens</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Feature pricing</div>
+                  <div className="text-[10px] text-slate-500">Token-based billing from the backend pricing table</div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-[11px]">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-[10px] uppercase tracking-widest text-slate-500">
+                        <th className="pb-2 pr-4 font-semibold">Workspace</th>
+                        <th className="pb-2 pr-4 font-semibold">Action</th>
+                        <th className="pb-2 pr-4 font-semibold">Tokens</th>
+                        <th className="pb-2 font-semibold">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ACCOUNT_PRICING_ROWS.map((row) => (
+                        <tr key={`${row.workspace}-${row.label}`} className="border-b border-slate-900/70 align-top">
+                          <td className="py-2 pr-4 text-slate-400">{row.workspace}</td>
+                          <td className="py-2 pr-4 text-slate-200">{row.label}</td>
+                          <td className="py-2 pr-4 text-white font-semibold">{row.tokens}</td>
+                          <td className="py-2 text-slate-400">{row.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Subscription plans</div>
+                  <div className="space-y-2">
+                    {pricingPlans.map((plan) => (
+                      <div key={plan.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/80 bg-slate-900/50 px-3 py-2">
+                        <div>
+                          <div className="font-semibold text-white">{plan.name}</div>
+                          <div className="text-[10px] uppercase tracking-wider text-slate-500">{plan.id}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-slate-200">{plan.monthlyTokens} tokens / month</div>
+                          <div className="text-[10px] text-slate-500">Top-up cap {plan.maxTopUpPerMonth}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Google Play mappings</div>
+                  <div className="space-y-2">
+                    {playSubscriptionRows.map((item) => (
+                      <div key={item.tier} className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-3 py-2">
+                        <div className="font-semibold text-white">{item.tier} subscription</div>
+                        <div className="text-[10px] text-slate-400 break-all">{item.productId}</div>
+                      </div>
+                    ))}
+                    {playTopUpRows.map((item) => (
+                      <div key={item.productId} className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-3 py-2">
+                        <div className="font-semibold text-white">{item.tokens} token top-up</div>
+                        <div className="text-[10px] text-slate-400 break-all">{item.productId}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2 text-[11px] text-amber-100/90">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-300">Purchase flow notes</div>
+                <div>Web and local development can use direct plan changes and token top-ups when billing mutations are enabled.</div>
+                <div>Android production flow is Google Play purchase, then backend verification through `/api/billing/google-play/verify`.</div>
+                <div>Use `npm run pricing:features:json` for a machine-readable export of the same pricing matrix.</div>
+              </div>
+            </div>
           )}
 
           {accountTab === 'account-details' && (
@@ -2763,6 +2991,7 @@ const App: React.FC = () => {
                 className="w-full rounded-xl bg-slate-950/60 border border-amber-400/40 px-3 py-3 text-xs text-amber-100 focus:outline-none focus:border-amber-300"
               >
                 <optgroup label="General Styles">
+                  <option value="none">None (keep current hairstyle)</option>
                   {GENERAL_HAIRSTYLE_OPTIONS.map((style) => (
                     <option key={style.value} value={style.value}>{style.label}</option>
                   ))}
@@ -2948,7 +3177,7 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="w-full space-y-6 sm:space-y-8 xl:col-start-2 max-w-xl xl:max-w-none mx-auto xl:mx-0">
+        <div className="w-full min-w-0 space-y-6 sm:space-y-8 xl:col-start-2 max-w-xl xl:max-w-none mx-auto xl:mx-0">
 
         {activeWorkspaceTab === 'dashboard' && (
         <div
@@ -3112,36 +3341,38 @@ const App: React.FC = () => {
             <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2 sm:overflow-x-auto sm:whitespace-nowrap sm:pb-1">
               <button
                 onClick={() => tryUploadInputRef.current?.click()}
-                className="inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
               >
                 Upload
               </button>
               <button
                 onClick={() => tryCameraInputRef.current?.click()}
-                className="inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-rose-400"
               >
                 Camera
               </button>
               <button
                 onClick={handleGenerateVirtualMakeup}
                 disabled={tryLoading || !trySelfie}
-                className="inline-flex min-w-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-amber-100 hover:bg-amber-500/30 disabled:opacity-50"
               >
                 {tryLoading ? 'Generating...' : 'Generate'}
               </button>
               <button
                 onClick={handleDownloadTryOn}
                 disabled={!tryAfterImage}
-                className="inline-flex min-w-0 items-center justify-center rounded-full border border-indigo-500/40 bg-indigo-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-indigo-500/40 bg-indigo-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-indigo-100 hover:bg-indigo-500/30 disabled:opacity-50"
               >
-                Download Photo
+                <span className="studio-label-full">Download Photo</span>
+                <span className="studio-label-short">Download</span>
               </button>
               <button
                 onClick={handleSaveBeautyConsultationSheet}
                 disabled={!tryAfterImage}
-                className="inline-flex min-w-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
               >
-                Download Card
+                <span className="studio-label-full">Download Card</span>
+                <span className="studio-label-short">Card</span>
               </button>
               {trySelfie && (
                 <button
@@ -3154,7 +3385,7 @@ const App: React.FC = () => {
                     setHair360Previews(null);
                     setHair360Message(null);
                   }}
-                  className="inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
+                  className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
                 >
                   Reset
                 </button>
@@ -3439,11 +3670,11 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'barbershop' && (
         <div
           id="barbershop-panel"
-          className="studio-shell-enter w-full rounded-3xl border transition-all border-emerald-500/50 bg-emerald-500/5 shadow-lg shadow-emerald-500/10 overflow-hidden"
+          className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-emerald-500/50 bg-emerald-500/5 shadow-lg shadow-emerald-500/10 overflow-hidden"
         >
-          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center">
+          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center min-w-0">
             {barbershopSelfie ? (
-              <div className="w-full h-full grid md:grid-cols-2 gap-px bg-slate-800/60">
+              <div className="w-full h-full min-w-0 grid md:grid-cols-2 gap-px bg-slate-800/60">
                 <div className="flex flex-col bg-slate-950/70">
                   <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">Before</div>
                   <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-full object-contain bg-slate-950" />
@@ -3472,40 +3703,50 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-emerald-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
-            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-emerald-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto min-w-0">
+            <div className="grid grid-cols-2 gap-2 md:flex md:items-center md:gap-2 md:overflow-x-auto md:whitespace-nowrap md:pb-1">
               <button
                 type="button"
                 onClick={() => barbershopUploadInputRef.current?.click()}
-                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-emerald-400"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-emerald-400 md:shrink-0"
               >
                 Upload
               </button>
               <button
                 type="button"
                 onClick={() => barbershopCameraInputRef.current?.click()}
-                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-emerald-400"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-emerald-400 md:shrink-0"
               >
                 Camera
               </button>
               <button
                 onClick={handleGetBarbershopRecommendations}
                 disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
-                className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50 md:shrink-0"
               >
                 {barbershopRecommendationLoading ? 'Getting...' : 'Get Ideas'}
               </button>
               <button
                 onClick={handleGenerateBarbershopLook}
                 disabled={barbershopRecommendationLoading || barbershopGenerateLoading || !barbershopSelfie}
-                className="inline-flex shrink-0 items-center rounded-full border border-teal-500/40 bg-teal-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-teal-100 hover:bg-teal-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-teal-500/40 bg-teal-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-teal-100 hover:bg-teal-500/30 disabled:opacity-50 md:shrink-0"
               >
-                {barbershopGenerateLoading ? 'Generating...' : 'Generate Look'}
+                {barbershopGenerateLoading ? (
+                  <>
+                    <span className="studio-label-full">Generating...</span>
+                    <span className="studio-label-short">Working...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="studio-label-full">Generate Look</span>
+                    <span className="studio-label-short">Generate</span>
+                  </>
+                )}
               </button>
               <button
                 onClick={handleDownloadBarbershop}
                 disabled={!barbershopAfterImage}
-                className="inline-flex shrink-0 items-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50 md:shrink-0"
               >
                 Download
               </button>
@@ -3520,7 +3761,7 @@ const App: React.FC = () => {
                     setBarbershopGenerateLoading(false);
                     setBarbershopRecommendationLoading(false);
                   }}
-                  className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
+                  className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500 md:shrink-0"
                 >
                   Reset
                 </button>
@@ -3663,11 +3904,11 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'outfit' && (
         <div
           id="outfit-panel"
-          className="studio-shell-enter w-full rounded-3xl border transition-all border-fuchsia-500/50 bg-fuchsia-500/5 shadow-lg shadow-fuchsia-500/10 overflow-hidden"
+          className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-fuchsia-500/50 bg-fuchsia-500/5 shadow-lg shadow-fuchsia-500/10 overflow-hidden"
         >
-          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center">
+          <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center min-w-0">
             {outfitSelfie ? (
-              <div className="w-full h-full grid md:grid-cols-2 gap-px bg-slate-800/60">
+              <div className="w-full h-full min-w-0 grid md:grid-cols-2 gap-px bg-slate-800/60">
                 <div className="flex flex-col bg-slate-950/70">
                   <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">Before</div>
                   <img src={outfitSelfie} alt="Before outfit selfie" className="w-full h-full object-contain bg-slate-950" />
@@ -3691,40 +3932,51 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-fuchsia-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto">
-            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1">
+          <div className="h-[48vh] sm:h-[38vh] lg:h-[30vh] border-t border-fuchsia-400/20 bg-slate-900/65 backdrop-blur-xl p-3 sm:p-4 space-y-3 overflow-y-auto min-w-0">
+            <div className="grid grid-cols-2 gap-2 md:flex md:items-center md:gap-2 md:overflow-x-auto md:whitespace-nowrap md:pb-1">
               <button
                 type="button"
                 onClick={() => outfitUploadInputRef.current?.click()}
-                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-fuchsia-400"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-fuchsia-400 md:shrink-0"
               >
                 Upload
               </button>
               <button
                 type="button"
                 onClick={() => outfitCameraInputRef.current?.click()}
-                className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-fuchsia-400"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-200 hover:border-fuchsia-400 md:shrink-0"
               >
                 Camera
               </button>
               <button
                 type="button"
                 onClick={() => outfitGarmentUploadInputRef.current?.click()}
-                className="inline-flex shrink-0 items-center rounded-full border border-fuchsia-500/40 bg-fuchsia-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-100 hover:bg-fuchsia-500/30"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-fuchsia-500/40 bg-fuchsia-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-100 hover:bg-fuchsia-500/30 md:shrink-0"
               >
-                Upload Garment
+                <span className="studio-label-full">Upload Garment</span>
+                <span className="studio-label-short">Garment</span>
               </button>
               <button
                 onClick={handleGenerateOutfitLook}
                 disabled={outfitLoading || !outfitSelfie}
-                className="inline-flex shrink-0 items-center rounded-full border border-fuchsia-500/40 bg-fuchsia-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-100 hover:bg-fuchsia-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-fuchsia-500/40 bg-fuchsia-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-100 hover:bg-fuchsia-500/30 disabled:opacity-50 md:shrink-0"
               >
-                {outfitLoading ? 'Generating...' : 'Generate Outfit'}
+                {outfitLoading ? (
+                  <>
+                    <span className="studio-label-full">Generating...</span>
+                    <span className="studio-label-short">Working...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="studio-label-full">Generate Outfit</span>
+                    <span className="studio-label-short">Generate</span>
+                  </>
+                )}
               </button>
               <button
                 onClick={handleDownloadOutfit}
                 disabled={!outfitAfterImage}
-                className="inline-flex shrink-0 items-center rounded-full border border-pink-500/40 bg-pink-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-pink-100 hover:bg-pink-500/30 disabled:opacity-50"
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-pink-500/40 bg-pink-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-pink-100 hover:bg-pink-500/30 disabled:opacity-50 md:shrink-0"
               >
                 Download
               </button>
@@ -3740,7 +3992,7 @@ const App: React.FC = () => {
                     setOutfitGarmentImage(null);
                     setOutfitLoading(false);
                   }}
-                  className="inline-flex shrink-0 items-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500"
+                  className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-slate-300 hover:border-slate-500 md:shrink-0"
                 >
                   Reset
                 </button>

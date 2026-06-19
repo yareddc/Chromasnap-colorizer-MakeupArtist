@@ -23,7 +23,11 @@
     "secrets:scan:all-files": "node scripts/run-gitleaks.mjs detect --source . --no-git --redact --config .gitleaks.toml",
     "secrets:scan:staged": "node scripts/run-gitleaks.mjs protect --staged --redact --verbose --config .gitleaks.toml",
     "generate:icons": "node scripts/generate-android-icons.js",
-    "test:e2e:colorize-animate": "node scripts/run-e2e-colorize-animate.mjs"
+    "test:e2e:colorize-animate": "node scripts/run-e2e-colorize-animate.mjs",
+    "pricing:features": "node scripts/calculate-feature-costs.mjs",
+    "pricing:features:json": "node scripts/calculate-feature-costs.mjs --json",
+    "pricing:profitability": "node scripts/analyze-feature-profitability.mjs",
+    "pricing:profitability:json": "node scripts/analyze-feature-profitability.mjs --json"
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.1.0",

@@ -1662,6 +1662,7 @@ const buildVirtualLookDescription = (
 
 const runOutfitTryOnImageEdit = async (
     selfie: string,
+    outfitPrompt: string,
     outfitStyle: string,
     occasion: string,
     colorPalette: string,
@@ -1672,16 +1673,29 @@ const runOutfitTryOnImageEdit = async (
     variantIndex: number,
     totalVariants: number
 ): Promise<string> => {
+    if (!process.env.GCP_PROJECT_ID || !process.env.GCP_LOCATION) {
+        throw new Error('GCP_PROJECT_ID and GCP_LOCATION are required for Outfit Studio image editing');
+    }
+
     const base64Image = await normalizeImageToPngBase64(selfie);
     const normalizedGarmentImage = garmentImage ? await normalizeImageToPngBase64(garmentImage) : null;
-    const ai = createAI();
+    const token = await getCloudAccessToken();
+    if (!token) {
+        throw new Error('Unable to obtain cloud access token for Outfit Studio image editing');
+    }
+
+    const cleanPrompt = String(outfitPrompt || '').trim();
+    if (!cleanPrompt) {
+        throw new Error('Outfit text prompt is required');
+    }
 
     const variationLabel = totalVariants > 1
         ? `This is variation ${variantIndex + 1} of ${totalVariants}; keep it distinct while following the same brief.`
         : 'Generate a single best look.';
 
     const editPrompt = [
-        'Transform this full-body selfie with a photorealistic virtual outfit try-on.',
+        'Transform this full-body selfie using mask-free foreground apparel editing.',
+        `Natural language outfit request: ${cleanPrompt}`,
         `Mode: ${mode}.`,
         `Outfit style: ${outfitStyle || 'smart casual'}.`,
         `Occasion: ${occasion || 'night out'}.`,
@@ -1697,36 +1711,71 @@ const runOutfitTryOnImageEdit = async (
         mode === 'garment'
             ? '- Match the garment silhouette/material details from the reference image as closely as possible while preserving realism.'
             : '- Create an outfit matching the requested style and color palette.',
+        '- Preserve the original face and identity exactly as-is.',
         '- Preserve natural fabric folds, fit, and lighting realism.',
         '- Avoid visual artifacts, extra limbs, or warped anatomy.',
         '- Return one photorealistic edited image.',
     ].join('\n');
 
-    const parts: Array<{ inlineData?: { data: string; mimeType: string }; text?: string }> = [
-        { inlineData: { data: base64Image, mimeType: 'image/png' } },
-    ];
+    const garmentReferenceNote = normalizedGarmentImage
+        ? '\nAdditional reference image was provided by user; follow its silhouette/material cues when feasible.'
+        : '';
 
-    if (normalizedGarmentImage) {
-        parts.push({ inlineData: { data: normalizedGarmentImage, mimeType: 'image/png' } });
+    const modelsToTry = ['imagen-3.0-capability-001', 'imagen-3.0-generate-001'];
+    let parsed: any = {};
+    let lastError = '';
+
+    for (const model of modelsToTry) {
+        const endpoint = `https://${process.env.GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.GCP_PROJECT_ID}/locations/${process.env.GCP_LOCATION}/publishers/google/models/${model}:predict`;
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                instances: [
+                    {
+                        prompt: `${editPrompt}${garmentReferenceNote}`,
+                        context_image: {
+                            bytesBase64Encoded: base64Image,
+                        },
+                    },
+                ],
+                parameters: {
+                    sampleCount: 1,
+                    editConfig: {
+                        editMode: 'EDIT_MODE_INPAINT_INSERTION',
+                    },
+                },
+            }),
+        });
+
+        const responseText = await response.text();
+        if (!response.ok) {
+            lastError = `${model} failed (${response.status}): ${responseText.slice(0, 300)}`;
+            continue;
+        }
+
+        try {
+            parsed = responseText ? JSON.parse(responseText) : {};
+        } catch {
+            lastError = `${model} returned non-JSON response`;
+            continue;
+        }
+
+        const imageBase64Candidate = parsed?.predictions?.[0]?.bytesBase64Encoded;
+        if (typeof imageBase64Candidate === 'string' && imageBase64Candidate.length > 0) {
+            parsed._usedModel = model;
+            break;
+        }
+
+        lastError = `${model} returned no image bytes`;
     }
 
-    parts.push({ text: editPrompt });
-
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: [{
-            role: 'user',
-            parts,
-        }],
-        config: {
-            responseModalities: ['IMAGE'],
-            temperature: 0.35,
-        },
-    });
-
-    const imageBase64 = extractGeminiInlineImageBase64(response);
+    const imageBase64 = parsed?.predictions?.[0]?.bytesBase64Encoded;
     if (!imageBase64) {
-        throw new Error('Outfit try-on image generation returned no image');
+        throw new Error(`Outfit try-on image generation returned no image. ${lastError}`);
     }
 
     return `data:image/png;base64,${imageBase64}`;
@@ -2818,16 +2867,39 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
     }
 });
 
-app.post('/api/generate/outfit-tryon', requireBilling('outfit_tryon'), async (req, res) => {
+app.post('/api/generate/outfit-tryon', async (req, res) => {
     try {
-        const { selfie, outfitStyle, occasion, colorPalette, salonContext, generateImage, mode, garmentLabel, garmentImage, matchCurrentSalonLook, batchCount } = req.body;
+        const { selfie, outfitPrompt, outfitStyle, occasion, colorPalette, salonContext, generateImage, mode, garmentLabel, garmentImage, matchCurrentSalonLook, batchCount } = req.body;
         if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+        if (!String(outfitPrompt || '').trim()) return res.status(400).json({ error: 'Outfit text prompt is required' });
         if (!outfitStyle) return res.status(400).json({ error: 'Outfit style required' });
+
+        const billingReq = req as BillingRequest;
+        const userId = billingReq.authUser?.username?.trim() || billingReq.billingUserId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        billingReq.billingUserId = userId;
+
+        const tokenCost = Math.max(3, ACTION_TOKEN_COST.outfit_tryon ?? 3);
+        const account = await getOrCreateUserAccount(userId);
+        await resetCycleIfNeeded(account);
+        if (account.tokenBalance < tokenCost) {
+            return res.status(402).json({
+                error: 'Insufficient tokens',
+                details: {
+                    required: tokenCost,
+                    available: account.tokenBalance,
+                    action: 'outfit_tryon',
+                    tier: account.tier,
+                },
+            });
+        }
 
         const normalizedMode: 'style' | 'garment' = mode === 'garment' ? 'garment' : 'style';
         const normalizedBatchCount = Number.isFinite(Number(batchCount))
-            ? Math.max(1, Math.min(3, Number(batchCount)))
-            : 3;
+            ? Math.max(2, Math.min(2, Number(batchCount)))
+            : 2;
         const normalizedMatchSalonLook = matchCurrentSalonLook !== false;
 
         if (normalizedMode === 'garment' && !garmentImage && !garmentLabel) {
@@ -2851,6 +2923,7 @@ app.post('/api/generate/outfit-tryon', requireBilling('outfit_tryon'), async (re
             ? await Promise.all(Array.from({ length: normalizedBatchCount }).map(async (_, index) => {
                 const generatedImage = await runOutfitTryOnImageEdit(
                     selfie,
+                    String(outfitPrompt || ''),
                     String(outfitStyle),
                     String(occasion || ''),
                     String(colorPalette || ''),
@@ -2872,20 +2945,24 @@ app.post('/api/generate/outfit-tryon', requireBilling('outfit_tryon'), async (re
 
         const editedImage = looks[0]?.editedImage || selfie;
 
+        // Charge only after upstream image generation completed successfully.
+        await chargeTokens(account, 'outfit_tryon', tokenCost);
+
         const estimatedCostUsd = shouldGenerateImage
-            ? roundUsd(GEMINI_25_FLASH_IMAGE_OUTPUT_USD_PER_IMAGE * looks.length)
+            ? roundUsd(IMAGEN3_USD_PER_IMAGE * looks.length)
             : 0;
 
         logProviderUsageEstimate(req, {
             action: 'outfit_tryon',
             route: '/api/generate/outfit-tryon',
-            model: 'gemini-2.5-flash-image',
+            model: 'imagen-3.0-capability-001',
             estimatedCostUsd,
             details: {
                 mode: normalizedMode,
                 generatedLooks: looks.length,
                 requestedBatchCount: normalizedBatchCount,
                 generatedImage: shouldGenerateImage,
+                naturalLanguagePrompt: String(outfitPrompt || '').trim().slice(0, 200),
             },
         });
 
@@ -2895,6 +2972,7 @@ app.post('/api/generate/outfit-tryon', requireBilling('outfit_tryon'), async (re
             looks,
         });
     } catch (error: any) {
+        if (handleBillingError(res, error)) return;
         console.error('Outfit try-on generation failed:', error);
         res.status(500).json({ error: error.message || 'Outfit try-on generation failed' });
     }

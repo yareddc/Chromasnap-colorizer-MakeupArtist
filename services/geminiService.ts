@@ -635,6 +635,7 @@ export const generateVirtualMakeup = async (
 
 export const generateOutfitTryOn = async (
   selfieBase64: string,
+  outfitPrompt: string,
   outfitStyle: string,
   occasion: string,
   colorPalette: string,
@@ -644,7 +645,7 @@ export const generateOutfitTryOn = async (
     garmentLabel?: string;
     garmentImageBase64?: string;
     matchCurrentSalonLook?: boolean;
-    batchCount?: 1 | 2 | 3;
+    batchCount?: 2;
   }
 ): Promise<{
   editedImage: string;
@@ -657,6 +658,7 @@ export const generateOutfitTryOn = async (
     headers: getJsonHeaders(),
     body: JSON.stringify({
       selfie: selfieBase64,
+      outfitPrompt,
       outfitStyle,
       occasion,
       colorPalette,
@@ -665,7 +667,7 @@ export const generateOutfitTryOn = async (
       garmentLabel: options?.garmentLabel || '',
       garmentImage: options?.garmentImageBase64,
       matchCurrentSalonLook: options?.matchCurrentSalonLook !== false,
-      batchCount: options?.batchCount || 3,
+      batchCount: options?.batchCount || 2,
       generateImage: true,
     }),
   }, 120000);

@@ -335,11 +335,11 @@ const App: React.FC = () => {
   const [outfitAfterImage, setOutfitAfterImage] = useState<string | null>(null);
   const [outfitLooks, setOutfitLooks] = useState<OutfitLookVariant[] | null>(null);
   const [outfitActiveLookIndex, setOutfitActiveLookIndex] = useState(0);
+  const [outfitPrompt, setOutfitPrompt] = useState('An oversized emerald green blazer over a black silk turtleneck.');
   const [outfitStyle, setOutfitStyle] = useState('formal-evening');
   const [outfitMode, setOutfitMode] = useState<'style' | 'garment'>('style');
   const [outfitOccasion, setOutfitOccasion] = useState('night out');
   const [outfitColorPalette, setOutfitColorPalette] = useState('match makeup palette');
-  const [outfitBatchCount, setOutfitBatchCount] = useState<1 | 2 | 3>(3);
   const [outfitMatchCurrentSalonLook, setOutfitMatchCurrentSalonLook] = useState(true);
   const [outfitNotes, setOutfitNotes] = useState('');
   const [outfitGarmentLabel, setOutfitGarmentLabel] = useState('tailored blazer set');
@@ -1489,6 +1489,11 @@ const App: React.FC = () => {
       return;
     }
 
+    if (!outfitPrompt.trim()) {
+      setOutfitMessage('Describe what you want to wear before generating outfit options.');
+      return;
+    }
+
     setOutfitLoading(true);
     setOutfitMessage(null);
     setOutfitLooks(null);
@@ -1498,6 +1503,7 @@ const App: React.FC = () => {
       const result = await runBeautyActionWithRetry(() =>
         generateOutfitTryOn(
           outfitSelfie,
+          outfitPrompt,
           outfitStyle,
           outfitOccasion,
           outfitColorPalette,
@@ -1507,7 +1513,7 @@ const App: React.FC = () => {
             garmentLabel: outfitGarmentLabel,
             garmentImageBase64: outfitGarmentImage || undefined,
             matchCurrentSalonLook: outfitMatchCurrentSalonLook,
-            batchCount: outfitBatchCount,
+            batchCount: 2,
           }
         )
       );
@@ -3943,16 +3949,10 @@ const App: React.FC = () => {
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Batch Looks</label>
-                <select
-                  value={outfitBatchCount}
-                  onChange={(e) => setOutfitBatchCount(Number(e.target.value) as 1 | 2 | 3)}
-                  className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
-                >
-                  <option value={1}>1 look</option>
-                  <option value={2}>2 looks</option>
-                  <option value={3}>3 looks</option>
-                </select>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Generated Options</label>
+                <div className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100">
+                  2 looks per request (swipe/select your favorite)
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -3984,6 +3984,17 @@ const App: React.FC = () => {
                   <option value="wedding guest">Wedding Guest</option>
                   <option value="event party">Event Party</option>
                 </select>
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">What would you like to wear today?</label>
+                <textarea
+                  value={outfitPrompt}
+                  onChange={(event) => setOutfitPrompt(event.target.value)}
+                  placeholder="An oversized emerald green blazer over a black silk turtleneck"
+                  rows={2}
+                  className="w-full rounded-xl bg-slate-950/60 border border-fuchsia-400/40 px-3 py-3 text-xs text-fuchsia-100 focus:outline-none focus:border-fuchsia-300"
+                />
               </div>
 
               <div className="space-y-2 sm:col-span-2">
@@ -4097,7 +4108,7 @@ const App: React.FC = () => {
             {outfitLooks && outfitLooks.length > 1 && (
               <div className="rounded-xl border border-fuchsia-500/30 bg-slate-950/60 p-3 space-y-2">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Generated Outfit Options</div>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-2">
                   {outfitLooks.map((look, idx) => (
                     <button
                       key={`${look.title}-${idx}`}
@@ -4109,6 +4120,7 @@ const App: React.FC = () => {
                       }`}
                     >
                       <div className="text-[10px] font-bold uppercase tracking-widest">{look.title}</div>
+                      <img src={look.editedImage} alt={`${look.title} outfit option`} className="mt-2 w-full h-40 rounded-lg object-contain bg-slate-950" />
                       <div className="mt-1 text-[10px] text-slate-300 line-clamp-2">{look.description || 'Generated look'}</div>
                     </button>
                   ))}

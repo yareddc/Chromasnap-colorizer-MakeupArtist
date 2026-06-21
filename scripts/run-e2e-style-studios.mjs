@@ -227,6 +227,7 @@ const run = async () => {
       method: 'POST',
       body: JSON.stringify({
         selfie,
+        outfitPrompt: 'An oversized emerald green blazer over a black silk turtleneck with tapered black trousers.',
         outfitStyle: 'smart casual layered streetwear',
         occasion: 'night out',
         colorPalette: 'black, charcoal, cream',

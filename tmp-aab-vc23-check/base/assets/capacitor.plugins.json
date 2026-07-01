@@ -1,0 +1,14 @@
+[
+	{
+		"pkg": "@capacitor-firebase/authentication",
+		"classpath": "io.capawesome.capacitorjs.plugins.firebase.authentication.FirebaseAuthenticationPlugin"
+	},
+	{
+		"pkg": "@capacitor/camera",
+		"classpath": "com.capacitorjs.plugins.camera.CameraPlugin"
+	},
+	{
+		"pkg": "@chromasnap/image-processor",
+		"classpath": "com.chromasnap.processor.ChromaSnapImageProcessorPlugin"
+	}
+]

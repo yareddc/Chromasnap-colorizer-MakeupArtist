@@ -1,6 +1,6 @@
 {
-  "name": "ChromaSnap: AI Colorizer Ver_003",
-  "description": "Transform vintage black and white photos into vibrant, lifelike color images using Gemini's advanced image-to-image AI capabilities.",
+  "name": "ChromaSnap: AI Photo Studio Ver_003",
+  "description": "Create complete looks with AI-powered photo tools: black-and-white colorization, cinematic animation, Beauty Lab virtual makeup, Barbershop haircut previews, and Outfit Studio try-on generation.",
   "requestFramePermissions": [
     "camera"
   ]

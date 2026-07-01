@@ -94,3 +94,27 @@ textarea:focus-visible {
     outline: 2px solid rgb(129 140 248);
     outline-offset: 2px;
 }
+
+@media (max-width: 359px) {
+    .studio-action-compact {
+        font-size: 9px !important;
+        letter-spacing: 0.04em;
+        padding-left: 0.625rem !important;
+        padding-right: 0.625rem !important;
+        min-height: 2.125rem;
+    }
+}
+
+.studio-label-short {
+    display: none;
+}
+
+@media (max-width: 320px) {
+    .studio-label-full {
+        display: none;
+    }
+
+    .studio-label-short {
+        display: inline;
+    }
+}

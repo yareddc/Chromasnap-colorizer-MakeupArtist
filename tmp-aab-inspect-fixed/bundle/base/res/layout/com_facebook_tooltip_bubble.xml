@@ -1,0 +1,62 @@
+
+Õ$
+;
+android*http://schemas.android.com/apk/res/android!RelativeLayout"P
+*http://schemas.android.com/apk/res/androidpaddingRight20dp"(Ø„2:h("`
+*http://schemas.android.com/apk/res/androidlayout_widthwrap_content"(ô„2:0þÿÿÿÿÿÿÿÿ"a
+*http://schemas.android.com/apk/res/androidlayout_heightwrap_content"(õ„2:0þÿÿÿÿÿÿÿÿ"O
+*http://schemas.android.com/apk/res/androidpaddingLeft20dp"(Ö„2:h(*†
+ýRelativeLayout"³
+*http://schemas.android.com/apk/res/androidlayout_below1@+id/com_facebook_tooltip_bubble_view_top_pointer"(…ƒ„2;
+9 ø/id/com_facebook_tooltip_bubble_view_top_pointer0"¬
+*http://schemas.android.com/apk/res/android
+background.@drawable/com_facebook_tooltip_blue_background"(Ô„29
+7”œø-drawable/com_facebook_tooltip_blue_background0"`
+*http://schemas.android.com/apk/res/androidlayout_widthwrap_content"(ô„2:0þÿÿÿÿÿÿÿÿ"a
+*http://schemas.android.com/apk/res/androidlayout_heightwrap_content"(õ„2:0þÿÿÿÿÿÿÿÿ"Z
+*http://schemas.android.com/apk/res/androidlayout_centerHorizontaltrue"(ƒ„2:@"
+*http://schemas.android.com/apk/res/androidid@+id/com_facebook_body_frame"(Ð„2&
+$‡ øid/com_facebook_body_frame0*ü
+ó	ImageView"™
+*http://schemas.android.com/apk/res/androidsrc(@drawable/com_facebook_tooltip_blue_xout"(™‚„23
+1—œø'drawable/com_facebook_tooltip_blue_xout0"K
+*http://schemas.android.com/apk/res/androidpadding10dp"(Õ„2:h"`
+*http://schemas.android.com/apk/res/androidlayout_widthwrap_content"(ô„2:0þÿÿÿÿÿÿÿÿ"a
+*http://schemas.android.com/apk/res/androidlayout_heightwrap_content"(õ„2:0þÿÿÿÿÿÿÿÿ"Z
+*http://schemas.android.com/apk/res/androidlayout_alignParentRighttrue"(ƒ„2:@"X
+*http://schemas.android.com/apk/res/androidlayout_alignParentToptrue"(Œƒ„2:@"
+*http://schemas.android.com/apk/res/androidid@+id/com_facebook_button_xout"(Ð„2'
+%ˆ øid/com_facebook_button_xout0*ä
+ÛTextView"K
+*http://schemas.android.com/apk/res/androidpadding10dp")(Õ„2:h"`
+*http://schemas.android.com/apk/res/androidlayout_widthwrap_content")(ô„2:0þÿÿÿÿÿÿÿÿ"a
+*http://schemas.android.com/apk/res/androidlayout_heightwrap_content")(õ„2:0þÿÿÿÿÿÿÿÿ"
+*http://schemas.android.com/apk/res/androidlayout_toLeftOf@id/com_facebook_button_xout")(‚ƒ„2'
+%ˆ øid/com_facebook_button_xout0"Y
+*http://schemas.android.com/apk/res/androidlayout_alignParentLefttrue")(‹ƒ„2:@"Pstyle@style/tooltip_bubble_text")2'
+%ç‰Äøstyle/tooltip_bubble_text0ÿÿ"X
+*http://schemas.android.com/apk/res/androidlayout_alignParentToptrue")(Œƒ„2:@"¥
+*http://schemas.android.com/apk/res/androidid/@+id/com_facebook_tooltip_bubble_view_text_body")(Ð„29
+7 ø-id/com_facebook_tooltip_bubble_view_text_body0)I*¸
+¯	ImageView"[
+*http://schemas.android.com/apk/res/androidlayout_marginBottom-10dp"3(ú„2:hìÿÿ"
+*http://schemas.android.com/apk/res/androidsrc*@drawable/com_facebook_tooltip_blue_topnub"3(™‚„25
+3–œø)drawable/com_facebook_tooltip_blue_topnub0"`
+*http://schemas.android.com/apk/res/androidlayout_widthwrap_content"3(ô„2:0þÿÿÿÿÿÿÿÿ"a
+*http://schemas.android.com/apk/res/androidlayout_heightwrap_content"3(õ„2:0þÿÿÿÿÿÿÿÿ"Z
+*http://schemas.android.com/apk/res/androidlayout_centerHorizontaltrue"3(ƒ„2:@"X
+*http://schemas.android.com/apk/res/androidlayout_alignParentToptrue"3(Œƒ„2:@"©
+*http://schemas.android.com/apk/res/androidid1@+id/com_facebook_tooltip_bubble_view_top_pointer"3(Ð„2;
+9 ø/id/com_facebook_tooltip_bubble_view_top_pointer03	*Ù
+Ð	ImageView"ˆ
+*http://schemas.android.com/apk/res/androidlayout_below@id/com_facebook_body_frame"=(…ƒ„2&
+$‡ øid/com_facebook_body_frame0"£
+*http://schemas.android.com/apk/res/androidsrc-@drawable/com_facebook_tooltip_blue_bottomnub"=(™‚„28
+6•œø,drawable/com_facebook_tooltip_blue_bottomnub0"`
+*http://schemas.android.com/apk/res/androidlayout_widthwrap_content"=(ô„2:0þÿÿÿÿÿÿÿÿ"a
+*http://schemas.android.com/apk/res/androidlayout_heightwrap_content"=(õ„2:0þÿÿÿÿÿÿÿÿ"Z
+*http://schemas.android.com/apk/res/androidlayout_centerHorizontaltrue"=(ƒ„2:@"X
+*http://schemas.android.com/apk/res/androidlayout_marginTop-13dp"=(ø„2:hæÿÿ"¯
+*http://schemas.android.com/apk/res/androidid4@+id/com_facebook_tooltip_bubble_view_bottom_pointer"=(Ð„2>
+<Ž ø2id/com_facebook_tooltip_bubble_view_bottom_pointer0"e
+*http://schemas.android.com/apk/res/androidlayout_gravitycenter_horizontal|bottom"=(³„2:8Q=	!

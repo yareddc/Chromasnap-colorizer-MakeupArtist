@@ -483,4 +483,4 @@ cd android
 "$ADB" start-server
 "$ADB" devices -l
 ```
-# Chromasnap-colorizer-MakeupArtist
+# ChromaSnap AI Photo Studio

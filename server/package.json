@@ -1,7 +1,7 @@
 {
     "name": "chromasnap-server",
     "version": "1.0.0",
-    "description": "Backend for ChromaSnap AI Colorizer",
+    "description": "Backend for ChromaSnap AI Photo Studio",
     "main": "src/index.ts",
     "scripts": {
         "dev": "tsx watch src/index.ts",

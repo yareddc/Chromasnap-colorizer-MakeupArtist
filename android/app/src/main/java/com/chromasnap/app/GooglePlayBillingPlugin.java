@@ -12,6 +12,7 @@ import com.android.billingclient.api.ProductDetails;
 import com.android.billingclient.api.Purchase;
 import com.android.billingclient.api.PurchasesUpdatedListener;
 import com.android.billingclient.api.QueryProductDetailsParams;
+import com.android.billingclient.api.QueryProductDetailsResult;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -188,12 +189,16 @@ public class GooglePlayBillingPlugin extends Plugin implements PurchasesUpdatedL
                 .setProductList(List.of(product))
                 .build();
 
-        billingClient.queryProductDetailsAsync(params, (billingResult, productDetailsList) -> {
+        billingClient.queryProductDetailsAsync(params, (billingResult, productDetailsResult) -> {
             Log.i(TAG, "queryProductDetailsAsync result code=" + billingResult.getResponseCode() + " msg=" + billingResult.getDebugMessage());
             if (billingResult.getResponseCode() != BillingClient.BillingResponseCode.OK) {
                 call.reject("Failed to query product details: " + billingResult.getDebugMessage());
                 return;
             }
+
+            List<ProductDetails> productDetailsList = productDetailsResult == null
+                ? null
+                : productDetailsResult.getProductDetailsList();
 
             if (productDetailsList == null || productDetailsList.isEmpty()) {
                 call.reject("No product details found for productId: " + productId);

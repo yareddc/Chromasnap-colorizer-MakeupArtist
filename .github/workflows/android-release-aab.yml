@@ -170,3 +170,4 @@ jobs:
         with:
           name: app-release-aab
           path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 3

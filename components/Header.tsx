@@ -30,7 +30,7 @@ const Header: React.FC<HeaderProps> = ({ tokenBalance, onMenuToggle, isMenuOpen 
             id="workspace-hamburger-trigger"
             type="button"
             onClick={onMenuToggle}
-            className={`h-11 w-11 rounded-xl border transition-colors flex items-center justify-center ${
+            className={`xl:hidden h-11 w-11 rounded-xl border transition-colors flex items-center justify-center ${
               isMenuOpen
                 ? 'border-indigo-400 bg-indigo-500/20 text-indigo-100'
                 : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-indigo-400 hover:text-indigo-100'

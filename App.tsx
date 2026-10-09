@@ -2362,6 +2362,23 @@ const App: React.FC = () => {
               Account
             </button>
           </div>
+
+          <div className="rounded-2xl border border-rose-400/20 bg-slate-950/60 p-2 space-y-1">
+            <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-widest font-bold text-rose-200/75">Tools & Session</div>
+            <button
+              onClick={() => setShowBeautyToolsDrawer(true)}
+              disabled={activeWorkspaceTab !== 'beauty-lab'}
+              className="w-full rounded-full px-3 py-2 text-left text-sm font-semibold text-slate-300 border border-transparent transition-all hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-white disabled:opacity-50"
+            >
+              Open Beauty Tools
+            </button>
+            <button
+              onClick={handleLogout}
+              className="w-full rounded-full px-3 py-2 text-left text-sm font-semibold text-rose-300 border border-transparent transition-all hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-rose-100"
+            >
+              Logout
+            </button>
+          </div>
         </div>
 
         <div

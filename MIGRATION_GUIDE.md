@@ -1,5 +1,8 @@
 # Migration Guide: From API to Native Backend
 
+> ⚠️ **Deprecated:** Colorization and black-and-white (monochromatic) detection have been removed from the codebase. The `colorizeImage` and `isBlackAndWhite` APIs referenced below no longer exist. This guide is retained for historical reference.
+
+
 ## Overview
 
 If you're currently using `services/geminiService.ts` directly, this guide shows how to migrate to the new native backend through `services/nativeImageProcessorService.ts`.

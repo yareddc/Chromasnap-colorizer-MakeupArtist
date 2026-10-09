@@ -1,5 +1,8 @@
 # ChromaSnap Native Backend - Architecture Diagrams
 
+> ⚠️ **Deprecated:** Colorization references in these diagrams are historical. Colorization and black-and-white detection have been removed from the codebase.
+
+
 ## System Architecture
 
 ```

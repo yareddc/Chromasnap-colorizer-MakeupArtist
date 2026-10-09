@@ -220,9 +220,9 @@ done
 ```bash
 API_BASE="https://chromasnap-server-grtbijsg7a-uc.a.run.app"
 
-# Make 130 rapid colorize requests (limit is 120/10min)
+# Make 130 rapid upscale requests (limit is 120/10min)
 for i in {1..130}; do
-  curl -s -X POST "$API_BASE/api/process/colorize" \
+  curl -s -X POST "$API_BASE/api/process/upscale" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
     -d '{"image":"data:image/png;base64,iVBOR..."}' \
@@ -558,7 +558,7 @@ curl -X POST "https://chromasnap-server-grtbijsg7a-uc.a.run.app/api/analyze/safe
 ### Test: Error Logging
 ```bash
 # Trigger an error
-curl -X POST "https://chromasnap-server-grtbijsg7a-uc.a.run.app/api/process/colorize" \
+curl -X POST "https://chromasnap-server-grtbijsg7a-uc.a.run.app/api/process/upscale" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $VALID_TOKEN" \
   -d '{"image":"invalid-base64"}'

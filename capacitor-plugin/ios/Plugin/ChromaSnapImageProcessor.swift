@@ -5,34 +5,6 @@ class ChromaSnapImageProcessor {
     
     // MARK: - Analysis Methods
     
-    func analyzeMonochromatic(imageData: String, completion: @escaping ([String: Any]?, Error?) -> Void) {
-        let base64Data = extractBase64(imageData)
-        let mimeType = extractMimeType(imageData)
-        
-        let requestBody: [String: Any] = [
-            "contents": [
-                [
-                    "parts": [
-                        ["inlineData": ["data": base64Data, "mimeType": mimeType]],
-                        ["text": "Is this image black and white (monochromatic)? Respond strictly with \"true\" or \"false\" in JSON format."]
-                    ]
-                ]
-            ],
-            "generationConfig": [
-                "responseMimeType": "application/json",
-                "responseSchema": [
-                    "type": "OBJECT",
-                    "properties": [
-                        "isMonochromatic": ["type": "BOOLEAN"]
-                    ],
-                    "required": ["isMonochromatic"]
-                ]
-            ]
-        ]
-        
-        makeGeminiRequest("gemini-2.0-flash:generateContent", body: requestBody, completion: completion)
-    }
-    
     func checkSafety(imageData: String, completion: @escaping ([String: Any]?, Error?) -> Void) {
         let base64Data = extractBase64(imageData)
         let mimeType = extractMimeType(imageData)
@@ -64,34 +36,6 @@ class ChromaSnapImageProcessor {
     }
     
     // MARK: - Image Processing Methods
-    
-    func colorizeImage(imageData: String, theme: String, apiKey: String, completion: @escaping (String?, Error?) -> Void) {
-        let base64Data = extractBase64(imageData)
-        let mimeType = extractMimeType(imageData)
-        
-        let themePrompts: [String: String] = [
-            "Natural": "realistic skin tones, natural landscapes, and accurate fabric colors.",
-            "Cinematic": "a moody, cinematic film look with high contrast and teal-and-orange hints.",
-            "Vivid": "bright, highly saturated, and punchy modern colors.",
-            "Vintage": "warm, slightly desaturated, nostalgic 70s film tones.",
-            "Technicolor": "highly vibrant, stylized mid-century 3-strip technicolor look."
-        ]
-        
-        let instruction = themePrompts[theme] ?? themePrompts["Natural"]!
-        
-        let requestBody: [String: Any] = [
-            "contents": [
-                [
-                    "parts": [
-                        ["inlineData": ["data": base64Data, "mimeType": mimeType]],
-                        ["text": "You are a professional photo restorer. Colorize this black and white photo with high precision using a \(theme) palette. Ensure \(instruction) Output ONLY the resulting colorized image. No conversational text."]
-                    ]
-                ]
-            ]
-        ]
-        
-        makeGeminiImageRequest("gemini-2.0-flash:generateContent", body: requestBody, apiKey: apiKey, completion: completion)
-    }
     
     func upscaleImage(imageData: String, apiKey: String, completion: @escaping (String?, Error?) -> Void) {
         let base64Data = extractBase64(imageData)

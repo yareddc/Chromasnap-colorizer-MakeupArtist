@@ -78,7 +78,7 @@ $env:KEY_PASSWORD = "your-key-password"
    - ✅ Account creation
    - ✅ Google Sign-In (Continue with Google)
    - ✅ Phone OTP (via Firebase)
-   - ✅ Image upload & colorization
+   - ✅ Image upload & AI processing
 
 ### Logs to Check:
 ```bash

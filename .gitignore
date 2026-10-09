@@ -49,3 +49,4 @@ server/data/usernames.db
 
 # Generated Android plugin build outputs
 capacitor-plugin/android/build/
+capacitor-plugin/android/.gradle/

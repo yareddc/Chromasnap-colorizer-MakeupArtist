@@ -1,12 +1,6 @@
 import { registerPlugin } from '@capacitor/core';
 import type { PluginListenerHandle } from '@capacitor/core';
 
-export interface ColorizeOptions {
-  image: string; // base64 data URL
-  theme: 'Natural' | 'Cinematic' | 'Vivid' | 'Vintage' | 'Technicolor';
-  apiKey: string;
-}
-
 export interface AnalyzeOptions {
   image: string; // base64 data URL
   apiKey: string;
@@ -34,25 +28,11 @@ export interface SafetyCheckResult {
   reason?: string;
 }
 
-export interface MonochromaticCheckResult {
-  isMonochromatic: boolean;
-}
-
 export interface ChromaSnapImageProcessorPlugin {
-  /**
-   * Analyze if image is black and white
-   */
-  analyzeMonochromatic(options: AnalyzeOptions): Promise<MonochromaticCheckResult>;
-
   /**
    * Check image safety (nudity, minors, explicit content)
    */
   checkSafety(options: AnalyzeOptions): Promise<SafetyCheckResult>;
-
-  /**
-   * Colorize a black and white image with specified theme
-   */
-  colorizeImage(options: ColorizeOptions): Promise<ProcessResult>;
 
   /**
    * Upscale image to higher resolution

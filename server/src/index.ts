@@ -33,7 +33,14 @@ import {
     removeUsername,
     upsertBillingAccount,
     updateAuthUserPassword,
+    saveLook,
+    listLooks,
+    deleteLook,
+    setLookFavorite,
 } from './userDatabase';
+import { uploadImageToStorage } from './imageStorage';
+import { getProvider } from './ai/provider';
+import { getLookFinder } from './commerce/lookFinder';
 import { buildFallbackOccasionRecommendations, parseOccasionRecommendations } from './occasionRecommendations';
 import type { App as FirebaseAdminApp } from 'firebase-admin/app';
 
@@ -137,17 +144,22 @@ const PLAN_CONFIG: Record<SubscriptionTier, PlanConfig> = {
 };
 
 const ACTION_TOKEN_COST: Record<string, number> = {
-    colorize: 3,
     upscale: 1,
     vibrancy: 1,
     sharpen: 1,
     animate_start: 54,
     beauty_consult: 1,
     virtual_makeup: 3,
+    hairstyle_try_on: 3,
     outfit_tryon: 3,
     occasion_recommend: 1,
     beauty_profile_analysis: 1,
     complexion_report: 1,
+    style_advisor: 1,
+    create_my_look: 3,
+    find_this_look: 1,
+    photo_enhancement: 3,
+    complete_look: 1,
 };
 
 const GEMINI_25_FLASH_INPUT_USD_PER_1M = 0.3;
@@ -1015,7 +1027,6 @@ app.use(attachAuthUser);
 app.use(attachBillingAccount);
 app.use('/api/analyze', processingLimiter);
 app.use('/api/process', processingLimiter);
-app.use('/api/colorize', processingLimiter);
 
 /**
  * AI Client Factory
@@ -1443,101 +1454,6 @@ const generateAnimationVideoUri = async (
     throw new Error(`Video generation failed. ${errors.join(' | ')}`);
 };
 
-/**
- * Colorization Core Logic
- * Prioritizes Imagen 3 Capability for structure-locked editing.
- * Failsafe: Gemini 2.5 Flash Image for robust multimodal editing.
- */
-const callColorizationAPI = async (base64Image: string) => {
-    if (!process.env.GCP_PROJECT_ID || !process.env.GCP_LOCATION) {
-        throw new Error('GCP_PROJECT_ID and GCP_LOCATION are required for Vertex colorization');
-    }
-
-    const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
-    const client = await auth.getClient();
-    const at = await client.getAccessToken();
-    const token = typeof at === 'string' ? at : at?.token;
-
-    const postPredict = async (model: string, body: any) => {
-        const url = `https://${process.env.GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.GCP_PROJECT_ID}/locations/${process.env.GCP_LOCATION}/publishers/google/models/${model}:predict`;
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body)
-        });
-
-        const text = await response.text();
-        let parsed: any = {};
-        try { parsed = JSON.parse(text); } catch { parsed = { raw: text }; }
-        return { response, parsed, rawText: text, model };
-    };
-
-    // 1. PRIMARY ATTEMPT: Imagen 3 Capability (Structure-Preserving Colorization)
-    const capabilityBody = {
-        instances: [{
-            prompt: 'Colorize this photo naturally. Maintain 100% original texture and subject detail.',
-            referenceImages: [{
-                referenceId: 1,
-                referenceType: 'REFERENCE_TYPE_RAW',
-                image: {
-                    bytesBase64Encoded: base64Image,
-                    mimeType: 'image/png'
-                }
-            }]
-        }],
-        parameters: {
-            sampleCount: 1,
-            editConfig: {
-                editMode: 'EDIT_MODE_INPAINT_INSERTION',
-                guidanceScale: 70 // High guidance prevents random generations
-            }
-        }
-    };
-
-    const capabilityResult = await postPredict('imagen-3.0-capability-001', capabilityBody);
-    if (capabilityResult.response.ok) return capabilityResult;
-
-    // 2. FAILSAFE ATTEMPT: Gemini 2.5 Flash Image (Multimodal "Vision-to-Vision")
-    // Replaces the random-generating fallback with a model that respects input pixels.
-    console.log('Imagen capability failed, falling back to Gemini 2.5 Flash Image...');
-    const ai = createAI();
-    const geminiResult = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: [{
-            role: 'user',
-            parts: [
-                { inlineData: { data: base64Image, mimeType: 'image/png' } },
-                { text: "INSTRUCTION: Colorize this specific B&W photo. Do not change the subjects. Preserve 100% structural consistency." }
-            ]
-        }],
-        config: {
-            responseModalities: ["IMAGE"], // Correct camelCase property
-            temperature: 0.3
-        }
-    });
-
-    return geminiResult;
-};
-
-const runColorization = async (image: string): Promise<string> => {
-    const normalizedPngBase64 = await normalizeImageToPngBase64(image);
-    const result = await callColorizationAPI(normalizedPngBase64);
-
-    if ((result as any).candidates) {
-        const part = (result as any).candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-        const data = part?.inlineData?.data;
-        if (!data) throw new Error('No image returned from Gemini response');
-        return `data:image/png;base64,${data}`;
-    }
-
-    const imgBase64 = (result as any).parsed?.predictions?.[0]?.bytesBase64Encoded;
-    if (!imgBase64) throw new Error('No image returned from AI');
-    return `data:image/png;base64,${imgBase64}`;
-};
-
 const extractGeminiInlineImageBase64 = (response: any): string | undefined => {
     const candidateRoots = [
         response?.candidates,
@@ -1570,9 +1486,6 @@ const runVirtualMakeupImageEdit = async (
     styleIntensity: 'subtle' | 'balanced' | 'dramatic' = 'balanced',
     cameraView: 'front' | 'left' | 'right' | 'back' = 'front'
 ): Promise<string> => {
-    const base64Image = await normalizeImageToPngBase64(selfie);
-    const ai = createAI();
-
     const intensityInstructions: Record<'subtle' | 'balanced' | 'dramatic', string> = {
         subtle: 'Keep the look very natural and conservative with soft makeup contrast and gentle hair adjustments.',
         balanced: 'Apply a noticeable but realistic makeover with clear style improvements while staying wearable.',
@@ -1603,27 +1516,50 @@ const runVirtualMakeupImageEdit = async (
         '- Return one photorealistic edited image.',
     ].join('\n');
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: [{
-            role: 'user',
-            parts: [
-                { inlineData: { data: base64Image, mimeType: 'image/png' } },
-                { text: editPrompt },
-            ],
-        }],
-        config: {
-            responseModalities: ['IMAGE'],
-            temperature: 0.35,
-        },
+    const result = await getProvider().generateImage({
+        userId: 'system',
+        featureType: 'BEAUTY',
+        sourceImage: selfie,
+        prompt: editPrompt,
     });
-
-    const imageBase64 = extractGeminiInlineImageBase64(response);
-    if (!imageBase64) {
+    if (!result.image) {
         throw new Error('Virtual makeover image generation returned no image');
     }
+    return result.image;
+};
 
-    return `data:image/png;base64,${imageBase64}`;
+const runHairstyleTryOnImageEdit = async (
+    selfie: string,
+    hairstyle: string,
+    hairColor: string
+): Promise<string> => {
+    const cleanHairstyle = String(hairstyle || 'natural/current').trim() || 'natural/current';
+    const colorInstruction = !hairColor || hairColor === 'natural'
+        ? 'Keep the subject\'s current hair color.'
+        : `Change the hair color to ${hairColor.replace(/-/g, ' ')}.`;
+
+    const editPrompt = [
+        'Perform a realistic virtual hairstyle try-on on this exact selfie.',
+        `Requested hairstyle: ${cleanHairstyle}.`,
+        colorInstruction,
+        'Hard constraints:',
+        '- Preserve the person\'s face, identity, skin tone, facial structure, and head shape exactly.',
+        '- Only change the hair — style, length, texture, and color as requested.',
+        '- Do not modify makeup, clothing, pose, framing, or background.',
+        '- Do not swap faces or change age.',
+        '- Return one photorealistic edited image.',
+    ].join('\n');
+
+    const result = await getProvider().generateImage({
+        userId: 'system',
+        featureType: 'HAIRSTYLE',
+        sourceImage: selfie,
+        prompt: editPrompt,
+    });
+    if (!result.image) {
+        throw new Error('Hairstyle try-on image generation returned no image');
+    }
+    return result.image;
 };
 
 const buildVirtualLookDescription = (
@@ -2414,6 +2350,95 @@ app.get('/api/subscription/usage', requireAuth, async (req, res) => {
     });
 });
 
+// --- Saved Looks (My Looks gallery) ---
+
+app.post('/api/looks', requireAuth, async (req, res) => {
+    try {
+        const userId = (req as BillingRequest).authUser!.username;
+        const {
+            type,
+            originalImage,
+            generatedImage,
+            hairstyle,
+            beautyStyle,
+            outfit,
+            accessories,
+            prompt,
+        } = req.body as {
+            type?: string;
+            originalImage?: string;
+            generatedImage?: string;
+            hairstyle?: string;
+            beautyStyle?: string;
+            outfit?: string;
+            accessories?: string;
+            prompt?: string;
+        };
+
+        if (!generatedImage) return res.status(400).json({ error: 'Generated image required' });
+        const validTypes = ['hair', 'beauty', 'outfit', 'complete-look'];
+        if (!type || !validTypes.includes(type)) {
+            return res.status(400).json({ error: 'Invalid look type' });
+        }
+
+        const generatedImageUrl = await uploadImageToStorage(generatedImage, `looks/${userId}`);
+        const originalImageUrl = originalImage ? await uploadImageToStorage(originalImage, `looks/${userId}/original`) : null;
+
+        const look = await saveLook({
+            id: randomUUID(),
+            userId,
+            type: type as 'hair' | 'beauty' | 'outfit' | 'complete-look',
+            originalImageUrl,
+            generatedImageUrl,
+            hairstyle: hairstyle || null,
+            beautyStyle: beautyStyle || null,
+            outfit: outfit || null,
+            accessories: accessories || null,
+            prompt: prompt || null,
+            favorite: false,
+        });
+
+        res.json({ look });
+    } catch (error: any) {
+        console.error('Save look failed:', error);
+        res.status(500).json({ error: error.message || 'Failed to save look' });
+    }
+});
+
+app.get('/api/looks', requireAuth, async (req, res) => {
+    try {
+        const userId = (req as BillingRequest).authUser!.username;
+        const looks = await listLooks(userId);
+        res.json({ looks });
+    } catch (error: any) {
+        console.error('List looks failed:', error);
+        res.status(500).json({ error: error.message || 'Failed to list looks' });
+    }
+});
+
+app.delete('/api/looks/:id', requireAuth, async (req, res) => {
+    try {
+        const userId = (req as BillingRequest).authUser!.username;
+        const removed = await deleteLook(userId, String(req.params.id || ''));
+        res.json({ removed });
+    } catch (error: any) {
+        console.error('Delete look failed:', error);
+        res.status(500).json({ error: error.message || 'Failed to delete look' });
+    }
+});
+
+app.post('/api/looks/:id/favorite', requireAuth, async (req, res) => {
+    try {
+        const userId = (req as BillingRequest).authUser!.username;
+        const favorite = Boolean(req.body?.favorite);
+        const updated = await setLookFavorite(userId, String(req.params.id || ''), favorite);
+        res.json({ updated, favorite });
+    } catch (error: any) {
+        console.error('Favorite look failed:', error);
+        res.status(500).json({ error: error.message || 'Failed to update favorite' });
+    }
+});
+
 const safeConstantTimeCompare = (a: string, b: string) => {
     const left = Buffer.from(a);
     const right = Buffer.from(b);
@@ -2493,47 +2518,6 @@ app.delete('/api/admin/usernames/:role/:username', adminLimiter, requireAdminAcc
     }
 });
 
-// Compatibility analysis endpoint used by frontend
-app.post('/api/analyze/monochromatic', async (req, res) => {
-    try {
-        const { image } = req.body;
-        if (!image) return res.status(400).json({ error: 'Image data required' });
-
-        const ai = createAI();
-        const base64Data = await normalizeImageToPngBase64(image);
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: [{
-                role: 'user',
-                parts: [
-                    { inlineData: { data: base64Data, mimeType: 'image/png' } },
-                    { text: 'Is this image black and white (monochromatic)? Respond strictly in JSON with key isMonochromatic.' }
-                ]
-            }],
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: { isMonochromatic: { type: Type.BOOLEAN } },
-                    required: ['isMonochromatic']
-                }
-            }
-        });
-
-        const anyResp = response as any;
-        const text = typeof anyResp.text === 'function'
-            ? (anyResp.text()?.trim() || '{}')
-            : (response as any).candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-
-        const parsed = JSON.parse(text);
-        res.json({ isMonochromatic: Boolean(parsed.isMonochromatic) });
-    } catch (error: any) {
-        console.error('Monochromatic check failed:', error);
-        res.status(500).json({ error: error.message || 'Analysis failed' });
-    }
-});
-
 // Compatibility safety endpoint used by frontend
 app.post('/api/analyze/safety', async (req, res) => {
     try {
@@ -2580,44 +2564,6 @@ app.post('/api/analyze/safety', async (req, res) => {
     } catch (error: any) {
         console.error('Safety check failed:', error);
         res.status(500).json({ error: error.message || 'Safety check failed' });
-    }
-});
-
-// Main Colorization Endpoint
-app.post('/api/colorize', requireBilling('colorize'), async (req, res) => {
-    try {
-        const { image } = req.body;
-        if (!image) return res.status(400).json({ error: 'Image data required' });
-        const dataUrl = await runColorization(image);
-        logProviderUsageEstimate(req, {
-            action: 'colorize',
-            route: '/api/colorize',
-            model: 'imagen-3.0-capability-001|gemini-2.5-flash-image-fallback',
-            estimatedCostUsd: IMAGEN3_USD_PER_IMAGE,
-        });
-        res.json({ image: dataUrl });
-    } catch (error: any) {
-        console.error("Colorization failed:", error);
-        res.status(500).json({ error: error.message || 'Colorization failed' });
-    }
-});
-
-// Frontend-compatible processing route
-app.post('/api/process/colorize', requireBilling('colorize'), async (req, res) => {
-    try {
-        const { image } = req.body;
-        if (!image) return res.status(400).json({ error: 'Image data required' });
-        const dataUrl = await runColorization(image);
-        logProviderUsageEstimate(req, {
-            action: 'colorize',
-            route: '/api/process/colorize',
-            model: 'imagen-3.0-capability-001|gemini-2.5-flash-image-fallback',
-            estimatedCostUsd: IMAGEN3_USD_PER_IMAGE,
-        });
-        res.json({ result: dataUrl });
-    } catch (error: any) {
-        console.error('Colorization failed:', error);
-        res.status(500).json({ error: error.message || 'Colorization failed' });
     }
 });
 
@@ -2865,6 +2811,388 @@ app.post('/api/generate/virtual-makeup', requireBilling('virtual_makeup'), async
         console.error('Virtual makeup generation failed:', error);
         res.status(500).json({ error: error.message || 'Virtual makeup generation failed' });
     }
+});
+
+app.post('/api/generate/hairstyle-try-on', requireBilling('hairstyle_try_on'), async (req, res) => {
+    try {
+        const { selfie, hairstyle, hairColor } = req.body;
+        if (!selfie) return res.status(400).json({ error: 'Selfie image required' });
+        if (!hairstyle) return res.status(400).json({ error: 'Hairstyle required' });
+
+        const cleanHairstyle = String(hairstyle).trim();
+        const cleanColor = String(hairColor || 'natural').trim();
+
+        const editedImage = await runHairstyleTryOnImageEdit(selfie, cleanHairstyle, cleanColor);
+        const description = `Hairstyle try-on: ${cleanHairstyle}${cleanColor && cleanColor !== 'natural' ? ` with ${cleanColor.replace(/-/g, ' ')} color` : ''}.`;
+
+        logProviderUsageEstimate(req, {
+            action: 'hairstyle_try_on',
+            route: '/api/generate/hairstyle-try-on',
+            model: 'gemini-2.5-flash-image',
+            estimatedCostUsd: GEMINI_25_FLASH_IMAGE_OUTPUT_USD_PER_IMAGE,
+            details: { hairstyle: cleanHairstyle, hairColor: cleanColor },
+        });
+
+        res.json({
+            editedImage,
+            description,
+        });
+    } catch (error: any) {
+        console.error('Hairstyle try-on generation failed:', error);
+        res.status(500).json({ error: error.message || 'Hairstyle try-on generation failed' });
+    }
+});
+
+// --- AI Style Advisor (conversational styling assistant) ---
+
+app.post('/api/style-advisor', requireBilling('style_advisor'), async (req, res) => {
+    try {
+        const { message, image } = req.body as { message?: string; image?: string };
+        if (!message || !String(message).trim()) {
+            return res.status(400).json({ error: 'Message required' });
+        }
+
+        const provider = getProvider();
+        const systemPrompt = [
+            'You are ChromaSnap, a friendly, expert AI personal stylist and appearance advisor.',
+            'Help the user decide what to wear, how to style their hair, and which beauty looks suit them.',
+            'Consider occasion, budget, weather, and their preferences when mentioned.',
+            'Give concise, actionable advice with specific, realistic recommendations.',
+            'When the user shares a photo, reference what you can observe about their features and current style.',
+            'If the user wants a visual result, suggest Hairstyle Try-On, Beauty Try-On, or Outfit Studio.',
+            'Be warm, encouraging, and never judgmental. Avoid medical advice.',
+        ].join('\n');
+
+        const fullPrompt = `${systemPrompt}\n\nUser: ${String(message).trim()}`;
+        const result = await provider.generateText({
+            userId: (req as BillingRequest).authUser?.username?.trim() || getUserIdFromRequest(req) || 'unknown',
+            featureType: 'COMPLETE_LOOK',
+            sourceImage: image || '',
+            prompt: fullPrompt,
+        });
+
+        logProviderUsageEstimate(req, {
+            action: 'style_advisor',
+            route: '/api/style-advisor',
+            model: result.model,
+            estimatedCostUsd: 0.001,
+            details: { hasImage: Boolean(image) },
+        });
+
+        res.json({ reply: result.text || 'I\'m here to help with your style questions!' });
+    } catch (error: any) {
+        console.error('Style advisor failed:', error);
+        res.status(500).json({ error: error.message || 'Style advisor failed' });
+    }
+});
+
+// --- Complete the Look (accessory recommendations for an outfit) ---
+
+app.post('/api/generate/complete-look', requireBilling('complete_look'), async (req, res) => {
+    try {
+        const { outfitDescription, selfie, occasion } = req.body as {
+            outfitDescription?: string;
+            selfie?: string;
+            occasion?: string;
+        };
+        if (!outfitDescription || !String(outfitDescription).trim()) {
+            return res.status(400).json({ error: 'Outfit description required' });
+        }
+
+        const provider = getProvider();
+        const prompt = [
+            'Recommend complementary accessories to complete this outfit.',
+            `Outfit: ${String(outfitDescription).trim()}`,
+            occasion ? `Occasion: ${occasion}` : '',
+            'Return ONLY a JSON array of 5-7 recommendations, each with fields: category, name, description, and styleNote.',
+            'Use categories like shoes, watch, jewelry, bag, sunglasses, hat, or accessory.',
+            'Respond with ONLY the JSON array, no markdown or extra text.',
+        ].filter(Boolean).join('\n');
+
+        const result = await provider.generateText({
+            userId: (req as BillingRequest).authUser?.username?.trim() || getUserIdFromRequest(req) || 'unknown',
+            featureType: 'COMPLETE_LOOK',
+            sourceImage: selfie || '',
+            prompt,
+        });
+
+        let recommendations: Array<{ category: string; name: string; description: string; styleNote?: string }> = [];
+        try {
+            const cleaned = (result.text || '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            const parsed = JSON.parse(cleaned);
+            if (Array.isArray(parsed)) recommendations = parsed;
+        } catch {
+            recommendations = [];
+        }
+
+        logProviderUsageEstimate(req, {
+            action: 'complete_look',
+            route: '/api/generate/complete-look',
+            model: result.model,
+            estimatedCostUsd: 0.001,
+            details: { recommendationCount: recommendations.length },
+        });
+
+        res.json({ recommendations });
+    } catch (error: any) {
+        console.error('Complete look failed:', error);
+        res.status(500).json({ error: error.message || 'Complete look failed' });
+    }
+});
+
+// --- AI Photo Enhancement ---
+
+app.post('/api/generate/photo-enhancement', requireBilling('photo_enhancement'), async (req, res) => {
+    try {
+        const { image, enhancementType } = req.body as { image?: string; enhancementType?: string };
+        if (!image) return res.status(400).json({ error: 'Image required' });
+
+        const type = String(enhancementType || 'quality').trim();
+        const instructions: Record<string, string> = {
+            lighting: 'Improve the lighting and exposure of this image for a more flattering, balanced result.',
+            background: 'Clean up and subtly blur the background to focus on the subject.',
+            portrait: 'Apply a professional portrait retouch (smooth skin subtly, sharpen eyes) while preserving identity.',
+            social: 'Optimize this image to look great on social media (vivid, crisp, well-framed).',
+            quality: 'Improve overall image quality, sharpness, and clarity.',
+        };
+        const instruction = instructions[type] || instructions.quality;
+
+        const provider = getProvider();
+        const prompt = [
+            instruction,
+            'Preserve the person\'s identity, face, skin tone, and body proportions exactly.',
+            'Do not change clothing, hairstyle, or makeup.',
+            'Return one photorealistic edited image.',
+        ].join('\n');
+
+        const result = await provider.generateImage({
+            userId: (req as BillingRequest).authUser?.username?.trim() || getUserIdFromRequest(req) || 'unknown',
+            featureType: 'PHOTO_ENHANCEMENT',
+            sourceImage: image,
+            prompt,
+        });
+
+        logProviderUsageEstimate(req, {
+            action: 'photo_enhancement',
+            route: '/api/generate/photo-enhancement',
+            model: result.model,
+            estimatedCostUsd: GEMINI_25_FLASH_IMAGE_OUTPUT_USD_PER_IMAGE,
+            details: { enhancementType: type },
+        });
+
+        res.json({ editedImage: result.image });
+    } catch (error: any) {
+        console.error('Photo enhancement failed:', error);
+        res.status(500).json({ error: error.message || 'Photo enhancement failed' });
+    }
+});
+
+// --- Create My Look (flagship orchestration) ---
+
+app.post('/api/generate/create-my-look', requireBilling('create_my_look'), async (req, res) => {
+    try {
+        const { selfie, occasion, style, budget } = req.body as {
+            selfie?: string;
+            occasion?: string;
+            style?: string;
+            budget?: string;
+        };
+        if (!occasion || !String(occasion).trim()) {
+            return res.status(400).json({ error: 'Occasion required' });
+        }
+
+        const provider = getProvider();
+        const prompt = [
+            'You are an expert personal stylist. Create a complete, coordinated look for the user.',
+            `Occasion: ${String(occasion).trim()}`,
+            style ? `Preferred style: ${String(style).trim()}` : '',
+            budget ? `Budget: ${String(budget).trim()}` : '',
+            '',
+            'Return ONLY a JSON object (no markdown) with these exact fields:',
+            '- hairstyle: a specific, descriptive hairstyle recommendation (e.g. "soft shoulder-length waves with face-framing layers").',
+            '- hairColor: one of natural, black, dark-brown, brown, light-brown, blonde, platinum, red, auburn, gray, highlighted.',
+            '- beautyLook: a specific makeup look description (e.g. "natural dewy glow with soft nude lips").',
+            '- outfit: a specific full outfit description including garments and colors.',
+            '- accessories: an array of 3-5 accessory recommendations, each with category, name, and description.',
+            '',
+            'Ensure the hairstyle, beauty look, outfit, and accessories are cohesive and appropriate for the occasion.',
+        ].filter(Boolean).join('\n');
+
+        const result = await provider.generateText({
+            userId: (req as BillingRequest).authUser?.username?.trim() || getUserIdFromRequest(req) || 'unknown',
+            featureType: 'COMPLETE_LOOK',
+            sourceImage: selfie || '',
+            prompt,
+        });
+
+        let plan: {
+            hairstyle?: string;
+            hairColor?: string;
+            beautyLook?: string;
+            outfit?: string;
+            accessories?: Array<{ category: string; name: string; description: string }>;
+        } = {};
+        try {
+            const cleaned = (result.text || '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+            const parsed = JSON.parse(cleaned);
+            if (parsed && typeof parsed === 'object') plan = parsed;
+        } catch {
+            plan = {};
+        }
+
+        logProviderUsageEstimate(req, {
+            action: 'create_my_look',
+            route: '/api/generate/create-my-look',
+            model: result.model,
+            estimatedCostUsd: 0.001,
+            details: { occasion: String(occasion), hasPlan: Boolean(plan.hairstyle || plan.outfit) },
+        });
+
+        res.json({
+            plan: {
+                hairstyle: plan.hairstyle || '',
+                hairColor: plan.hairColor || 'natural',
+                beautyLook: plan.beautyLook || '',
+                outfit: plan.outfit || '',
+                accessories: Array.isArray(plan.accessories) ? plan.accessories : [],
+            },
+        });
+    } catch (error: any) {
+        console.error('Create my look failed:', error);
+        res.status(500).json({ error: error.message || 'Create my look failed' });
+    }
+});
+
+// --- Find This Look (commerce / local services) ---
+
+app.post('/api/find-this-look', requireBilling('find_this_look'), async (req, res) => {
+    try {
+        const { lookDescription, category, location } = req.body as {
+            lookDescription?: string;
+            category?: string;
+            location?: string;
+        };
+        if (!lookDescription || !String(lookDescription).trim()) {
+            return res.status(400).json({ error: 'Look description required' });
+        }
+
+        const description = String(lookDescription).trim();
+        const wantedCategory = String(category || 'all').trim();
+        const finder = getLookFinder();
+
+        const [fashion, services] = await Promise.all([
+            wantedCategory === 'services' ? Promise.resolve([]) : finder.findFashion(description),
+            wantedCategory === 'fashion' ? Promise.resolve([]) : finder.findServices(description, location || undefined),
+        ]);
+
+        logProviderUsageEstimate(req, {
+            action: 'find_this_look',
+            route: '/api/find-this-look',
+            model: 'ai-look-finder',
+            estimatedCostUsd: 0.001,
+            details: { category: wantedCategory, fashionCount: fashion.length, serviceCount: services.length },
+        });
+
+        res.json({ fashion, services });
+    } catch (error: any) {
+        console.error('Find this look failed:', error);
+        res.status(500).json({ error: error.message || 'Find this look failed' });
+    }
+});
+
+// --- Generation Job System (async queue/poll) ---
+
+type GenerationJobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+type GenerationJob = {
+    id: string;
+    userId: string;
+    featureType: string;
+    status: GenerationJobStatus;
+    result?: { image?: string; text?: string };
+    error?: string;
+    createdAt: number;
+};
+
+const generationJobs = new Map<string, GenerationJob>();
+
+const processGenerationJob = async (job: GenerationJob, payload: { sourceImage?: string; prompt: string; featureType: string }) => {
+    job.status = 'processing';
+    try {
+        const provider = getProvider();
+        const imageFeatures = ['HAIRSTYLE', 'BEAUTY', 'OUTFIT', 'COMPLETE_LOOK', 'PHOTO_ENHANCEMENT'];
+        if (imageFeatures.includes(payload.featureType) && payload.sourceImage) {
+            const result = await provider.generateImage({
+                userId: job.userId,
+                featureType: payload.featureType as 'HAIRSTYLE',
+                sourceImage: payload.sourceImage,
+                prompt: payload.prompt,
+            });
+            job.result = { image: result.image };
+        } else {
+            const result = await provider.generateText({
+                userId: job.userId,
+                featureType: payload.featureType as 'COMPLETE_LOOK',
+                sourceImage: payload.sourceImage || '',
+                prompt: payload.prompt,
+            });
+            job.result = { text: result.text };
+        }
+        job.status = 'completed';
+    } catch (error: any) {
+        job.status = 'failed';
+        job.error = error?.message || 'Generation failed';
+    }
+};
+
+app.post('/api/generate/job', requireAuth, async (req, res) => {
+    try {
+        const { featureType, sourceImage, prompt } = req.body as {
+            featureType?: string;
+            sourceImage?: string;
+            prompt?: string;
+        };
+        if (!featureType || !prompt || !String(prompt).trim()) {
+            return res.status(400).json({ error: 'featureType and prompt are required' });
+        }
+
+        const job: GenerationJob = {
+            id: randomUUID(),
+            userId: (req as BillingRequest).authUser!.username,
+            featureType: String(featureType),
+            status: 'queued',
+            createdAt: Date.now(),
+        };
+        generationJobs.set(job.id, job);
+
+        // Process asynchronously (fire-and-forget); the client polls status.
+        void processGenerationJob(job, {
+            sourceImage,
+            prompt: String(prompt).trim(),
+            featureType: String(featureType),
+        });
+
+        res.json({ jobId: job.id, status: job.status });
+    } catch (error: any) {
+        console.error('Enqueue generation job failed:', error);
+        res.status(500).json({ error: error.message || 'Failed to enqueue job' });
+    }
+});
+
+app.get('/api/generate/job/:id', requireAuth, (req, res) => {
+    const job = generationJobs.get(String(req.params.id || ''));
+    if (!job) {
+        return res.status(404).json({ error: 'Job not found' });
+    }
+    if (job.userId !== (req as BillingRequest).authUser!.username) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+    res.json({
+        id: job.id,
+        status: job.status,
+        result: job.result,
+        error: job.error,
+    });
 });
 
 app.post('/api/generate/outfit-tryon', async (req, res) => {

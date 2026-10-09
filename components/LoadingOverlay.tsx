@@ -3,30 +3,23 @@ import React from 'react';
 
 interface LoadingOverlayProps {
   message: string;
-  type?: 'colorizing' | 'animating' | 'editing';
+  type?: 'animating' | 'editing';
 }
 
-type LoadingOverlayType = 'colorizing' | 'animating' | 'editing';
+type LoadingOverlayType = 'animating' | 'editing';
 
 const stepsByType: Record<LoadingOverlayType, string[]> = {
-  colorizing: ['Analyzing image', 'Applying color palette', 'Final quality check'],
   animating: ['Preparing frames', 'Generating motion', 'Rendering final video'],
   editing: ['Reading image', 'Applying enhancement', 'Finalizing output'],
 };
 
 const estimateByType: Record<LoadingOverlayType, string> = {
-  colorizing: '~10-20 seconds',
   animating: '~45-90 seconds',
   editing: '~3-8 seconds',
 };
 
 const detectStepIndex = (message: string, type: LoadingOverlayType) => {
   const normalized = message.toLowerCase();
-  if (type === 'colorizing') {
-    if (normalized.includes('safety') || normalized.includes('scan') || normalized.includes('analy')) return 0;
-    if (normalized.includes('palette') || normalized.includes('coloriz') || normalized.includes('applying')) return 1;
-    return 2;
-  }
 
   if (type === 'animating') {
     if (normalized.includes('start') || normalized.includes('prepar') || normalized.includes('process')) return 0;
@@ -38,9 +31,9 @@ const detectStepIndex = (message: string, type: LoadingOverlayType) => {
   return 2;
 };
 
-const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message, type = 'colorizing' }) => {
+const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message, type = 'editing' }) => {
   const normalizedType: LoadingOverlayType =
-    type === 'animating' || type === 'editing' ? type : 'colorizing';
+    type === 'animating' ? 'animating' : 'editing';
   const steps = stepsByType[normalizedType];
   const activeIndex = detectStepIndex(message, normalizedType);
 

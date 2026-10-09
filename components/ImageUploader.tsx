@@ -175,7 +175,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, isLoadin
       {pendingEditImage && (
         <PhotoEditorModal
           image={pendingEditImage}
-          title="Edit Colorizer Photo"
+          title="Edit Photo"
           onCancel={() => setPendingEditImage(null)}
           onApply={(editedImage) => {
             onImageSelected(editedImage);

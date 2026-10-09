@@ -3,7 +3,7 @@
 If you see the error:
 > **"Image generation model (Imagen 3) not available. Please enable Vertex AI or check your API key permissions."**
 
-This means your current Google Cloud Project or API Key does not have access to the **Imagen 3** model required for image colorization.
+This means your current Google Cloud Project or API Key does not have access to the **Imagen 3** model required for AI image generation.
 
 ## Why is this happening?
 - The app uses `imagen-3.0-generate-001` for image generation/modification.

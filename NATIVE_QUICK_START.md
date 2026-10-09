@@ -1,5 +1,8 @@
 # ChromaSnap Native Backend - Quick Start
 
+> ⚠️ **Deprecated:** Colorization and black-and-white detection have been removed. The `colorizeImage` and `isBlackAndWhite` APIs referenced below no longer exist.
+
+
 ## What's New?
 
 Your ChromaSnap app now has a **native backend** that runs image processing directly on iOS and Android devices, without relying on an external server for every operation.

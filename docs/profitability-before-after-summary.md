@@ -22,7 +22,6 @@ Assumptions used:
 
 | Action | Tokens Before | Tokens After | Margin Before | Margin After |
 | --- | ---: | ---: | ---: | ---: |
-| colorize | 8 | 3 | 89.98% | 73.28% |
 | upscale | 5 | 1 | 98.00% | 89.98% |
 | vibrancy | 2 | 1 | 98.00% | 95.99% |
 | sharpen | 2 | 1 | 98.00% | 95.99% |

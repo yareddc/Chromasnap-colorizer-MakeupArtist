@@ -8,29 +8,12 @@
 
 import { ChromaSnapImageProcessor } from '../capacitor-plugin/src/index';
 import type {
-  ColorizeOptions,
   AnalyzeOptions,
   EnhancementOptions,
   AnimationOptions,
 } from '../capacitor-plugin/src/index';
 
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY || '';
-
-/**
- * Check if image is black and white
- */
-export const isBlackAndWhite = async (base64Image: string): Promise<boolean> => {
-  try {
-    const result = await ChromaSnapImageProcessor.analyzeMonochromatic({
-      image: base64Image,
-      apiKey: API_KEY,
-    });
-    return !!result.isMonochromatic;
-  } catch (error) {
-    console.error('Monochromatic check failed:', error);
-    return true; // Default fail-safe
-  }
-};
 
 /**
  * Check image safety (nudity, minors, explicit content)
@@ -47,38 +30,6 @@ export const checkImageSafety = async (
   } catch (error) {
     console.error('Safety check failed:', error);
     return { isSafe: true, containsMinors: false, reason: '' }; // Fail-open
-  }
-};
-
-/**
- * Colorize a black and white image with specified theme
- */
-export const colorizeImage = async (
-  base64Image: string,
-  theme: string = 'Natural'
-): Promise<string> => {
-  try {
-    const validThemes = ['Natural', 'Cinematic', 'Vivid', 'Vintage', 'Technicolor'];
-    const selectedTheme = validThemes.includes(theme)
-      ? theme
-      : 'Natural';
-
-    const result = await ChromaSnapImageProcessor.colorizeImage({
-      image: base64Image,
-      theme: selectedTheme as any,
-      apiKey: API_KEY,
-    });
-
-    if (!result.success) {
-      throw new Error(
-        result.error || 'Colorization failed'
-      );
-    }
-
-    return result.result!;
-  } catch (error: any) {
-    console.error('Colorization failed:', error);
-    throw new Error(error.message || 'Failed to colorize image.');
   }
 };
 

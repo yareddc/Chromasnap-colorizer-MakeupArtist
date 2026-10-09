@@ -17,21 +17,6 @@ public class ChromaSnapImageProcessorPlugin: CAPPlugin, URLSessionDelegate {
         urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
     
-    @objc func analyzeMonochromatic(_ call: CAPPluginCall) {
-        guard let imageData = call.getString("image") else {
-            call.reject("Image data required")
-            return
-        }
-        
-        implementation.analyzeMonochromatic(imageData: imageData) { result, error in
-            if let error = error {
-                call.reject(error.localizedDescription)
-            } else if let result = result {
-                call.resolve(result)
-            }
-        }
-    }
-    
     @objc func checkSafety(_ call: CAPPluginCall) {
         guard let imageData = call.getString("image") else {
             call.reject("Image data required")
@@ -43,26 +28,6 @@ public class ChromaSnapImageProcessorPlugin: CAPPlugin, URLSessionDelegate {
                 call.reject(error.localizedDescription)
             } else if let result = result {
                 call.resolve(result)
-            }
-        }
-    }
-    
-    @objc func colorizeImage(_ call: CAPPluginCall) {
-        guard let imageData = call.getString("image") else {
-            call.reject("Image data required")
-            return
-        }
-        guard let apiKey = call.getString("apiKey") else {
-            call.reject("API key required")
-            return
-        }
-        let theme = call.getString("theme") ?? "Natural"
-        
-        implementation.colorizeImage(imageData: imageData, theme: theme, apiKey: apiKey) { result, error in
-            if let error = error {
-                call.resolve(["success": false, "error": error.localizedDescription])
-            } else if let result = result {
-                call.resolve(["success": true, "result": result])
             }
         }
     }

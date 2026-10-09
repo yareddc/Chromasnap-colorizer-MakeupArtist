@@ -5,6 +5,23 @@
 import { API_ENDPOINTS } from './apiConfig';
 import type { AuthUser, SubscriptionAccount, SubscriptionPlan, SubscriptionUsageItem } from '../types';
 
+export type LookType = 'hair' | 'beauty' | 'outfit' | 'complete-look';
+
+export interface SavedLook {
+  id: string;
+  userId: string;
+  type: LookType;
+  originalImageUrl?: string | null;
+  generatedImageUrl: string;
+  hairstyle?: string | null;
+  beautyStyle?: string | null;
+  outfit?: string | null;
+  accessories?: string | null;
+  prompt?: string | null;
+  favorite: boolean;
+  createdAt: number;
+}
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const USER_ID_STORAGE_KEY = 'chromasnap_user_id';
@@ -95,68 +112,6 @@ const parseJsonResponse = async (response: Response) => {
     throw new Error("Backend unreachable (HTML received). Make sure the API URL points to the host computer's IP address.");
   }
   return response.json();
-};
-
-export const isBlackAndWhite = async (base64Image: string): Promise<boolean> => {
-  try {
-    const response = await fetchWithTimeout(API_ENDPOINTS.ANALYZE_MONOCHROMATIC, {
-      method: 'POST',
-      credentials: withAuthCredentials,
-      headers: getJsonHeaders(),
-      body: JSON.stringify({ image: base64Image }),
-    }, 30000);
-
-    if (!response.ok) {
-      console.error(`Backend error (${response.status}): Is the server running?`);
-      throw new Error('Analysis failed');
-    }
-    const result = await parseJsonResponse(response);
-    return !!result.isMonochromatic;
-  } catch (error) {
-    console.error("Monochromatic check failed:", error);
-    return true; // Default fail-safe
-  }
-};
-
-export const colorizeImage = async (base64Image: string, theme: string = 'Natural'): Promise<string> => {
-  try {
-    const endpoint = API_ENDPOINTS.PROCESS_COLORIZE;
-    console.debug(`Colorization request to: ${endpoint}`);
-    
-    const response = await fetchWithTimeout(endpoint, {
-      method: 'POST',
-      credentials: withAuthCredentials,
-      headers: getJsonHeaders(),
-      body: JSON.stringify({ image: base64Image, theme }),
-    }, 120000);
-
-    if (!response.ok) {
-      let errorMessage = 'Colorization failed';
-      try {
-        const errorData = await response.json();
-        errorMessage = errorData.error || errorMessage;
-        if (errorData.details) errorMessage += `: ${errorData.details}`;
-      } catch {
-        errorMessage = `Server error (${response.status}): Is the backend running?`;
-      }
-      throw new Error(errorMessage);
-    }
-
-    const data = await parseJsonResponse(response);
-    return data.result;
-  } catch (error: any) {
-    const msg = error?.message || String(error);
-    console.error("Colorization API Error:", msg);
-    
-    // Provide more helpful error messages
-    if (msg.includes('NetworkError') || msg.includes('Failed to fetch') || msg.includes('AbortError')) {
-      throw new Error('Backend unreachable. Ensure the server is running and CORS is configured correctly.');
-    }
-    if (msg.includes('Unauthorized')) {
-      throw new Error('Session expired. Please refresh the page.');
-    }
-    throw new Error(msg || "Failed to colorize image.");
-  }
 };
 
 export const upscaleImage = async (base64Image: string): Promise<string> => {
@@ -633,6 +588,46 @@ export const generateVirtualMakeup = async (
   return { editedImage, description };
 };
 
+export const generateHairstyleTryOn = async (
+  selfieBase64: string,
+  hairstyle: string,
+  hairColor: string = 'natural'
+): Promise<{ editedImage: string; description: string }> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.GENERATE_HAIRSTYLE_TRY_ON, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({
+      selfie: selfieBase64,
+      hairstyle,
+      hairColor,
+    }),
+  }, 120000);
+
+  if (!response.ok) {
+    let errorMessage = 'Hairstyle try-on failed';
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.error || errorMessage;
+    } catch {
+      errorMessage = `Server error (${response.status}): Is the backend running?`;
+    }
+    throw new Error(errorMessage);
+  }
+  const result = await parseJsonResponse(response);
+  const editedImage = typeof result?.editedImage === 'string'
+    ? result.editedImage
+    : typeof result?.result === 'string'
+      ? result.result
+      : selfieBase64;
+
+  const description = typeof result?.description === 'string'
+    ? result.description
+    : '';
+
+  return { editedImage, description };
+};
+
 export const generateOutfitTryOn = async (
   selfieBase64: string,
   outfitPrompt: string,
@@ -963,5 +958,245 @@ export const verifyGooglePlayPurchase = async (
     throw new Error(data.error || 'Failed to verify Google Play purchase');
   }
   return data.account as SubscriptionAccount;
+};
+
+export const saveLook = async (payload: {
+  type: LookType;
+  originalImage?: string;
+  generatedImage: string;
+  hairstyle?: string;
+  beautyStyle?: string;
+  outfit?: string;
+  accessories?: string;
+  prompt?: string;
+}): Promise<SavedLook> => {
+  const response = await fetch(API_ENDPOINTS.LOOKS, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to save look');
+  }
+  return data.look as SavedLook;
+};
+
+export const listLooks = async (): Promise<SavedLook[]> => {
+  const response = await fetch(API_ENDPOINTS.LOOKS, {
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to load looks');
+  }
+  return (data.looks || []) as SavedLook[];
+};
+
+export const deleteLook = async (lookId: string): Promise<boolean> => {
+  const response = await fetch(`${API_ENDPOINTS.LOOK_DELETE}/${lookId}`, {
+    method: 'DELETE',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to delete look');
+  }
+  return Boolean(data.removed);
+};
+
+export const setLookFavorite = async (lookId: string, favorite: boolean): Promise<boolean> => {
+  const response = await fetch(`${API_ENDPOINTS.LOOK_FAVORITE}/${lookId}/favorite`, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({ favorite }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to update favorite');
+  }
+  return Boolean(data.updated);
+};
+
+export const askStyleAdvisor = async (message: string, image?: string): Promise<string> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.STYLE_ADVISOR, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({ message, image }),
+  }, 120000);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Style advisor failed');
+  }
+  return typeof data.reply === 'string' ? data.reply : '';
+};
+
+export interface AccessoryRecommendation {
+  category: string;
+  name: string;
+  description: string;
+  styleNote?: string;
+}
+
+export const generateCompleteLook = async (
+  outfitDescription: string,
+  options?: { selfie?: string; occasion?: string }
+): Promise<AccessoryRecommendation[]> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.COMPLETE_LOOK, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({
+      outfitDescription,
+      selfie: options?.selfie,
+      occasion: options?.occasion,
+    }),
+  }, 120000);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Complete look failed');
+  }
+  return (data.recommendations || []) as AccessoryRecommendation[];
+};
+
+export const enhancePhoto = async (
+  image: string,
+  enhancementType: string = 'quality'
+): Promise<string> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.PHOTO_ENHANCEMENT, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify({ image, enhancementType }),
+  }, 120000);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Photo enhancement failed');
+  }
+  return typeof data.editedImage === 'string' ? data.editedImage : image;
+};
+
+export interface CreateMyLookPlan {
+  hairstyle: string;
+  hairColor: string;
+  beautyLook: string;
+  outfit: string;
+  accessories: AccessoryRecommendation[];
+}
+
+export const generateCreateMyLookPlan = async (options: {
+  selfie?: string;
+  occasion: string;
+  style?: string;
+  budget?: string;
+}): Promise<CreateMyLookPlan> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.CREATE_MY_LOOK, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify(options),
+  }, 120000);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Create my look failed');
+  }
+  const plan = data.plan || {};
+  return {
+    hairstyle: plan.hairstyle || '',
+    hairColor: plan.hairColor || 'natural',
+    beautyLook: plan.beautyLook || '',
+    outfit: plan.outfit || '',
+    accessories: Array.isArray(plan.accessories) ? plan.accessories : [],
+  };
+};
+
+export interface ProductRecommendation {
+  name: string;
+  category: string;
+  image?: string;
+  price?: string;
+  brand?: string;
+  productUrl?: string;
+  affiliateUrl?: string;
+  retailer?: string;
+}
+
+export interface ServiceRecommendation {
+  name: string;
+  type: 'barber' | 'hair-salon' | 'beauty-salon' | 'stylist';
+  description?: string;
+  location?: string;
+}
+
+export interface FindThisLookResult {
+  fashion: ProductRecommendation[];
+  services: ServiceRecommendation[];
+}
+
+export const findThisLook = async (options: {
+  lookDescription: string;
+  category?: string;
+  location?: string;
+}): Promise<FindThisLookResult> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.FIND_THIS_LOOK, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify(options),
+  }, 120000);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Find this look failed');
+  }
+  return {
+    fashion: Array.isArray(data.fashion) ? data.fashion : [],
+    services: Array.isArray(data.services) ? data.services : [],
+  };
+};
+
+// --- Generation Job System (async queue/poll) ---
+
+export type GenerationJobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+
+export interface GenerationJobResult {
+  id: string;
+  status: GenerationJobStatus;
+  result?: { image?: string; text?: string };
+  error?: string;
+}
+
+export const startGenerationJob = async (payload: {
+  featureType: string;
+  sourceImage?: string;
+  prompt: string;
+}): Promise<{ jobId: string; status: GenerationJobStatus }> => {
+  const response = await fetchWithTimeout(API_ENDPOINTS.GENERATION_JOB, {
+    method: 'POST',
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+    body: JSON.stringify(payload),
+  }, 30000);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to start generation job');
+  }
+  return { jobId: data.jobId, status: data.status };
+};
+
+export const getGenerationJob = async (jobId: string): Promise<GenerationJobResult> => {
+  const response = await fetch(`${API_ENDPOINTS.GENERATION_JOB}/${jobId}`, {
+    credentials: withAuthCredentials,
+    headers: getJsonHeaders(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to fetch job status');
+  }
+  return data as GenerationJobResult;
 };
 

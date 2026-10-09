@@ -1,5 +1,8 @@
 # 🎊 ChromaSnap Native Backend - Implementation Complete!
 
+> ⚠️ **Deprecated:** Colorization and black-and-white detection have been removed from the codebase. Colorize-related entries below are historical.
+
+
 ## ✅ What You're Getting
 
 ### 🏗️ **Complete Capacitor Plugin** (Production-Ready)

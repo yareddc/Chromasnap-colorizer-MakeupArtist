@@ -2,13 +2,11 @@ import { WebPlugin, type PluginListenerHandle } from '@capacitor/core';
 
 import type {
   ChromaSnapImageProcessorPlugin,
-  ColorizeOptions,
   AnalyzeOptions,
   EnhancementOptions,
   AnimationOptions,
   ProcessResult,
   SafetyCheckResult,
-  MonochromaticCheckResult,
 } from './index';
 
 /**
@@ -28,22 +26,6 @@ export class ChromaSnapImageProcessorWeb extends WebPlugin implements ChromaSnap
     return response.json();
   }
 
-  async analyzeMonochromatic(options: AnalyzeOptions): Promise<MonochromaticCheckResult> {
-    try {
-      const response = await fetch(`${this.apiBaseUrl}/api/analyze/monochromatic`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: options.image }),
-      });
-
-      if (!response.ok) throw new Error('Analysis failed');
-      return await this.parseJsonResponse(response);
-    } catch (error: any) {
-      console.error('Monochromatic check failed:', error);
-      throw error;
-    }
-  }
-
   async checkSafety(options: AnalyzeOptions): Promise<SafetyCheckResult> {
     try {
       const response = await fetch(`${this.apiBaseUrl}/api/analyze/safety`, {
@@ -57,27 +39,6 @@ export class ChromaSnapImageProcessorWeb extends WebPlugin implements ChromaSnap
     } catch (error) {
       console.error('Safety check failed:', error);
       return { isSafe: true, containsMinors: false, reason: '' };
-    }
-  }
-
-  async colorizeImage(options: ColorizeOptions): Promise<ProcessResult> {
-    try {
-      const response = await fetch(`${this.apiBaseUrl}/api/process/colorize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: options.image, theme: options.theme }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Colorization failed');
-      }
-
-      const data = await this.parseJsonResponse(response);
-      return { success: true, result: data.result };
-    } catch (error: any) {
-      console.error('Colorization failed:', error);
-      return { success: false, error: error.message || 'Colorization failed' };
     }
   }
 

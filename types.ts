@@ -1,16 +1,4 @@
 
-export interface ColorizedImage {
-  id: string;
-  original: string; // base64
-  colorized: string; // base64
-  timestamp: number;
-  safetyCheck?: {
-    isSafe: boolean;
-    containsMinors?: boolean;
-    reason?: string;
-  };
-}
-
 export interface AnimatedResult {
   videoUrl: string;
   timestamp: number;
@@ -20,7 +8,7 @@ export interface ProcessingState {
   isProcessing: boolean;
   statusMessage: string;
   error?: string;
-  type?: 'colorizing' | 'animating' | 'editing';
+  type?: 'animating' | 'editing';
 }
 
 export interface SubscriptionPlan {
@@ -54,3 +42,5 @@ export interface AuthUser {
   email?: string;
   phoneNumber?: string | null;
 }
+
+export type WorkspaceTab = 'dashboard' | 'animate' | 'create-look' | 'hairstyle' | 'beauty-lab' | 'barbershop' | 'outfit' | 'enhance' | 'stylist' | 'find-this-look' | 'looks' | 'account';

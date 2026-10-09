@@ -1,11 +1,10 @@
 # ChromaSnap Image Processor Plugin
 
-A native Capacitor plugin for ChromaSnap AI that enables image colorization, enhancement, and animation directly on iOS and Android devices.
+A native Capacitor plugin for ChromaSnap AI that enables image enhancement and animation directly on iOS and Android devices.
 
 ## Features
 
-- **Analyze Images**: Detect if image is black & white, check safety (nudity/minors)
-- **Colorize**: Convert B&W photos to color with multiple theme palettes
+- **Analyze Images**: Check safety (nudity/minors)
 - **Enhance**: Upscale, increase vibrancy, sharpen images
 - **Animate**: Generate AI-driven video animations from static images
 - **Native**: Runs natively on iOS/Android through Capacitor bridge
@@ -42,22 +41,9 @@ buildTypes {
 ```typescript
 import { ChromaSnapImageProcessor } from '@chromasnap/image-processor';
 
-// Analyze if image is monochromatic
-const isMonochromatic = await ChromaSnapImageProcessor.analyzeMonochromatic({
-  image: base64ImageDataUrl,
-  apiKey: 'your-gemini-api-key'
-});
-
 // Check image safety
 const safety = await ChromaSnapImageProcessor.checkSafety({
   image: base64ImageDataUrl,
-  apiKey: 'your-gemini-api-key'
-});
-
-// Colorize image
-const colorized = await ChromaSnapImageProcessor.colorizeImage({
-  image: base64ImageDataUrl,
-  theme: 'Natural', // Natural | Cinematic | Vivid | Vintage | Technicolor
   apiKey: 'your-gemini-api-key'
 });
 
@@ -90,17 +76,6 @@ const animation = await ChromaSnapImageProcessor.animateImage({
 
 ### Methods
 
-#### `analyzeMonochromatic(options: AnalyzeOptions): Promise<MonochromaticCheckResult>`
-
-Determine if an image is black and white (monochromatic).
-
-**Returns:**
-```typescript
-{
-  isMonochromatic: boolean
-}
-```
-
 #### `checkSafety(options: AnalyzeOptions): Promise<SafetyCheckResult>`
 
 Check image for inappropriate content (nudity, minors, explicit content).
@@ -111,28 +86,6 @@ Check image for inappropriate content (nudity, minors, explicit content).
   isSafe: boolean;
   containsMinors?: boolean;
   reason?: string;
-}
-```
-
-#### `colorizeImage(options: ColorizeOptions): Promise<ProcessResult>`
-
-Colorize a black and white image with a specific theme palette.
-
-**Options:**
-```typescript
-{
-  image: string; // base64 data URL
-  theme: 'Natural' | 'Cinematic' | 'Vivid' | 'Vintage' | 'Technicolor';
-  apiKey: string;
-}
-```
-
-**Returns:**
-```typescript
-{
-  success: boolean;
-  result?: string; // base64 image
-  error?: string;
 }
 ```
 
@@ -156,9 +109,7 @@ Generate cinematic animation from static image (video generation via Veo model).
 
 | Feature | iOS | Android | Web |
 |---------|-----|---------|-----|
-| analyzeMonochromatic | ✅ | ✅ | ✅ |
 | checkSafety | ✅ | ✅ | ✅ |
-| colorizeImage | ✅ | ✅ | ✅ |
 | upscaleImage | ✅ | ✅ | ✅ |
 | enhanceVibrancy | ✅ | ✅ | ✅ |
 | sharpenImage | ✅ | ✅ | ✅ |
@@ -185,7 +136,7 @@ All methods follow a consistent error pattern:
 
 ```typescript
 try {
-  const result = await ChromaSnapImageProcessor.colorizeImage(options);
+  const result = await ChromaSnapImageProcessor.upscaleImage(options);
   if (result.success) {
     // Process result.result
   } else {

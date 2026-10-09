@@ -45,11 +45,11 @@ npm run dev
 import { API_ENDPOINTS, getApiBaseUrl } from './services/apiConfig.js';
 
 console.log('Base URL:', getApiBaseUrl());
-console.log('Colorize Endpoint:', API_ENDPOINTS.PROCESS_COLORIZE);
+console.log('Upscale Endpoint:', API_ENDPOINTS.PROCESS_UPSCALE);
 
 // Expected:
 // Base URL: http://localhost:3001
-// Colorize Endpoint: http://localhost:3001/api/process/colorize
+// Upscale Endpoint: http://localhost:3001/api/process/upscale
 ```
 
 ## Environment Variables
@@ -65,11 +65,9 @@ All available endpoints (auto-constructed from `REACT_APP_API_BASE_URL`):
 
 ```javascript
 // Analysis
-POST {BASE_URL}/api/analyze/monochromatic
 POST {BASE_URL}/api/analyze/safety
 
 // Image Processing
-POST {BASE_URL}/api/process/colorize
 POST {BASE_URL}/api/process/upscale
 POST {BASE_URL}/api/process/vibrancy
 POST {BASE_URL}/api/process/sharpen
@@ -83,17 +81,17 @@ POST {BASE_URL}/api/process/animate
 ```typescript
 import { API_ENDPOINTS } from './services/apiConfig';
 
-fetch(API_ENDPOINTS.PROCESS_COLORIZE, { ... });
+fetch(API_ENDPOINTS.PROCESS_UPSCALE, { ... });
 ```
 
 ### ❌ Avoid
 
 ```typescript
 // Old relative paths (don't use)
-fetch('/api/process/colorize', { ... });
+fetch('/api/process/upscale', { ... });
 
 // Hardcoded URLs (don't use)
-fetch('http://localhost:3001/api/process/colorize', { ... });
+fetch('http://localhost:3001/api/process/upscale', { ... });
 ```
 
 ## Changing Backend URL

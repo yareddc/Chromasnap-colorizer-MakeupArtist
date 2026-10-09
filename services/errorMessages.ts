@@ -58,7 +58,6 @@ const FRIENDLY_MAP: Array<[RegExp | string, string]> = [
 
   // Image processing
   [/analysis failed/i,               'Image analysis failed. Please try a different image.'],
-  [/failed to colorize/i,            'Colorization failed. Please try again.'],
   [/failed to upscale/i,             'Upscaling failed. Please try again.'],
   [/failed to increase vibrancy/i,   'Vibrancy enhancement failed. Please try again.'],
   [/failed to sharpen/i,             'Sharpening failed. Please try again.'],

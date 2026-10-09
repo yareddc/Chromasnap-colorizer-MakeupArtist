@@ -81,9 +81,7 @@ Capacitor Plugin Bridge
 
 ```typescript
 // All operations available cross-platform
-await isBlackAndWhite(image)      // Detect B&W
 await checkImageSafety(image)     // Screen content
-await colorizeImage(image, theme) // Apply palette
 await upscaleImage(image)         // 4K enhancement
 await enhanceVibrancy(image)      // Boost colors
 await sharpenImage(image)         // Sharpen details
@@ -187,7 +185,6 @@ See [NATIVE_BACKEND_GUIDE.md](../NATIVE_BACKEND_GUIDE.md) for more help.
 | Network | All HTTP | Native stack |
 
 ### Benchmarks (Estimated)
-- Colorization: ~2-3s faster on mobile
 - All operations: ~3-5x less network overhead
 - Battery impact: ~20-30% less drain per operation
 
@@ -241,16 +238,6 @@ npx cap build android       # Android release
 
 ### Methods
 
-#### `analyzeMonochromatic(options)`
-Check if image is black & white
-```typescript
-const result = await ChromaSnapImageProcessor.analyzeMonochromatic({
-  image: base64DataUrl,
-  apiKey: 'your-key'
-});
-// Returns: { isMonochromatic: boolean }
-```
-
 #### `checkSafety(options)`
 Screen for nudity, minors, explicit content
 ```typescript
@@ -261,19 +248,8 @@ const result = await ChromaSnapImageProcessor.checkSafety({
 // Returns: { isSafe: boolean, containsMinors: boolean, reason: string }
 ```
 
-#### `colorizeImage(options)`
-Colorize B&W image with theme
-```typescript
-const result = await ChromaSnapImageProcessor.colorizeImage({
-  image: base64DataUrl,
-  theme: 'Natural' | 'Cinematic' | 'Vivid' | 'Vintage' | 'Technicolor',
-  apiKey: 'your-key'
-});
-// Returns: { success: boolean, result?: string, error?: string }
-```
-
 #### `upscaleImage(options)`, `enhanceVibrancy(options)`, `sharpenImage(options)`
-Similar structure to colorizeImage
+Enhancement operations that return `{ success: boolean, result?: string, error?: string }`.
 
 #### `animateImage(options)`
 Generate video animation (pending Veo integration)

@@ -52,14 +52,12 @@ const baseUrl = getApiBaseUrl();
 // Result: http://localhost:3001
 
 // Use specific endpoints
-const colorizeUrl = API_ENDPOINTS.PROCESS_COLORIZE;
-// Result: http://localhost:3001/api/process/colorize
+const upscaleUrl = API_ENDPOINTS.PROCESS_UPSCALE;
+// Result: http://localhost:3001/api/process/upscale
 ```
 
 **Available Endpoints:**
-- `API_ENDPOINTS.ANALYZE_MONOCHROMATIC` - Check if image is B&W
 - `API_ENDPOINTS.ANALYZE_SAFETY` - Safety check (nudity, minors)
-- `API_ENDPOINTS.PROCESS_COLORIZE` - Colorize black & white images
 - `API_ENDPOINTS.PROCESS_UPSCALE` - Upscale to higher resolution
 - `API_ENDPOINTS.PROCESS_VIBRANCY` - Enhance color vibrancy
 - `API_ENDPOINTS.PROCESS_SHARPEN` - Sharpen image details
@@ -72,11 +70,11 @@ All API calls now use absolute URLs from `apiConfig.ts`:
 ```typescript
 import { API_ENDPOINTS } from './apiConfig';
 
-export const colorizeImage = async (base64Image: string, theme: string = 'Natural'): Promise<string> => {
-  const response = await fetch(API_ENDPOINTS.PROCESS_COLORIZE, {
+export const upscaleImage = async (base64Image: string): Promise<string> => {
+  const response = await fetch(API_ENDPOINTS.PROCESS_UPSCALE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: base64Image, theme }),
+    body: JSON.stringify({ image: base64Image }),
   });
   // ...
 };
@@ -92,8 +90,8 @@ export class ChromaSnapImageProcessorWeb {
                         process.env.REACT_APP_API_BASE_URL || 
                         'http://localhost:3001') as string;
   
-  async colorizeImage(options: ColorizeOptions) {
-    const response = await fetch(`${this.apiBaseUrl}/api/process/colorize`, {
+  async upscaleImage(options: EnhancementOptions) {
+    const response = await fetch(`${this.apiBaseUrl}/api/process/upscale`, {
       // ...
     });
   }
@@ -204,7 +202,7 @@ The application has intelligent fallbacks:
 import { getApiBaseUrl, API_ENDPOINTS } from './services/apiConfig';
 
 console.log('API Base URL:', getApiBaseUrl());
-console.log('Colorize Endpoint:', API_ENDPOINTS.PROCESS_COLORIZE);
+console.log('Upscale Endpoint:', API_ENDPOINTS.PROCESS_UPSCALE);
 ```
 
 ### Verify Environment Variables
@@ -221,7 +219,7 @@ console.log(import.meta.env.REACT_APP_API_BASE_URL);
 
 ```bash
 # Test if backend is reachable
-curl -X POST http://localhost:3001/api/analyze/monochromatic \
+curl -X POST http://localhost:3001/api/analyze/safety \
   -H "Content-Type: application/json" \
   -d '{"image":"data:image/png;base64,..."}'
 ```
@@ -275,13 +273,13 @@ If you were using relative paths before:
 
 ### Old Code ❌
 ```typescript
-const response = await fetch('/api/process/colorize', { ... });
+const response = await fetch('/api/process/upscale', { ... });
 ```
 
 ### New Code ✅
 ```typescript
 import { API_ENDPOINTS } from './services/apiConfig';
-const response = await fetch(API_ENDPOINTS.PROCESS_COLORIZE, { ... });
+const response = await fetch(API_ENDPOINTS.PROCESS_UPSCALE, { ... });
 ```
 
 ## Troubleshooting

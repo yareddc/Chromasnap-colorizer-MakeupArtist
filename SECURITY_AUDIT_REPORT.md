@@ -344,7 +344,7 @@ app.post('/api/analyze/safety', async (req, res) => {
     }
 });
 
-// Enforce safety checks in colorize endpoint
+// Enforce safety checks in processing endpoints
 const isRestricted = result && result.safetyCheck && !result.safetyCheck.isSafe;
 if (isRestricted && containsMinors) {
     // Block processing for minors

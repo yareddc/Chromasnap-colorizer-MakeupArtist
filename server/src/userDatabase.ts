@@ -213,6 +213,28 @@ export const initUsernameDatabase = async () => {
         );
     `);
 
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS looks (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL COLLATE NOCASE,
+            type TEXT NOT NULL CHECK(type IN ('hair', 'beauty', 'outfit', 'complete-look')),
+            original_image_url TEXT,
+            generated_image_url TEXT,
+            hairstyle TEXT,
+            beauty_style TEXT,
+            outfit TEXT,
+            accessories TEXT,
+            prompt TEXT,
+            favorite INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );
+    `);
+
+    await db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_looks_user_created
+        ON looks(user_id, created_at DESC);
+    `);
+
     database = db;
 
     if (persistentBucket) {
@@ -770,5 +792,146 @@ export const markGooglePlayTokenConsumed = async (payload: {
         return true;
     }
 
+    return false;
+};
+
+export type LookType = 'hair' | 'beauty' | 'outfit' | 'complete-look';
+
+export type LookRecord = {
+    id: string;
+    userId: string;
+    type: LookType;
+    originalImageUrl?: string | null;
+    generatedImageUrl: string;
+    hairstyle?: string | null;
+    beautyStyle?: string | null;
+    outfit?: string | null;
+    accessories?: string | null;
+    prompt?: string | null;
+    favorite: boolean;
+    createdAt: number;
+};
+
+export const saveLook = async (look: {
+    id: string;
+    userId: string;
+    type: LookType;
+    originalImageUrl?: string | null;
+    generatedImageUrl: string;
+    hairstyle?: string | null;
+    beautyStyle?: string | null;
+    outfit?: string | null;
+    accessories?: string | null;
+    prompt?: string | null;
+    favorite?: boolean;
+}): Promise<LookRecord> => {
+    const userId = normalizeUsername(look.userId);
+    if (!userId) throw new Error('User ID is required');
+    if (!look.id) throw new Error('Look ID is required');
+    if (!look.generatedImageUrl) throw new Error('Generated image URL is required');
+    if (!['hair', 'beauty', 'outfit', 'complete-look'].includes(look.type)) {
+        throw new Error('Invalid look type');
+    }
+
+    const db = getDatabase();
+    const createdAt = Date.now();
+    await db.run(
+        `INSERT INTO looks
+         (id, user_id, type, original_image_url, generated_image_url, hairstyle, beauty_style, outfit, accessories, prompt, favorite, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        look.id,
+        userId,
+        look.type,
+        look.originalImageUrl || null,
+        look.generatedImageUrl,
+        look.hairstyle || null,
+        look.beautyStyle || null,
+        look.outfit || null,
+        look.accessories || null,
+        look.prompt || null,
+        look.favorite ? 1 : 0,
+        createdAt
+    );
+
+    await queuePersistDatabase();
+
+    return {
+        id: look.id,
+        userId,
+        type: look.type,
+        originalImageUrl: look.originalImageUrl || null,
+        generatedImageUrl: look.generatedImageUrl,
+        hairstyle: look.hairstyle || null,
+        beautyStyle: look.beautyStyle || null,
+        outfit: look.outfit || null,
+        accessories: look.accessories || null,
+        prompt: look.prompt || null,
+        favorite: Boolean(look.favorite),
+        createdAt,
+    };
+};
+
+const mapLookRow = (row: any): LookRecord => ({
+    id: String(row.id),
+    userId: String(row.user_id),
+    type: row.type as LookType,
+    originalImageUrl: row.original_image_url ?? null,
+    generatedImageUrl: String(row.generated_image_url || ''),
+    hairstyle: row.hairstyle ?? null,
+    beautyStyle: row.beauty_style ?? null,
+    outfit: row.outfit ?? null,
+    accessories: row.accessories ?? null,
+    prompt: row.prompt ?? null,
+    favorite: Boolean(row.favorite),
+    createdAt: Number(row.created_at),
+});
+
+export const listLooks = async (userId: string): Promise<LookRecord[]> => {
+    const normalizedUserId = normalizeUsername(userId);
+    if (!normalizedUserId) return [];
+
+    const db = getDatabase();
+    const rows = await db.all<any[]>(
+        `SELECT * FROM looks WHERE user_id = ? ORDER BY created_at DESC`,
+        normalizedUserId
+    );
+
+    return rows.map(mapLookRow);
+};
+
+export const deleteLook = async (userId: string, lookId: string): Promise<boolean> => {
+    const normalizedUserId = normalizeUsername(userId);
+    if (!normalizedUserId || !lookId) return false;
+
+    const db = getDatabase();
+    const result = await db.run(
+        `DELETE FROM looks WHERE id = ? AND user_id = ?`,
+        lookId,
+        normalizedUserId
+    );
+
+    if ((result.changes || 0) > 0) {
+        await queuePersistDatabase();
+        return true;
+    }
+    return false;
+};
+
+export const setLookFavorite = async (userId: string, lookId: string, favorite: boolean): Promise<boolean> => {
+    const normalizedUserId = normalizeUsername(userId);
+    if (!normalizedUserId || !lookId) return false;
+
+    const db = getDatabase();
+    const result = await db.run(
+        `UPDATE looks SET favorite = ? WHERE id = ? AND user_id = ?`,
+        favorite ? 1 : 0,
+        lookId,
+        normalizedUserId
+    );
+
+    if ((result.changes || 0) > 0) {
+        await queuePersistDatabase();
+        return true;
+    }
     return false;
 };

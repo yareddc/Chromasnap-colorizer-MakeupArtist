@@ -19,24 +19,6 @@ class ChromaSnapImageProcessorPlugin : Plugin() {
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
     @PluginMethod
-    fun analyzeMonochromatic(call: PluginCall) {
-        val imageData = call.getString("image")
-        if (imageData == null) {
-            call.reject("Image data required")
-            return
-        }
-        
-        scope.launch {
-            try {
-                val result = implementation.analyzeMonochromatic(imageData)
-                call.resolve(result)
-            } catch (e: Exception) {
-                call.reject(e.message ?: "Analysis failed")
-            }
-        }
-    }
-
-    @PluginMethod
     fun checkSafety(call: PluginCall) {
         val imageData = call.getString("image")
         if (imageData == null) {
@@ -50,37 +32,6 @@ class ChromaSnapImageProcessorPlugin : Plugin() {
                 call.resolve(result)
             } catch (e: Exception) {
                 call.reject(e.message ?: "Safety check failed")
-            }
-        }
-    }
-
-    @PluginMethod
-    fun colorizeImage(call: PluginCall) {
-        val imageData = call.getString("image")
-        val apiKey = call.getString("apiKey")
-        val theme = call.getString("theme") ?: "Natural"
-        
-        if (imageData == null) {
-            call.reject("Image data required")
-            return
-        }
-        if (apiKey == null) {
-            call.reject("API key required")
-            return
-        }
-        
-        scope.launch {
-            try {
-                val result = implementation.colorizeImage(imageData, theme, apiKey)
-                val response = JSObject()
-                response.put("success", true)
-                response.put("result", result)
-                call.resolve(response)
-            } catch (e: Exception) {
-                val response = JSObject()
-                response.put("success", false)
-                response.put("error", e.message ?: "Colorization failed")
-                call.resolve(response)
             }
         }
     }

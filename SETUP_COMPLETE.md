@@ -1,5 +1,8 @@
 # 🎉 ChromaSnap Native Backend Implementation - Complete Summary
 
+> ⚠️ **Deprecated:** Colorization and black-and-white detection have been removed from the codebase. Colorize-related entries below are historical.
+
+
 ## Project Status: ✅ COMPLETE & PRODUCTION-READY
 
 **Completed**: February 14, 2026  

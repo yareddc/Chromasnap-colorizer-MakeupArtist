@@ -25,7 +25,7 @@ const VideoResult: React.FC<VideoResultProps> = ({ videoUrl, onDownload }) => {
       </div>
       
       <div className="w-full flex justify-between items-center px-2 mt-4">
-        <p className="text-slate-400 text-sm italic">Video generated from your colorized photo</p>
+        <p className="text-slate-400 text-sm italic">Video generated from your photo</p>
         <button
           type="button"
           onClick={() => {

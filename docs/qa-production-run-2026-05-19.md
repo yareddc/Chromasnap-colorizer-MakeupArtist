@@ -1,5 +1,8 @@
 # Production QA Run - 2026-05-19
 
+> ⚠️ **Deprecated:** This QA run covered the Colorizer feature, which has since been removed from the codebase. Colorizer references below are historical.
+
+
 ## Scope
 - Authenticated deep feature pass
 - Colorizer monochrome and processing validation

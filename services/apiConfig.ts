@@ -41,11 +41,9 @@ const API_BASE_URL = (
  */
 export const API_ENDPOINTS = {
   // Analysis endpoints
-  ANALYZE_MONOCHROMATIC: `${API_BASE_URL}/api/analyze/monochromatic`,
   ANALYZE_SAFETY: `${API_BASE_URL}/api/analyze/safety`,
 
   // Image processing endpoints
-  PROCESS_COLORIZE: `${API_BASE_URL}/api/process/colorize`,
   PROCESS_UPSCALE: `${API_BASE_URL}/api/process/upscale`,
   PROCESS_VIBRANCY: `${API_BASE_URL}/api/process/vibrancy`,
   PROCESS_SHARPEN: `${API_BASE_URL}/api/process/sharpen`,
@@ -57,7 +55,14 @@ export const API_ENDPOINTS = {
   // Beauty Lab endpoints
   CONSULT_BEAUTY_ADVISOR: `${API_BASE_URL}/api/consult/beauty-advisor`,
   GENERATE_VIRTUAL_MAKEUP: `${API_BASE_URL}/api/generate/virtual-makeup`,
+  GENERATE_HAIRSTYLE_TRY_ON: `${API_BASE_URL}/api/generate/hairstyle-try-on`,
   GENERATE_OUTFIT_TRY_ON: `${API_BASE_URL}/api/generate/outfit-tryon`,
+  STYLE_ADVISOR: `${API_BASE_URL}/api/style-advisor`,
+  CREATE_MY_LOOK: `${API_BASE_URL}/api/generate/create-my-look`,
+  COMPLETE_LOOK: `${API_BASE_URL}/api/generate/complete-look`,
+  PHOTO_ENHANCEMENT: `${API_BASE_URL}/api/generate/photo-enhancement`,
+  GENERATION_JOB: `${API_BASE_URL}/api/generate/job`,
+  FIND_THIS_LOOK: `${API_BASE_URL}/api/find-this-look`,
   RECOMMEND_OCCASION_LOOK: `${API_BASE_URL}/api/recommend/occasion-look`,
   ANALYZE_BEAUTY_PROFILE: `${API_BASE_URL}/api/analyze/beauty-profile`,
   ANALYZE_COMPLEXION_REPORT: `${API_BASE_URL}/api/analyze/complexion-report`,
@@ -82,7 +87,11 @@ export const API_ENDPOINTS = {
 
   AUTH_SOCIAL_LOGIN: `${API_BASE_URL}/api/auth/social-login`,
 
-  // Admin endpoints
+  // Saved Looks
+  LOOKS: `${API_BASE_URL}/api/looks`,
+  LOOK_DELETE: `${API_BASE_URL}/api/looks`,
+  LOOK_FAVORITE: `${API_BASE_URL}/api/looks`,
+
   ADMIN_USERNAMES: `${API_BASE_URL}/api/admin/usernames`,
 } as const;
 

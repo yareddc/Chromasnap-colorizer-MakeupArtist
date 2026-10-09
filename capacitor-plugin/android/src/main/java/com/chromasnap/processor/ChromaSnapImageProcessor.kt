@@ -12,34 +12,6 @@ class ChromaSnapImageProcessor {
     private val apiUrl = "https://generativelanguage.googleapis.com/v1beta/models"
     private val TAG = "ChromaSnap"
     
-    suspend fun analyzeMonochromatic(imageData: String): JSObject {
-        val base64Data = extractBase64(imageData)
-        val mimeType = extractMimeType(imageData)
-        
-        val requestBody = JSONObject().apply {
-            put("contents", JSONObject.wrap(listOf(
-                mapOf(
-                    "parts" to listOf(
-                        mapOf("inlineData" to mapOf("data" to base64Data, "mimeType" to mimeType)),
-                        mapOf("text" to "Is this image black and white (monochromatic)? Respond strictly with \"true\" or \"false\" in JSON format.")
-                    )
-                )
-            )))
-            put("generationConfig", mapOf(
-                "responseMimeType" to "application/json",
-                "responseSchema" to mapOf(
-                    "type" to "OBJECT",
-                    "properties" to mapOf(
-                        "isMonochromatic" to mapOf("type" to "BOOLEAN")
-                    ),
-                    "required" to listOf("isMonochromatic")
-                )
-            ))
-        }
-        
-        return makeGeminiRequest("gemini-2.0-flash:generateContent", requestBody)
-    }
-    
     suspend fun checkSafety(imageData: String): JSObject {
         val base64Data = extractBase64(imageData)
         val mimeType = extractMimeType(imageData)
@@ -68,35 +40,6 @@ class ChromaSnapImageProcessor {
         }
         
         return makeGeminiRequest("gemini-2.0-flash:generateContent", requestBody)
-    }
-    
-    suspend fun colorizeImage(imageData: String, theme: String, apiKey: String): String {
-        val base64Data = extractBase64(imageData)
-        val mimeType = extractMimeType(imageData)
-        
-        val themePrompts = mapOf(
-            "Natural" to "realistic skin tones, natural landscapes, and accurate fabric colors.",
-            "Cinematic" to "a moody, cinematic film look with high contrast and teal-and-orange hints.",
-            "Vivid" to "bright, highly saturated, and punchy modern colors.",
-            "Vintage" to "warm, slightly desaturated, nostalgic 70s film tones.",
-            "Technicolor" to "highly vibrant, stylized mid-century 3-strip technicolor look."
-        )
-        
-        val instruction = themePrompts[theme] ?: themePrompts["Natural"]!!
-        
-        val requestBody = JSONObject().apply {
-            put("contents", JSONObject.wrap(listOf(
-                mapOf(
-                    "parts" to listOf(
-                        mapOf("inlineData" to mapOf("data" to base64Data, "mimeType" to mimeType)),
-                        mapOf("text" to "You are a professional photo restorer. Colorize this black and white photo with high precision using a $theme palette. Ensure $instruction Output ONLY the resulting colorized image. No conversational text.")
-                    )
-                )
-            )))
-        }
-        
-        val result = makeGeminiImageRequest("gemini-2.0-flash:generateContent", requestBody, apiKey)
-        return result
     }
     
     suspend fun upscaleImage(imageData: String, apiKey: String): String {

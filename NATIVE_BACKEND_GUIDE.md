@@ -1,5 +1,8 @@
 # Native Backend Integration Guide
 
+> ⚠️ **Deprecated:** Colorization and black-and-white (monochromatic) detection have been removed. The `colorizeImage` and `isBlackAndWhite` APIs referenced below no longer exist.
+
+
 This guide explains how to use the ChromaSnap Native Image Processor plugin to run image processing natively on iOS and Android devices.
 
 ## Overview

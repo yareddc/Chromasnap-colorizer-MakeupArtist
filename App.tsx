@@ -2,18 +2,23 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Header from './components/Header';
 import ImageUploader from './components/ImageUploader';
-import ComparisonView from './components/ComparisonView';
 import VideoResult from './components/VideoResult';
 import LoadingOverlay from './components/LoadingOverlay';
 import TurnstileCaptcha from './components/TurnstileCaptcha';
 import AdminLoginPage from './components/AdminLoginPage';
 import PhotoEditorModal from './components/PhotoEditorModal';
 import MultiAngleAfterPreview from './components/MultiAngleAfterPreview';
-import { AuthUser, ColorizedImage, AnimatedResult, ProcessingState, SubscriptionAccount, SubscriptionPlan, SubscriptionUsageItem } from './types';
+import HairTryOn from './components/HairTryOn';
+import LooksGallery from './components/LooksGallery';
+import StyleAdvisor from './components/StyleAdvisor';
+import PhotoEnhancer from './components/PhotoEnhancer';
+import CreateMyLook from './components/CreateMyLook';
+import FindThisLook from './components/FindThisLook';
+import WorkspaceNav from './components/WorkspaceNav';
+import { AuthUser, AnimatedResult, ProcessingState, SubscriptionAccount, SubscriptionPlan, SubscriptionUsageItem, WorkspaceTab } from './types';
 import {
   analyzeComplexionReport,
   clearAuthToken,
-  colorizeImage,
   confirmPasswordReset,
   animateImage,
   checkImageSafety,
@@ -21,15 +26,12 @@ import {
   consultBeautyAdvisor,
   generateOutfitTryOn,
   generateVirtualMakeup,
+  generateCompleteLook,
   recommendOccasionLook,
   fetchAuthMe,
-  isBlackAndWhite,
   deleteAuthAccount,
   loginUser,
     socialLogin,
-  upscaleImage,
-  enhanceVibrancy,
-  sharpenImage,
   fetchSubscriptionPlans,
   fetchSubscriptionUsage,
   getCurrentUserId,
@@ -37,10 +39,11 @@ import {
   registerUser,
   requestPasswordReset,
   setCurrentUserId,
+  saveLook,
   topUpTokens,
   verifyGooglePlayPurchase,
 } from './services/geminiService';
-import type { BeautyProfileAnalysis, ComplexionReport } from './services/geminiService';
+import type { BeautyProfileAnalysis, ComplexionReport, AccessoryRecommendation } from './services/geminiService';
 import {
   checkGoogleRedirectResult,
   confirmPhoneOtp,
@@ -67,16 +70,6 @@ import {
 } from './services/barbershopVisitFeature';
 import { generateBarbershopLook, getBarbershopRecommendations } from './services/barbershopService';
 
-const PALETTES = [
-  { id: 'Natural', name: 'Natural', colors: 'from-emerald-600 to-emerald-400' },
-  { id: 'Cinematic', name: 'Cinematic', colors: 'from-indigo-600 to-indigo-400' },
-  { id: 'Vivid', name: 'Vivid', colors: 'from-pink-600 to-pink-400' },
-  { id: 'Vintage', name: 'Vintage', colors: 'from-amber-600 to-amber-400' },
-  { id: 'Technicolor', name: 'Technicolor', colors: 'from-rose-600 to-rose-400' }
-];
-
-const SAMPLE_IMAGE_ASSET_URL = '/bw_smoke_test.jpg';
-
 const resolveEnvProductId = (...keys: (keyof ImportMetaEnv)[]): string | undefined => {
   for (const key of keys) {
     const value = import.meta.env[key];
@@ -96,25 +89,27 @@ const PLAY_TOPUP_PRODUCT_IDS: Record<number, string> = {
 };
 
 const FEATURE_ACTION_TOKEN_COST = {
-  colorize: 3,
-  upscale: 1,
-  vibrancy: 1,
-  sharpen: 1,
   animate_start: 54,
+  hairstyle_try_on: 3,
   beauty_consult: 1,
   virtual_makeup: 3,
   outfit_tryon: 3,
+  style_advisor: 1,
+  create_my_look: 3,
+  find_this_look: 1,
+  photo_enhancement: 3,
   occasion_recommend: 1,
   beauty_profile_analysis: 1,
   complexion_report: 1,
 } as const;
 
 const ACCOUNT_PRICING_ROWS = [
-  { workspace: 'Colorizer', label: 'Colorize', tokens: FEATURE_ACTION_TOKEN_COST.colorize, note: 'Main image colorization request.' },
-  { workspace: 'Colorizer', label: '4K Upscale', tokens: FEATURE_ACTION_TOKEN_COST.upscale, note: 'Optional enhancement after colorization.' },
-  { workspace: 'Colorizer', label: 'Vibrant', tokens: FEATURE_ACTION_TOKEN_COST.vibrancy, note: 'Optional saturation enhancement.' },
-  { workspace: 'Colorizer', label: 'Sharpen', tokens: FEATURE_ACTION_TOKEN_COST.sharpen, note: 'Optional detail enhancement.' },
   { workspace: 'Animate', label: 'Animate / Animate This Photo', tokens: FEATURE_ACTION_TOKEN_COST.animate_start, note: 'Charged when the animation job starts.' },
+  { workspace: 'Hairstyle', label: 'Hairstyle Try-On', tokens: FEATURE_ACTION_TOKEN_COST.hairstyle_try_on, note: 'Generates a hairstyle try-on image.' },
+  { workspace: 'Style', label: 'AI Stylist', tokens: FEATURE_ACTION_TOKEN_COST.style_advisor, note: 'Each AI styling conversation message.' },
+  { workspace: 'Style', label: 'Photo Enhance', tokens: FEATURE_ACTION_TOKEN_COST.photo_enhancement, note: 'Enhances a photo (quality, lighting, etc.).' },
+  { workspace: 'Create', label: 'Create My Look', tokens: FEATURE_ACTION_TOKEN_COST.create_my_look, note: 'Generates a coordinated complete-look plan (hair + beauty + outfit + accessories).' },
+  { workspace: 'Commerce', label: 'Find This Look', tokens: FEATURE_ACTION_TOKEN_COST.find_this_look, note: 'Finds similar products and local services for a described look.' },
   { workspace: 'Beauty Lab', label: 'Get Ideas', tokens: FEATURE_ACTION_TOKEN_COST.occasion_recommend, note: 'Occasion-based recommendation set.' },
   { workspace: 'Beauty Lab', label: 'Consult Notes', tokens: FEATURE_ACTION_TOKEN_COST.beauty_consult, note: 'Written beauty consultation based on your notes.' },
   { workspace: 'Beauty Lab', label: 'Generate', tokens: FEATURE_ACTION_TOKEN_COST.virtual_makeup, note: 'Creates the Beauty Lab after-image.' },
@@ -128,7 +123,6 @@ const ACCOUNT_PRICING_ROWS = [
 ] as const;
 
 const ACCOUNT_PRICING_BUNDLES = [
-  { label: 'Colorize image', tokens: FEATURE_ACTION_TOKEN_COST.colorize },
   { label: 'Animate image', tokens: FEATURE_ACTION_TOKEN_COST.animate_start },
   { label: 'Barbershop full flow', tokens: FEATURE_ACTION_TOKEN_COST.occasion_recommend + FEATURE_ACTION_TOKEN_COST.virtual_makeup },
   { label: 'Beauty Lab core flow', tokens: FEATURE_ACTION_TOKEN_COST.occasion_recommend + FEATURE_ACTION_TOKEN_COST.beauty_consult + FEATURE_ACTION_TOKEN_COST.virtual_makeup },
@@ -137,7 +131,6 @@ const ACCOUNT_PRICING_BUNDLES = [
 
 
 
-type WorkspaceTab = 'dashboard' | 'colorizer' | 'animate' | 'beauty-lab' | 'barbershop' | 'outfit' | 'account';
 type Hair360Angle = 'front' | 'left' | 'right' | 'back';
 type LookRecommendation = { style: string; makeup: string; hair: string; description: string };
 type PendingPhotoEditTarget = 'try-on' | 'barbershop' | 'outfit';
@@ -249,9 +242,6 @@ type BeautyServiceId = (typeof BEAUTY_SERVICES)[number]['id'];
 const App: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [uploadPreviewZoom, setUploadPreviewZoom] = useState<number>(1);
-  const [selectedTheme, setSelectedTheme] = useState<string>('Natural');
-  const [result, setResult] = useState<ColorizedImage | null>(null);
-  const [history, setHistory] = useState<ColorizedImage[]>([]);
   const [uploadedOriginals, setUploadedOriginals] = useState<string[]>([]);
   const [videoResult, setVideoResult] = useState<AnimatedResult | null>(null);
   const [processing, setProcessing] = useState<ProcessingState>({
@@ -311,6 +301,7 @@ const App: React.FC = () => {
   const [faceShapeContour, setFaceShapeContour] = useState('soft-oval');
   const [accentBlushProfile, setAccentBlushProfile] = useState('rose');
   const [eyelinerPattern, setEyelinerPattern] = useState('cat-eye');
+  const [browStyle, setBrowStyle] = useState('natural');
   const [lashOverlayDensity, setLashOverlayDensity] = useState('high-density');
   const [lipFinish, setLipFinish] = useState('matte');
   const [wigTrackStyle, setWigTrackStyle] = useState('structured-bob');
@@ -334,6 +325,8 @@ const App: React.FC = () => {
   const [outfitSelfie, setOutfitSelfie] = useState<string | null>(null);
   const [outfitAfterImage, setOutfitAfterImage] = useState<string | null>(null);
   const [outfitLooks, setOutfitLooks] = useState<OutfitLookVariant[] | null>(null);
+  const [outfitAccessories, setOutfitAccessories] = useState<AccessoryRecommendation[]>([]);
+  const [outfitAccessoryLoading, setOutfitAccessoryLoading] = useState(false);
   const [outfitActiveLookIndex, setOutfitActiveLookIndex] = useState(0);
   const [outfitPrompt, setOutfitPrompt] = useState('An oversized emerald green blazer over a black silk turtleneck.');
   const [outfitStyle, setOutfitStyle] = useState('formal-evening');
@@ -375,13 +368,13 @@ const App: React.FC = () => {
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showAccountDrawer, setShowAccountDrawer] = useState(false);
   const [showBeautyToolsDrawer, setShowBeautyToolsDrawer] = useState(false);
+  const [createMenuOpen, setCreateMenuOpen] = useState(true);
   const [showAdminLoginPage, setShowAdminLoginPage] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const uploadPreviewRef = useRef<HTMLDivElement | null>(null);
   const pinchZoomStateRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
   const turnstileSiteKey = import.meta.env.REACT_APP_TURNSTILE_SITE_KEY || '';
   const isDeveloperMode = import.meta.env.DEV || import.meta.env.REACT_APP_ENABLE_ADMIN_PAGE === 'true';
-  const [mediaMode, setMediaMode] = useState<'colorize' | 'animate'>('colorize');
   const complexionHistoryStorageKey = `chromasnap_complexion_history_${authUser?.username || activeUserId || 'guest'}`;
 
   const currentPlan = subscriptionPlans.find((plan) => plan.id === (subscriptionAccount?.tier ?? 'free'));
@@ -851,7 +844,6 @@ const App: React.FC = () => {
   const handleImageSelected = (base64: string) => {
     setSelectedImage(base64);
     setUploadPreviewZoom(1);
-    setResult(null);
     setVideoResult(null);
     setProcessing(prev => ({ ...prev, error: undefined }));
     if (!uploadedOriginals.includes(base64)) {
@@ -865,23 +857,6 @@ const App: React.FC = () => {
     }
     const separator = imageUrl.includes('?') ? '&' : '?';
     return `${imageUrl}${separator}cb=${Date.now().toString(36)}`;
-  };
-
-  const handleSampleImage = async () => {
-    try {
-      const response = await fetch(SAMPLE_IMAGE_ASSET_URL, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`Sample image request failed (${response.status})`);
-      }
-      const sampleBlob = await response.blob();
-      handleImageSelected(await blobToDataUrl(sampleBlob));
-    } catch (error) {
-      console.error('Sample image load failed:', error);
-      setProcessing((prev) => ({
-        ...prev,
-        error: 'The sample image is unavailable right now. Please upload a photo instead.',
-      }));
-    }
   };
 
   const clampUploadZoom = (value: number) => Math.min(3, Math.max(0.5, Number(value.toFixed(2))));
@@ -926,130 +901,15 @@ const App: React.FC = () => {
     }
   };
 
-  const handleColorize = async (themeOverride?: string) => {
-    if (!selectedImage) return;
-    const activeTheme = themeOverride || selectedTheme;
-
-    setProcessing({
-      isProcessing: true,
-      statusMessage: `Colorizing with ${activeTheme} Palette...`,
-      type: 'colorizing',
-      error: undefined
-    });
-
-    try {
-      const monochromatic = await isBlackAndWhite(selectedImage);
-      if (!monochromatic) {
-        setProcessing({
-          isProcessing: false,
-          statusMessage: '',
-          error: "Please upload a black and white photo."
-        });
-        return;
-      }
-
-      setProcessing(prev => ({ ...prev, statusMessage: 'Scanning photo for safety...' }));
-      const preSafety = await checkImageSafety(selectedImage);
-      if (!preSafety.isSafe && preSafety.reason?.toLowerCase().includes('nudity')) {
-        setProcessing({
-          isProcessing: false,
-          statusMessage: '',
-          error: "Nudity is not allowed. Please upload a different image."
-        });
-        return;
-      }
-
-      setProcessing(prev => ({ ...prev, statusMessage: `Applying ${activeTheme} palette...` }));
-      const colorized = await colorizeImage(selectedImage, activeTheme);
-
-      setProcessing(prev => ({ ...prev, statusMessage: 'Verifying result...' }));
-      const postSafety = await checkImageSafety(colorized);
-
-      const newResult: ColorizedImage = {
-        id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36),
-        original: selectedImage,
-        colorized: ensureFreshPreviewUrl(colorized),
-        timestamp: Date.now(),
-        safetyCheck: postSafety
-      };
-
-      setResult(newResult);
-      setHistory([newResult]); // Reset undo history for new base image
-      setProcessing({ isProcessing: false, statusMessage: '' });
-    } catch (error: any) {
-      setProcessing({
-        isProcessing: false,
-        statusMessage: '',
-        error: friendlyError(error, 'colorize')
-      });
-    }
-  };
-
-  const updateResult = (newImage: string) => {
-    if (!result) return;
-    const newVersion: ColorizedImage = {
-      ...result,
-      id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36),
-      colorized: ensureFreshPreviewUrl(newImage),
-      timestamp: Date.now()
-    };
-    setResult(newVersion);
-    setHistory(prev => [newVersion, ...prev]);
-  };
-
-  const handleUpscale = async () => {
-    if (!result) return;
-    setProcessing({ isProcessing: true, statusMessage: 'Enhancing Resolution (4K)...', type: 'editing' });
-    try {
-      const upscaled = await upscaleImage(result.colorized);
-      updateResult(upscaled);
-      setProcessing({ isProcessing: false, statusMessage: '' });
-    } catch (error: any) {
-      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'upscale') });
-    }
-  };
-
-  const handleVibrancy = async () => {
-    if (!result) return;
-    setProcessing({ isProcessing: true, statusMessage: 'Increasing Color Vibrancy...', type: 'editing' });
-    try {
-      const vibrant = await enhanceVibrancy(result.colorized);
-      updateResult(vibrant);
-      setProcessing({ isProcessing: false, statusMessage: '' });
-    } catch (error: any) {
-      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'vibrancy') });
-    }
-  };
-
-  const handleSharpen = async () => {
-    if (!result) return;
-    setProcessing({ isProcessing: true, statusMessage: 'Sharpening Details...', type: 'editing' });
-    try {
-      const sharpened = await sharpenImage(result.colorized);
-      updateResult(sharpened);
-      setProcessing({ isProcessing: false, statusMessage: '' });
-    } catch (error: any) {
-      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'sharpen') });
-    }
-  };
-
-  const handleUndo = () => {
-    if (history.length > 1) {
-      const newHistory = history.slice(1);
-      setHistory(newHistory);
-      setResult(newHistory[0]);
-    }
-  };
-
   const triggerDownload = async (sourceUrl: string, filename: string) => {
     await downloadAsset(sourceUrl, filename);
   };
 
   const handleAnimate = async () => {
-    const sourceImage = result?.colorized || selectedImage;
+    const sourceImage = selectedImage;
     if (!sourceImage) return;
 
-    const safety = result?.safetyCheck || await checkImageSafety(sourceImage);
+    const safety = await checkImageSafety(sourceImage);
     if (safety?.containsMinors) {
       setProcessing({
         isProcessing: false,
@@ -1095,36 +955,8 @@ const App: React.FC = () => {
   const reset = () => {
     setSelectedImage(null);
     setUploadPreviewZoom(1);
-    setSelectedTheme('Natural');
-    setResult(null);
     setVideoResult(null);
     setProcessing({ isProcessing: false, statusMessage: '', error: undefined });
-    setMediaMode('colorize');
-  };
-
-  const handleDownloadResult = async () => {
-    if (!result) return;
-    try {
-      await triggerDownload(result.colorized, `chromasnap-hd-${Date.now()}.png`);
-    } catch (error: any) {
-      setProcessing({ isProcessing: false, statusMessage: '', error: friendlyError(error, 'download') });
-    }
-  };
-
-  const handleShareResult = async () => {
-    if (!result || !navigator.share) return;
-    try {
-      const response = await fetch(result.colorized);
-      const blob = await response.blob();
-      const file = new File([blob], `chromasnap-${Date.now()}.png`, { type: blob.type || 'image/png' });
-      await navigator.share({
-        title: 'ChromaSnap Result',
-        text: 'AI colorized image generated with ChromaSnap',
-        files: [file],
-      });
-    } catch {
-        void handleDownloadResult();
-    }
   };
 
   const handleWorkspaceTabChange = (tab: WorkspaceTab) => {
@@ -1145,7 +977,7 @@ const App: React.FC = () => {
           ? 'outfit-panel'
           : tab === 'account'
             ? 'account-panel'
-            : 'colorizer-panel';
+            : 'dashboard-panel';
     window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -1338,7 +1170,7 @@ const App: React.FC = () => {
 
   const beautyLabToolkitContext = [
     `Complexion ${complexionOpacity}%: shade ${complexionShadeProfile}, contour ${faceShapeContour}, blush ${accentBlushProfile}`,
-    `Eyes ${eyesOpacity}%: liner ${eyelinerPattern}, lashes ${lashOverlayDensity}`,
+    `Eyes ${eyesOpacity}%: liner ${eyelinerPattern}, lashes ${lashOverlayDensity}, brows ${browStyle}`,
     `Lips ${lipsOpacity}%: finish ${lipFinish}`,
     `Primary hair direction: ${selectedBeautyHairStyle}`,
     `Wig track: ${wigTrackStyle}`,
@@ -1850,6 +1682,48 @@ const App: React.FC = () => {
     setOutfitMessage(outfitLooks[index].description || 'Outfit look selected.');
   };
 
+  const handleSaveOutfit = async () => {
+    if (!outfitAfterImage) {
+      setOutfitMessage('Generate an outfit after image before saving.');
+      return;
+    }
+    try {
+      await saveLook({
+        type: 'outfit',
+        originalImage: outfitSelfie ?? undefined,
+        generatedImage: outfitAfterImage,
+        outfit: outfitStyle,
+        prompt: `Outfit try-on: ${outfitStyle}${outfitOccasion ? ` for ${outfitOccasion}` : ''}`,
+      });
+      setOutfitMessage('Saved to My Looks!');
+    } catch (error: any) {
+      setOutfitMessage(/unauthorized|sign in/i.test(String(error?.message || ''))
+        ? 'Sign in to save this look.'
+        : friendlyError(error, 'outfit-save'));
+    }
+  };
+
+  const handleCompleteOutfitLook = async () => {
+    if (!outfitAfterImage) {
+      setOutfitMessage('Generate an outfit before completing the look.');
+      return;
+    }
+    setOutfitAccessoryLoading(true);
+    setOutfitAccessories([]);
+    try {
+      const description = outfitPrompt || `${outfitStyle} outfit for ${outfitOccasion}`;
+      const recs = await generateCompleteLook(description, {
+        selfie: outfitSelfie ?? undefined,
+        occasion: outfitOccasion,
+      });
+      setOutfitAccessories(recs);
+    } catch (error: any) {
+      setOutfitMessage(friendlyError(error, 'complete-look'));
+    } finally {
+      setOutfitAccessoryLoading(false);
+    }
+  };
+
   const handleDownloadAnimation = async () => {
     if (!videoResult?.videoUrl) return;
     try {
@@ -2017,9 +1891,6 @@ const App: React.FC = () => {
     setComplexionHistory([]);
     setComplexionReportMessage('Complexion history cleared.');
   };
-
-  const isRestricted = result && result.safetyCheck && !result.safetyCheck.isSafe;
-  const containsMinors = result && result.safetyCheck?.containsMinors;
 
   if (!authInitialized) {
     return (
@@ -2372,52 +2243,23 @@ const App: React.FC = () => {
             <div className="text-[10px] text-slate-400 mt-1">Switch studio tabs quickly.</div>
           </div>
 
-          <div className="rounded-xl border border-indigo-400/20 bg-slate-900/45 p-1.5 space-y-1 mb-2">
-            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-indigo-200/75">Core</div>
-            <button
-              onClick={() => handleWorkspaceTabChange('dashboard')}
-              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'dashboard' ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50' : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'}`}
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('colorizer')}
-              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'colorizer' ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50' : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'}`}
-            >
-              Colorizer
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('animate')}
-              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'animate' ? 'bg-cyan-500/25 text-cyan-100 border border-cyan-400/50' : 'text-slate-300 border border-transparent hover:bg-cyan-500/10 hover:border-cyan-400/30 hover:text-white'}`}
-            >
-              Animate
-            </button>
-          </div>
+          <WorkspaceNav
+            variant="menu"
+            activeTab={activeWorkspaceTab}
+            onNavigate={handleWorkspaceTabChange}
+            createMenuOpen={createMenuOpen}
+            onToggleCreate={() => setCreateMenuOpen((v) => !v)}
+          />
 
-          <div className="rounded-xl border border-rose-400/20 bg-slate-900/45 p-1.5 space-y-1 mb-2">
-            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-rose-200/75">Studios</div>
-            <button
-              onClick={() => handleWorkspaceTabChange('beauty-lab')}
-              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'beauty-lab' ? 'bg-rose-500/25 text-rose-100 border border-rose-400/50' : 'text-slate-300 border border-transparent hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-white'}`}
-            >
-              Beauty Lab
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('barbershop')}
-              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'barbershop' ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50' : 'text-slate-300 border border-transparent hover:bg-emerald-500/10 hover:border-emerald-400/30 hover:text-white'}`}
-            >
-              Barbershop
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('outfit')}
-              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'outfit' ? 'bg-fuchsia-500/25 text-fuchsia-100 border border-fuchsia-400/50' : 'text-slate-300 border border-transparent hover:bg-fuchsia-500/10 hover:border-fuchsia-400/30 hover:text-white'}`}
-            >
-              Outfit Studio
-            </button>
-          </div>
 
           <div className="rounded-xl border border-amber-400/20 bg-slate-900/45 p-1.5 space-y-1 mb-2">
             <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-200/75">Account</div>
+            <button
+              onClick={() => handleWorkspaceTabChange('looks')}
+              className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'looks' ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50' : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'}`}
+            >
+              My Looks
+            </button>
             <button
               onClick={() => handleWorkspaceTabChange('account')}
               className={`w-full rounded-full px-3 py-2 text-left text-xs font-semibold transition-all ${activeWorkspaceTab === 'account' ? 'bg-amber-500/25 text-amber-100 border border-amber-400/50' : 'text-slate-300 border border-transparent hover:bg-amber-500/10 hover:border-amber-400/30 hover:text-white'}`}
@@ -2488,76 +2330,27 @@ const App: React.FC = () => {
             <div className="text-[10px] text-slate-400 mt-1">Launch a studio panel from here.</div>
           </div>
 
-          <div className="rounded-2xl border border-indigo-400/25 bg-slate-950/60 p-2 space-y-1">
-            <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-widest font-bold text-indigo-200/75">Core</div>
-            <button
-              onClick={() => handleWorkspaceTabChange('dashboard')}
-              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
-                activeWorkspaceTab === 'dashboard'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 shadow-sm shadow-indigo-500/30'
-                  : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'
-              }`}
-            >
-              Dashboard
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('colorizer')}
-              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
-                activeWorkspaceTab === 'colorizer'
-                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 shadow-sm shadow-indigo-500/30'
-                  : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'
-              }`}
-            >
-              Colorizer
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('animate')}
-              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
-                activeWorkspaceTab === 'animate'
-                  ? 'bg-cyan-500/25 text-cyan-100 border border-cyan-400/50 shadow-sm shadow-cyan-500/30'
-                  : 'text-slate-300 border border-transparent hover:bg-cyan-500/10 hover:border-cyan-400/30 hover:text-white'
-              }`}
-            >
-              Animate
-            </button>
-          </div>
+          <WorkspaceNav
+            variant="sidebar"
+            activeTab={activeWorkspaceTab}
+            onNavigate={handleWorkspaceTabChange}
+            createMenuOpen={createMenuOpen}
+            onToggleCreate={() => setCreateMenuOpen((v) => !v)}
+          />
 
-          <div className="rounded-2xl border border-rose-400/20 bg-slate-950/60 p-2 space-y-1">
-            <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-widest font-bold text-rose-200/75">Studios</div>
-            <button
-              onClick={() => handleWorkspaceTabChange('beauty-lab')}
-              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
-                activeWorkspaceTab === 'beauty-lab'
-                  ? 'bg-rose-500/25 text-rose-100 border border-rose-400/50 shadow-sm shadow-rose-500/30'
-                  : 'text-slate-300 border border-transparent hover:bg-rose-500/10 hover:border-rose-400/30 hover:text-white'
-              }`}
-            >
-              Beauty Lab
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('barbershop')}
-              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
-                activeWorkspaceTab === 'barbershop'
-                  ? 'bg-emerald-500/25 text-emerald-100 border border-emerald-400/50 shadow-sm shadow-emerald-500/30'
-                  : 'text-slate-300 border border-transparent hover:bg-emerald-500/10 hover:border-emerald-400/30 hover:text-white'
-              }`}
-            >
-              Barbershop
-            </button>
-            <button
-              onClick={() => handleWorkspaceTabChange('outfit')}
-              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
-                activeWorkspaceTab === 'outfit'
-                  ? 'bg-fuchsia-500/25 text-fuchsia-100 border border-fuchsia-400/50 shadow-sm shadow-fuchsia-500/30'
-                  : 'text-slate-300 border border-transparent hover:bg-fuchsia-500/10 hover:border-fuchsia-400/30 hover:text-white'
-              }`}
-            >
-              Outfit Studio
-            </button>
-          </div>
 
           <div className="rounded-2xl border border-amber-400/20 bg-slate-950/60 p-2 space-y-1">
             <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-widest font-bold text-amber-200/75">Account</div>
+            <button
+              onClick={() => handleWorkspaceTabChange('looks')}
+              className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
+                activeWorkspaceTab === 'looks'
+                  ? 'bg-indigo-500/25 text-indigo-100 border border-indigo-400/50 shadow-sm shadow-indigo-500/30'
+                  : 'text-slate-300 border border-transparent hover:bg-indigo-500/10 hover:border-indigo-400/30 hover:text-white'
+              }`}
+            >
+              My Looks
+            </button>
             <button
               onClick={() => handleWorkspaceTabChange('account')}
               className={`w-full rounded-full px-3 py-2 text-left text-sm font-semibold transition-all ${
@@ -3087,58 +2880,50 @@ const App: React.FC = () => {
         {activeWorkspaceTab === 'dashboard' && (
         <div
           id="dashboard-panel"
-          className="studio-shell-enter w-full rounded-3xl border border-cyan-400/30 bg-slate-900/70 backdrop-blur-xl p-4 sm:p-6 shadow-2xl shadow-cyan-500/10 overflow-hidden"
+          className="studio-shell-enter w-full rounded-3xl border border-indigo-500/30 bg-slate-900/70 backdrop-blur-xl p-4 sm:p-6 shadow-2xl shadow-indigo-500/10 overflow-hidden"
         >
-          <div className="mb-4 rounded-2xl border border-cyan-400/25 bg-gradient-to-r from-cyan-500/10 via-slate-900/20 to-indigo-500/10 px-4 py-3">
-            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-200/85">Studio Workspace</div>
-            <div className="mt-1 text-xs text-slate-300">Pick a studio and continue in the same split-canvas workflow.</div>
+          <div className="text-center py-6 sm:py-10">
+            <h1 className="text-2xl sm:text-4xl font-black tracking-tight text-white">
+              Your Style. <span className="bg-gradient-to-r from-indigo-300 via-fuchsia-300 to-rose-300 bg-clip-text text-transparent">Reimagined by AI.</span>
+            </h1>
+            <p className="mt-3 text-sm sm:text-base text-slate-300 max-w-xl mx-auto">
+              Try hairstyles, beauty looks and outfits before making them real.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <button
+                onClick={() => handleWorkspaceTabChange('create-look')}
+                className="rounded-full bg-gradient-to-r from-indigo-600 to-fuchsia-600 hover:from-indigo-500 hover:to-fuchsia-500 text-white font-bold px-6 py-3 text-sm uppercase tracking-wider shadow-lg shadow-fuchsia-500/20"
+              >
+                ✨ Create My Look
+              </button>
+              <button onClick={() => handleWorkspaceTabChange('hairstyle')} className="rounded-full border border-slate-700 bg-slate-900 text-slate-200 font-semibold px-5 py-3 text-sm hover:border-indigo-400 transition-colors">Try Hairstyle</button>
+              <button onClick={() => handleWorkspaceTabChange('beauty-lab')} className="rounded-full border border-slate-700 bg-slate-900 text-slate-200 font-semibold px-5 py-3 text-sm hover:border-rose-400 transition-colors">Try Beauty Look</button>
+              <button onClick={() => handleWorkspaceTabChange('outfit')} className="rounded-full border border-slate-700 bg-slate-900 text-slate-200 font-semibold px-5 py-3 text-sm hover:border-fuchsia-400 transition-colors">Try Outfit</button>
+            </div>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:auto-rows-[140px]">
-            <button
-              onClick={() => {
-                setMediaMode('colorize');
-                handleWorkspaceTabChange('colorizer');
-              }}
-              className="studio-tile lg:col-span-3 rounded-3xl border border-indigo-400/40 bg-gradient-to-br from-indigo-500/15 via-indigo-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-indigo-500/20"
-            >
-              <div className="mt-2 text-lg font-extrabold text-white">Colorizer</div>
-              <p className="mt-2 text-xs text-indigo-100/80">Restore color from black-and-white photos.</p>
-            </button>
 
-            <button
-              onClick={() => {
-                setMediaMode('animate');
-                handleWorkspaceTabChange('animate');
-              }}
-              className="studio-tile lg:col-span-3 rounded-3xl border border-cyan-400/40 bg-gradient-to-br from-cyan-500/15 via-cyan-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-cyan-500/20"
-            >
-              <div className="mt-2 text-lg font-extrabold text-white">Animate</div>
-              <p className="mt-2 text-xs text-cyan-100/80">Turn a photo into a cinematic motion clip.</p>
-            </button>
-
-            <button
-              onClick={() => handleWorkspaceTabChange('beauty-lab')}
-              className="studio-tile lg:col-span-2 rounded-3xl border border-rose-400/40 bg-gradient-to-br from-rose-500/15 via-rose-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-500/20"
-            >
-              <div className="mt-2 text-lg font-extrabold text-white">Beauty Lab</div>
-              <p className="mt-2 text-xs text-rose-100/80">Try-on studio, consultation, and profile tools.</p>
-            </button>
-
-            <button
-              onClick={() => handleWorkspaceTabChange('barbershop')}
-              className="studio-tile lg:col-span-2 rounded-3xl border border-emerald-400/40 bg-gradient-to-br from-emerald-500/15 via-emerald-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20"
-            >
-              <div className="mt-2 text-lg font-extrabold text-white">Barbershop Visit</div>
-              <p className="mt-2 text-xs text-emerald-100/80">Haircut previews with isolated session context.</p>
-            </button>
-
-            <button
-              onClick={() => handleWorkspaceTabChange('outfit')}
-              className="studio-tile lg:col-span-2 rounded-3xl border border-fuchsia-400/40 bg-gradient-to-br from-fuchsia-500/15 via-pink-300/10 to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-fuchsia-500/20"
-            >
-              <div className="mt-2 text-lg font-extrabold text-white">Outfit Studio</div>
-              <p className="mt-2 text-xs text-fuchsia-100/80">Virtual outfit try-on aligned with your makeup and haircut choices.</p>
-            </button>
+          <div className="mb-3 text-xs font-bold uppercase tracking-widest text-slate-400">Explore AI Looks</div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { tab: 'create-look' as WorkspaceTab, label: 'Create My Look', desc: 'A complete coordinated look — hair, beauty & outfit.', cls: 'border-fuchsia-400/40 from-fuchsia-500/15 via-pink-300/10' },
+              { tab: 'hairstyle' as WorkspaceTab, label: 'Hairstyle Try-On', desc: 'Preview new cuts, colors and lengths.', cls: 'border-indigo-400/40 from-indigo-500/15 via-indigo-300/10' },
+              { tab: 'beauty-lab' as WorkspaceTab, label: 'Beauty Lab', desc: 'Makeup, consultation & profile tools.', cls: 'border-rose-400/40 from-rose-500/15 via-rose-300/10' },
+              { tab: 'barbershop' as WorkspaceTab, label: 'Barbershop Visit', desc: 'Haircut previews with session context.', cls: 'border-emerald-400/40 from-emerald-500/15 via-emerald-300/10' },
+              { tab: 'outfit' as WorkspaceTab, label: 'Outfit Studio', desc: 'Virtual outfit try-on.', cls: 'border-fuchsia-400/40 from-fuchsia-500/15 via-pink-300/10' },
+              { tab: 'animate' as WorkspaceTab, label: 'Animate', desc: 'Turn a photo into a motion clip.', cls: 'border-cyan-400/40 from-cyan-500/15 via-cyan-300/10' },
+              { tab: 'enhance' as WorkspaceTab, label: 'Photo Enhance', desc: 'Improve quality, lighting & background.', cls: 'border-cyan-400/40 from-cyan-500/15 via-cyan-300/10' },
+              { tab: 'stylist' as WorkspaceTab, label: 'AI Stylist', desc: 'Chat with your personal stylist.', cls: 'border-teal-400/40 from-teal-500/15 via-teal-300/10' },
+              { tab: 'find-this-look' as WorkspaceTab, label: 'Find This Look', desc: 'Discover products & local services.', cls: 'border-purple-400/40 from-purple-500/15 via-purple-300/10' },
+            ].map((f) => (
+              <button
+                key={f.tab}
+                onClick={() => handleWorkspaceTabChange(f.tab)}
+                className={`studio-tile rounded-3xl border bg-gradient-to-br ${f.cls} to-slate-900/70 p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg`}
+              >
+                <div className="text-base font-extrabold text-white">{f.label}</div>
+                <p className="mt-1.5 text-xs text-slate-300/80">{f.desc}</p>
+              </button>
+            ))}
           </div>
         </div>
         )}
@@ -3433,6 +3218,30 @@ const App: React.FC = () => {
                     className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
                       lashOverlayDensity === item.value
                         ? 'border-cyan-300/70 bg-cyan-500/25 text-cyan-100'
+                        : 'border-slate-700 bg-slate-950/70 text-slate-300'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-amber-200/80">Brow Toolkit</div>
+              <div className="flex gap-2 overflow-x-auto whitespace-nowrap pb-1">
+                {[
+                  { value: 'natural', label: 'Natural' },
+                  { value: 'feathered', label: 'Feathered' },
+                  { value: 'defined', label: 'Defined' },
+                  { value: 'bold', label: 'Bold' },
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    onClick={() => setBrowStyle(item.value)}
+                    className={`inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      browStyle === item.value
+                        ? 'border-amber-300/70 bg-amber-500/25 text-amber-100'
                         : 'border-slate-700 bg-slate-950/70 text-slate-300'
                     }`}
                   >
@@ -3879,6 +3688,13 @@ const App: React.FC = () => {
                 )}
               </button>
               <button
+                onClick={handleSaveOutfit}
+                disabled={!outfitAfterImage}
+                className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-emerald-500/40 bg-emerald-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-100 hover:bg-emerald-500/30 disabled:opacity-50 md:shrink-0"
+              >
+                Save
+              </button>
+              <button
                 onClick={handleDownloadOutfit}
                 disabled={!outfitAfterImage}
                 className="studio-action-compact inline-flex min-w-0 items-center justify-center rounded-full border border-pink-500/40 bg-pink-500/20 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-pink-100 hover:bg-pink-500/30 disabled:opacity-50 md:shrink-0"
@@ -3891,6 +3707,7 @@ const App: React.FC = () => {
                     setOutfitSelfie(null);
                     setOutfitAfterImage(null);
                     setOutfitLooks(null);
+                    setOutfitAccessories([]);
                     setOutfitActiveLookIndex(0);
                     setOutfitMessage(null);
                     setOutfitNotes('');
@@ -4105,6 +3922,35 @@ const App: React.FC = () => {
               }`}>{outfitMessage}</div>
             )}
 
+            {outfitAfterImage && (
+              <div className="rounded-xl border border-fuchsia-500/30 bg-slate-950/60 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Complete the Look</div>
+                  <button
+                    onClick={() => void handleCompleteOutfitLook()}
+                    disabled={outfitAccessoryLoading}
+                    className="rounded-full border border-fuchsia-500/40 bg-fuchsia-500/20 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-100 hover:bg-fuchsia-500/30 disabled:opacity-50"
+                  >
+                    {outfitAccessoryLoading ? 'Finding…' : outfitAccessories.length ? 'Refresh' : 'Complete My Look'}
+                  </button>
+                </div>
+                {outfitAccessories.length > 0 && (
+                  <div className="space-y-2">
+                    {outfitAccessories.map((rec, idx) => (
+                      <div key={idx} className="rounded-xl border border-slate-800 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-semibold text-slate-100">{rec.name}</span>
+                          <span className="shrink-0 text-[9px] uppercase tracking-wider text-fuchsia-300">{rec.category}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{rec.description}</div>
+                        {rec.styleNote && <div className="text-[10px] text-slate-300 mt-0.5 italic">{rec.styleNote}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {outfitLooks && outfitLooks.length > 1 && (
               <div className="rounded-xl border border-fuchsia-500/30 bg-slate-950/60 p-3 space-y-2">
                 <div className="text-[10px] font-bold uppercase tracking-widest text-fuchsia-300">Generated Outfit Options</div>
@@ -4132,27 +3978,40 @@ const App: React.FC = () => {
         </div>
         )}
 
-        <div id="colorizer-panel" className="w-full" />
+        {activeWorkspaceTab === 'hairstyle' && (
+          <HairTryOn />
+        )}
+
+        {activeWorkspaceTab === 'create-look' && (
+          <CreateMyLook />
+        )}
+
+        {activeWorkspaceTab === 'enhance' && (
+          <PhotoEnhancer />
+        )}
+
+        {activeWorkspaceTab === 'stylist' && (
+          <StyleAdvisor onNavigate={handleWorkspaceTabChange} />
+        )}
+
+        {activeWorkspaceTab === 'find-this-look' && (
+          <FindThisLook />
+        )}
+
+        {activeWorkspaceTab === 'looks' && (
+          <LooksGallery />
+        )}
+
         <div id="animate-panel" className="w-full" />
 
-        {(activeWorkspaceTab === 'colorizer' || activeWorkspaceTab === 'animate') && !selectedImage && !result && (
+        {activeWorkspaceTab === 'animate' && !selectedImage && !videoResult && (
           <div className="w-full text-center space-y-6">
             <div className="space-y-2">
               <h2 className="text-3xl sm:text-4xl md:text-5xl leading-tight font-black tracking-tight text-white">
-                {activeWorkspaceTab === 'animate' ? (
-                  <>
-                    Create <span className="text-cyan-400">Animate</span> clips from still photos.
-                  </>
-                ) : (
-                  <>
-                    Restore <span className="text-indigo-500">Color</span> with precision.
-                  </>
-                )}
+                Create <span className="text-cyan-400">Animate</span> clips from still photos.
               </h2>
               <p className="text-slate-400 max-w-md mx-auto text-base sm:text-lg leading-relaxed">
-                {activeWorkspaceTab === 'animate'
-                  ? 'Upload a portrait or scene and generate a cinematic motion clip in one tap.'
-                  : 'Upload a black and white photo to rebuild natural tones and preserve detail.'}
+                Upload a portrait or scene and generate a cinematic motion clip in one tap.
               </p>
               <div className="flex flex-wrap justify-center gap-2 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">
                 <span className="px-2.5 py-1 rounded-full border border-slate-800">Fast processing</span>
@@ -4164,12 +4023,11 @@ const App: React.FC = () => {
             <ImageUploader
               onImageSelected={handleImageSelected}
               isLoading={processing.isProcessing}
-              onSampleSelect={handleSampleImage}
             />
           </div>
         )}
 
-        {(activeWorkspaceTab === 'colorizer' || activeWorkspaceTab === 'animate') && selectedImage && !result && (
+        {activeWorkspaceTab === 'animate' && selectedImage && !videoResult && (
           <div className="w-full flex flex-col items-center gap-6 animate-in slide-in-from-bottom-4 duration-500">
             <div className="relative w-full max-w-lg rounded-3xl overflow-hidden border border-slate-800 shadow-2xl group bg-slate-900">
               <div
@@ -4227,48 +4085,14 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Minimalist Theme Selector */}
-            <div className="w-full max-w-md space-y-3 px-1 sm:px-0">
-              <h3 className="text-[11px] sm:text-xs font-bold text-center text-slate-400 uppercase tracking-[0.18em]">Atmospheric Palette</h3>
-              <div className="flex flex-wrap justify-center gap-2">
-                {PALETTES.map((palette) => (
-                  <button
-                    key={palette.id}
-                    onClick={() => setSelectedTheme(palette.id)}
-                    className={`
-                      px-4 py-3 rounded-full text-xs font-bold transition-all duration-300 border min-h-[44px]
-                      ${selectedTheme === palette.id
-                        ? 'bg-indigo-600 border-indigo-400 text-white scale-105 shadow-lg shadow-indigo-600/20'
-                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-600 hover:text-slate-300'}
-                    `}
-                  >
-                    <span className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${palette.colors}`}></div>
-                      {palette.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div className="w-full max-w-md grid grid-cols-2 gap-3 px-1 sm:px-0">
-              {activeWorkspaceTab === 'animate' ? (
-                <button
-                  onClick={() => void handleAnimate()}
-                  disabled={processing.isProcessing}
-                  className="col-span-2 px-4 py-3 min-h-[44px] rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                >
-                  Animate
-                </button>
-              ) : (
-                <button
-                  onClick={() => void handleColorize()}
-                  disabled={processing.isProcessing}
-                  className="col-span-2 px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                >
-                  Colorize
-                </button>
-              )}
+              <button
+                onClick={() => void handleAnimate()}
+                disabled={processing.isProcessing}
+                className="col-span-2 px-4 py-3 min-h-[44px] rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+              >
+                Animate
+              </button>
             </div>
 
             {processing.error && (
@@ -4296,156 +4120,18 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {(activeWorkspaceTab === 'colorizer' || activeWorkspaceTab === 'animate') && result && (
+        {activeWorkspaceTab === 'animate' && videoResult && (
           <div className="w-full flex flex-col items-center gap-8 animate-in fade-in zoom-in-95 duration-700">
-            <ComparisonView
-              original={result.original}
-              colorized={result.colorized}
-            />
-
-            <div className="w-full max-w-2xl flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
-              <button
-                onClick={handleDownloadResult}
-                className="px-4 py-3 min-h-[44px] rounded-xl border border-slate-700 text-slate-200 text-xs font-semibold hover:border-indigo-400 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-              >
-                Download HD
-              </button>
-              {activeWorkspaceTab === 'colorizer' && (
-                <button
-                  onClick={() => {
-                    setMediaMode('animate');
-                    handleWorkspaceTabChange('animate');
-                  }}
-                  className="px-4 py-3 min-h-[44px] rounded-xl bg-cyan-600 text-white text-xs font-semibold hover:bg-cyan-500 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                >
-                  Animate This Photo
-                </button>
-              )}
-              <button
-                onClick={handleShareResult}
-                disabled={!navigator.share}
-                className="px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-500 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-              >
-                Share
-              </button>
-            </div>
-
-            <div className="w-full max-w-md flex flex-col gap-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between px-2">
-                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Enhancements</h3>
-                  {history.length > 1 && (
-                    <button
-                      onClick={handleUndo}
-                      className="text-[10px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 uppercase tracking-wider"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                      </svg>
-                      Undo
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                  <button
-                    onClick={handleUpscale}
-                    disabled={processing.isProcessing}
-                    className="flex flex-col items-center justify-center gap-1 py-3 min-h-[64px] bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold rounded-2xl border border-slate-800 transition-all active:scale-95 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                    </svg>
-                    <span className="text-[10px] sm:text-[11px] leading-tight uppercase tracking-wider">4K Upscale</span>
-                  </button>
-                  <button
-                    onClick={handleVibrancy}
-                    disabled={processing.isProcessing}
-                    className="flex flex-col items-center justify-center gap-1 py-3 min-h-[64px] bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold rounded-2xl border border-slate-800 transition-all active:scale-95 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-pink-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                    </svg>
-                    <span className="text-[10px] sm:text-[11px] leading-tight uppercase tracking-wider">Vibrant</span>
-                  </button>
-                  <button
-                    onClick={handleSharpen}
-                    disabled={processing.isProcessing}
-                    className="flex flex-col items-center justify-center gap-1 py-3 min-h-[64px] bg-slate-900 hover:bg-slate-800 text-slate-200 font-semibold rounded-2xl border border-slate-800 transition-all active:scale-95 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h3m-3 0H7m5 3v3m7-3l-1.414-1.414M5.414 5.414L4 4m1.414 14.586L4 20M20 4l-1.414 1.414" />
-                    </svg>
-                    <span className="text-[10px] sm:text-[11px] leading-tight uppercase tracking-wider">Sharpen</span>
-                  </button>
-                </div>
-              </div>
-
-              {activeWorkspaceTab === 'animate' && containsMinors ? (
-                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-sm text-center">
-                  <div className="flex items-center justify-center gap-3 font-bold text-amber-500 uppercase tracking-tight mb-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    Animation Restricted
-                  </div>
-                  <p className="opacity-90">
-                    Images containing minors cannot be animated for safety reasons.
-                  </p>
-                </div>
-              ) : activeWorkspaceTab === 'animate' && isRestricted ? (
-                <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-200 text-sm space-y-2">
-                  <div className="flex items-center gap-3 font-bold text-amber-500 uppercase tracking-tight">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    Animation Restricted
-                  </div>
-                  <p className="opacity-80">
-                    Video generation is not permitted for this content due to safety guidelines.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-1">
-                    {activeWorkspaceTab === 'animate' ? (
-                      <button
-                        onClick={() => void handleAnimate()}
-                        disabled={processing.isProcessing}
-                        className="px-4 py-3 min-h-[44px] rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                      >
-                        Animate
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => void handleColorize()}
-                        disabled={processing.isProcessing}
-                        className="px-4 py-3 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
-                      >
-                        Colorize
-                      </button>
-                    )}
-                  </div>
-
-                </>
-              )}
-
-              <button
-                onClick={reset}
-                className="w-full py-3 min-h-[44px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold rounded-2xl border border-slate-800 transition-all flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                New Image
-              </button>
-            </div>
-
-            {videoResult && (
-              <div className="w-full space-y-4">
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Animation</h3>
-                <VideoResult videoUrl={videoResult.videoUrl} onDownload={handleDownloadAnimation} />
-              </div>
-            )}
+            <VideoResult videoUrl={videoResult.videoUrl} onDownload={handleDownloadAnimation} />
+            <button
+              onClick={reset}
+              className="w-full py-3 min-h-[44px] bg-slate-900 hover:bg-slate-800 text-slate-300 font-semibold rounded-2xl border border-slate-800 transition-all flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              New Image
+            </button>
           </div>
         )}
 

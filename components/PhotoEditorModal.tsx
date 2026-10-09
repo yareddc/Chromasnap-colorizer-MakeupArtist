@@ -18,7 +18,7 @@ const normalizeRotation = (degrees: number) => {
   return normalized < 0 ? normalized + 360 : normalized;
 };
 
-const getTouchDistance = (touchA: Touch, touchB: Touch) => {
+const getTouchDistance = (touchA: React.Touch, touchB: React.Touch) => {
   const dx = touchA.clientX - touchB.clientX;
   const dy = touchA.clientY - touchB.clientY;
   return Math.hypot(dx, dy);

@@ -1609,17 +1609,6 @@ const runOutfitTryOnImageEdit = async (
     variantIndex: number,
     totalVariants: number
 ): Promise<string> => {
-    if (!process.env.GCP_PROJECT_ID || !process.env.GCP_LOCATION) {
-        throw new Error('GCP_PROJECT_ID and GCP_LOCATION are required for Outfit Studio image editing');
-    }
-
-    const base64Image = await normalizeImageToPngBase64(selfie);
-    const normalizedGarmentImage = garmentImage ? await normalizeImageToPngBase64(garmentImage) : null;
-    const token = await getCloudAccessToken();
-    if (!token) {
-        throw new Error('Unable to obtain cloud access token for Outfit Studio image editing');
-    }
-
     const cleanPrompt = String(outfitPrompt || '').trim();
     if (!cleanPrompt) {
         throw new Error('Outfit text prompt is required');
@@ -1653,68 +1642,23 @@ const runOutfitTryOnImageEdit = async (
         '- Return one photorealistic edited image.',
     ].join('\n');
 
-    const garmentReferenceNote = normalizedGarmentImage
+    const garmentReferenceNote = garmentImage
         ? '\nAdditional reference image was provided by user; follow its silhouette/material cues when feasible.'
         : '';
 
-    const modelsToTry = ['imagen-3.0-capability-001', 'imagen-3.0-generate-001'];
-    let parsed: any = {};
-    let lastError = '';
+    const provider = getProvider();
+    const result = await provider.generateImage({
+        userId: 'outfit-studio',
+        featureType: 'OUTFIT',
+        sourceImage: selfie,
+        prompt: `${editPrompt}${garmentReferenceNote}`,
+    });
 
-    for (const model of modelsToTry) {
-        const endpoint = `https://${process.env.GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.GCP_PROJECT_ID}/locations/${process.env.GCP_LOCATION}/publishers/google/models/${model}:predict`;
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                instances: [
-                    {
-                        prompt: `${editPrompt}${garmentReferenceNote}`,
-                        context_image: {
-                            bytesBase64Encoded: base64Image,
-                        },
-                    },
-                ],
-                parameters: {
-                    sampleCount: 1,
-                    editConfig: {
-                        editMode: 'EDIT_MODE_INPAINT_INSERTION',
-                    },
-                },
-            }),
-        });
-
-        const responseText = await response.text();
-        if (!response.ok) {
-            lastError = `${model} failed (${response.status}): ${responseText.slice(0, 300)}`;
-            continue;
-        }
-
-        try {
-            parsed = responseText ? JSON.parse(responseText) : {};
-        } catch {
-            lastError = `${model} returned non-JSON response`;
-            continue;
-        }
-
-        const imageBase64Candidate = parsed?.predictions?.[0]?.bytesBase64Encoded;
-        if (typeof imageBase64Candidate === 'string' && imageBase64Candidate.length > 0) {
-            parsed._usedModel = model;
-            break;
-        }
-
-        lastError = `${model} returned no image bytes`;
+    if (!result.image) {
+        throw new Error('Outfit try-on image generation returned no image');
     }
 
-    const imageBase64 = parsed?.predictions?.[0]?.bytesBase64Encoded;
-    if (!imageBase64) {
-        throw new Error(`Outfit try-on image generation returned no image. ${lastError}`);
-    }
-
-    return `data:image/png;base64,${imageBase64}`;
+    return result.image;
 };
 
 const buildOutfitTryOnDescription = (
@@ -2550,10 +2494,7 @@ app.post('/api/analyze/safety', async (req, res) => {
             }
         });
 
-        const anyResp = response as any;
-        const text = typeof anyResp.text === 'function'
-            ? (anyResp.text()?.trim() || '{"isSafe":true,"containsMinors":false,"reason":""}')
-            : (response as any).candidates?.[0]?.content?.parts?.[0]?.text || '{"isSafe":true,"containsMinors":false,"reason":""}';
+        const text = (response as any)?.text || '{"isSafe":true,"containsMinors":false,"reason":""}';
 
         const parsed = JSON.parse(text);
         res.json({
@@ -2690,7 +2631,7 @@ app.post('/api/consult/beauty-advisor', requireBilling('beauty_consult'), async 
             }],
         });
 
-        const adviceText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        const adviceText = (response as any)?.text || '';
         const resolvedAdvice = adviceText || buildFallbackBeautyAdvice(serviceDesc, String(notes || ''));
         const recommendations = extractRecommendations(resolvedAdvice);
         const usageMetadata = normalizeUsageMetadata(extractUsageMetadata(response));
@@ -3336,7 +3277,7 @@ app.post('/api/recommend/occasion-look', requireBilling('occasion_recommend'), a
             ],
         });
 
-        const fullText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        const fullText = (response as any)?.text || '';
         if (!fullText) {
             console.warn('Occasion recommendation returned empty model text', {
                 traceId,
@@ -3474,7 +3415,7 @@ Return ONLY the JSON object, nothing else.`;
             }],
         });
 
-        let analysisText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        let analysisText = (response as any)?.text || '';
         if (!analysisText) {
             return res.status(500).json({ error: 'Failed to analyze beauty profile' });
         }
@@ -3599,7 +3540,7 @@ app.post('/api/analyze/complexion-report', requireBilling('complexion_report'), 
             }],
         });
 
-        let rawText = (response as any)?.response?.content?.parts?.[0]?.text || '';
+        let rawText = (response as any)?.text || '';
         if (!rawText) {
             return res.status(500).json({ error: 'Failed to generate complexion report' });
         }

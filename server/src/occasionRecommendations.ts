@@ -66,28 +66,42 @@ export const parseOccasionRecommendations = (text: string): OccasionRecommendati
     const recommendations: OccasionRecommendation[] = [];
     const sections = text
         .replace(/\r\n/g, '\n')
-        .split(/(?:---+|###|==+|\n\s*\n)/)
+        .split(/(?:---+|###+|==+|\n\s*\n)/)
+        .map((section) => section.trim())
         .filter(Boolean);
 
-    for (let i = 0; i < Math.min(sections.length, 4); i += 1) {
-        const section = sections[i].trim();
-        if (!section) continue;
+    const cleanLine = (line: string): string =>
+        line
+            .replace(/^#{1,6}\s*/, '')
+            .replace(/^\s*(?:[-*•]\s+|\d+[.)]\s+)/, '')
+            .replace(/[*_]+/g, '')
+            .trim();
 
-        const lines = section.split('\n').map((line) => line.trim());
+    const LABEL_PATTERN = /^(Style Name|Name|Look|Style|Makeup|Makeup Description|Hair|Hairstyle|Hair Description|Why|Tips|Description|Why It Works|Why it works)\s*:\s*(.*)$/i;
+
+    for (const section of sections.slice(0, 8)) {
+        const lines = section.split('\n').map(cleanLine).filter(Boolean);
         let styleName = '';
         let makeup = '';
         let hair = '';
         let description = '';
 
         for (const line of lines) {
-            if (line.match(/^(Style Name|Name|Look):/i)) {
-                styleName = line.replace(/^(Style Name|Name|Look):\s*/i, '');
-            } else if (line.match(/^(Makeup|Makeup Description):/i)) {
-                makeup = line.replace(/^(Makeup|Makeup Description):\s*/i, '');
-            } else if (line.match(/^(Hair|Hairstyle|Hair Description):/i)) {
-                hair = line.replace(/^(Hair|Hairstyle|Hair Description):\s*/i, '');
-            } else if (line.match(/^(Why|Tips|Description|Why it works):/i)) {
-                description += `${description ? ' ' : ''}${line.replace(/^(Why|Tips|Description|Why it works):\s*/i, '')}`;
+            const match = line.match(LABEL_PATTERN);
+            if (match) {
+                const label = match[1].toLowerCase();
+                const value = match[2].trim();
+                if (label === 'style name' || label === 'name' || label === 'look' || label === 'style') {
+                    if (!styleName) styleName = value;
+                } else if (label === 'makeup' || label === 'makeup description') {
+                    if (!makeup) makeup = value;
+                } else if (label === 'hair' || label === 'hairstyle' || label === 'hair description') {
+                    if (!hair) hair = value;
+                } else {
+                    description = description ? `${description} ${value}` : value;
+                }
+            } else if (!styleName && !/^(here are|for |below|sure|based on|the following)/i.test(line)) {
+                styleName = line;
             }
         }
 

@@ -116,9 +116,8 @@ export class GoogleGeminiProvider implements AIProvider {
             contents: [{ role: 'user', parts }],
         });
 
-        const text = (response as any)?.text?.()?.trim()
-            || (response as any)?.response?.content?.parts?.[0]?.text
-            || '';
+        const rawText = (response as any)?.text;
+        const text = typeof rawText === 'string' ? rawText.trim() : '';
         return { text, model: 'gemini-2.5-flash' };
     }
 }

@@ -52,7 +52,7 @@ const StyleAdvisor: React.FC<StyleAdvisorProps> = ({ onNavigate }) => {
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-3 sm:px-4 py-4 flex flex-col" style={{ height: '72vh' }}>
+    <div className="w-full px-3 sm:px-4 py-4 flex flex-col" style={{ height: '72vh' }}>
       <div className="mb-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-slate-200">AI Stylist</h2>
         <p className="text-[11px] text-slate-400 mt-1">Your personal styling assistant — ask me anything about hair, beauty, or outfits.</p>

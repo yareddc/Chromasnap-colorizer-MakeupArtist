@@ -142,7 +142,7 @@ const LooksGallery: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-3 sm:px-4 py-6">
+    <div className="w-full px-3 sm:px-4 py-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-bold uppercase tracking-widest text-slate-200">My Looks</h2>
         <button

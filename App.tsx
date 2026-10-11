@@ -965,19 +965,19 @@ const App: React.FC = () => {
     if (tab !== 'beauty-lab') {
       setShowBeautyToolsDrawer(false);
     }
-    const targetId = tab === 'dashboard'
-      ? 'dashboard-panel'
-      : tab === 'animate'
-        ? 'animate-panel'
-      : tab === 'beauty-lab'
-        ? 'beauty-lab-panel'
-        : tab === 'barbershop'
-          ? 'barbershop-panel'
-      : tab === 'outfit'
-          ? 'outfit-panel'
-          : tab === 'account'
-            ? 'account-panel'
-            : 'dashboard-panel';
+    const panelIdByTab: Partial<Record<WorkspaceTab, string>> = {
+      dashboard: 'dashboard-panel',
+      animate: 'animate-panel',
+      'beauty-lab': 'beauty-lab-panel',
+      barbershop: 'barbershop-panel',
+      outfit: 'outfit-panel',
+      'create-look': 'create-look-panel',
+      stylist: 'stylist-panel',
+      'find-this-look': 'find-this-look-panel',
+      looks: 'looks-panel',
+      account: 'account-panel',
+    };
+    const targetId = panelIdByTab[tab] || 'dashboard-panel';
     window.requestAnimationFrame(() => {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
@@ -4000,7 +4000,12 @@ const App: React.FC = () => {
         )}
 
         {activeWorkspaceTab === 'create-look' && (
-          <CreateMyLook />
+          <div
+            id="create-look-panel"
+            className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-fuchsia-500/50 bg-fuchsia-500/5 shadow-lg shadow-fuchsia-500/10 overflow-hidden"
+          >
+            <CreateMyLook />
+          </div>
         )}
 
         {activeWorkspaceTab === 'enhance' && (
@@ -4008,15 +4013,30 @@ const App: React.FC = () => {
         )}
 
         {activeWorkspaceTab === 'stylist' && (
-          <StyleAdvisor onNavigate={handleWorkspaceTabChange} />
+          <div
+            id="stylist-panel"
+            className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-teal-500/50 bg-teal-500/5 shadow-lg shadow-teal-500/10 overflow-hidden"
+          >
+            <StyleAdvisor onNavigate={handleWorkspaceTabChange} />
+          </div>
         )}
 
         {activeWorkspaceTab === 'find-this-look' && (
-          <FindThisLook />
+          <div
+            id="find-this-look-panel"
+            className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-purple-500/50 bg-purple-500/5 shadow-lg shadow-purple-500/10 overflow-hidden"
+          >
+            <FindThisLook />
+          </div>
         )}
 
         {activeWorkspaceTab === 'looks' && (
-          <LooksGallery />
+          <div
+            id="looks-panel"
+            className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-indigo-500/50 bg-indigo-500/5 shadow-lg shadow-indigo-500/10 overflow-hidden"
+          >
+            <LooksGallery />
+          </div>
         )}
 
         <div id="animate-panel" className="w-full" />

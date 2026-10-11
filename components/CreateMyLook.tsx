@@ -154,7 +154,7 @@ const CreateMyLook: React.FC = () => {
   const isError = !!message && /error|failed|unavailable|try again|reach|tokens/i.test(message);
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-3 sm:px-4 py-6">
+    <div className="w-full px-3 sm:px-4 py-6">
       <div className="text-center mb-6">
         <h2 className="text-xl font-black uppercase tracking-widest bg-gradient-to-r from-indigo-300 via-fuchsia-300 to-rose-300 bg-clip-text text-transparent">Create My Look</h2>
         <p className="text-[11px] text-slate-400 mt-1">One tap. A complete, coordinated look — hair, beauty, outfit, and accessories.</p>

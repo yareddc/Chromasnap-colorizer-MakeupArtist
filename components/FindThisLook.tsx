@@ -44,7 +44,7 @@ const FindThisLook: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-3 sm:px-4 py-6">
+    <div className="w-full px-3 sm:px-4 py-6">
       <h2 className="text-sm font-bold uppercase tracking-widest text-slate-200">Find This Look</h2>
       <p className="text-[11px] text-slate-400 mt-1 mb-4">Describe a look to find similar products and local services.</p>
 

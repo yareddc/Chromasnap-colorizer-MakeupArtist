@@ -144,7 +144,10 @@ const LooksGallery: React.FC = () => {
   return (
     <div className="w-full px-3 sm:px-4 py-6">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-bold uppercase tracking-widest text-slate-200">My Looks</h2>
+        <div>
+          <h2 className="text-sm font-bold uppercase tracking-widest text-slate-200">My Looks</h2>
+          <p className="text-[11px] text-slate-400 mt-1">Your saved looks — review, share, regenerate, or delete them anytime.</p>
+        </div>
         <button
           onClick={() => void load()}
           className="text-[10px] font-semibold text-indigo-300 hover:text-indigo-200 uppercase tracking-wider"

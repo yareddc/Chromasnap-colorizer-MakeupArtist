@@ -2237,7 +2237,7 @@ const App: React.FC = () => {
       />
 
       {showAccountMenu && (
-        <div ref={accountMenuRef} className="studio-menu-enter fixed right-4 top-20 z-[60] w-[min(92vw,336px)] rounded-2xl border border-indigo-500/30 bg-slate-950/92 p-2.5 shadow-2xl shadow-indigo-500/10 backdrop-blur-xl">
+        <div ref={accountMenuRef} className="studio-menu-enter fixed right-4 top-20 z-[60] w-[min(92vw,336px)] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border border-indigo-500/30 bg-slate-950/92 p-2.5 shadow-2xl shadow-indigo-500/10 backdrop-blur-xl">
           <div className="rounded-xl border border-indigo-400/30 bg-gradient-to-r from-indigo-500/10 via-slate-950/70 to-cyan-500/10 px-3 py-2 mb-2">
             <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-indigo-200/85">Workspace</div>
             <div className="text-[10px] text-slate-400 mt-1">Switch studio tabs quickly.</div>
@@ -2892,7 +2892,7 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="w-full min-w-0 space-y-6 sm:space-y-8 xl:col-start-2 max-w-xl xl:max-w-none mx-auto xl:mx-0">
+        <div className="w-full min-w-0 space-y-6 sm:space-y-8 xl:col-start-2 max-w-3xl lg:max-w-4xl xl:max-w-none mx-auto xl:mx-0">
 
         {activeWorkspaceTab === 'dashboard' && (
         <div

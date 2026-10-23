@@ -8,6 +8,7 @@ import TurnstileCaptcha from './components/TurnstileCaptcha';
 import AdminLoginPage from './components/AdminLoginPage';
 import PhotoEditorModal from './components/PhotoEditorModal';
 import MultiAngleAfterPreview from './components/MultiAngleAfterPreview';
+import BeforeAfterViewer from './components/BeforeAfterViewer';
 import HairTryOn from './components/HairTryOn';
 import LooksGallery from './components/LooksGallery';
 import StyleAdvisor from './components/StyleAdvisor';
@@ -959,7 +960,23 @@ const App: React.FC = () => {
     setProcessing({ isProcessing: false, statusMessage: '', error: undefined });
   };
 
-  const handleWorkspaceTabChange = (tab: WorkspaceTab) => {
+  // Mirror feature navigation into browser history so the browser / Android back
+  // button returns to the dashboard instead of leaving the app.
+  const syncWorkspaceHistory = (tab: WorkspaceTab) => {
+    const inFeature = Boolean(window.history.state?.workspaceTab);
+    if (tab === 'dashboard') {
+      if (inFeature) window.history.back();
+      return;
+    }
+    if (inFeature) {
+      window.history.replaceState({ ...window.history.state, workspaceTab: tab }, '');
+    } else {
+      window.history.pushState({ workspaceTab: tab }, '');
+    }
+  };
+
+  const handleWorkspaceTabChange = (tab: WorkspaceTab, fromHistory = false) => {
+    if (!fromHistory) syncWorkspaceHistory(tab);
     setActiveWorkspaceTab(tab);
     setShowAccountMenu(false);
     if (tab !== 'beauty-lab') {
@@ -982,6 +999,16 @@ const App: React.FC = () => {
       document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   };
+
+  const workspaceTabChangeRef = useRef(handleWorkspaceTabChange);
+  workspaceTabChangeRef.current = handleWorkspaceTabChange;
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      workspaceTabChangeRef.current((event.state?.workspaceTab as WorkspaceTab) || 'dashboard', true);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const sleepWithBackoff = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -2894,6 +2921,21 @@ const App: React.FC = () => {
 
         <div className="w-full min-w-0 space-y-6 sm:space-y-8 xl:col-start-2 max-w-3xl lg:max-w-4xl xl:max-w-none mx-auto xl:mx-0">
 
+        {activeWorkspaceTab !== 'dashboard' && (
+          <div className="xl:hidden sticky top-[5.5rem] z-40 -mb-3 sm:-mb-5">
+            <button
+              onClick={() => handleWorkspaceTabChange('dashboard')}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/90 px-4 py-2.5 text-xs font-semibold text-slate-200 shadow-lg shadow-black/40 backdrop-blur hover:border-indigo-400 hover:text-indigo-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+              aria-label="Back to dashboard"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              Back to Dashboard
+            </button>
+          </div>
+        )}
+
         {activeWorkspaceTab === 'dashboard' && (
         <div
           id="dashboard-panel"
@@ -3012,11 +3054,12 @@ const App: React.FC = () => {
           className="studio-shell-enter w-full min-w-0 rounded-3xl border transition-all border-rose-500/50 bg-rose-500/5 shadow-lg shadow-rose-500/10 overflow-hidden"
         >
           <div className="h-[44vh] sm:h-[56vh] lg:h-[62vh] bg-slate-950/70 flex items-center justify-center min-w-0">
-            {tryAfterImage || trySelfie ? (
-              <img
-                src={tryAfterImage || trySelfie || ''}
-                alt="Beauty Lab render canvas"
-                className="w-full h-full object-contain"
+            {trySelfie ? (
+              <BeforeAfterViewer
+                beforeImage={trySelfie}
+                afterImage={tryAfterImage}
+                emptyText="Pick your makeup, hair and color options below, then tap Generate."
+                accentClass="text-rose-300"
               />
             ) : (
               <div className="text-center px-6 text-slate-400">
@@ -3405,27 +3448,22 @@ const App: React.FC = () => {
         >
           <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center min-w-0">
             {barbershopSelfie ? (
-              <div className="w-full h-full min-w-0 grid md:grid-cols-2 gap-px bg-slate-800/60">
-                <div className="flex flex-col bg-slate-950/70">
-                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">Before</div>
-                  <img src={barbershopSelfie} alt="Before barbershop selfie" className="w-full h-full object-contain bg-slate-950" />
-                </div>
-                <div className="flex flex-col bg-slate-950/70">
-                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-emerald-300 border-b border-emerald-500/20">After</div>
-                  {barbershopAfterImage ? (
+              <BeforeAfterViewer
+                beforeImage={barbershopSelfie}
+                afterImage={barbershopAfterImage}
+                emptyText="Generate a barbershop look to preview your after result."
+                accentClass="text-emerald-300"
+                afterContent={barbershopAfterImage ? (
+                  <div className="absolute inset-0 p-2">
                     <MultiAngleAfterPreview
                       image={barbershopAfterImage}
                       alt="After barbershop look"
                       requestAngleImage={handleGenerateBarbershopAngle}
                       className="w-full h-full object-contain bg-slate-950"
                     />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
-                      Generate a barbershop look to preview your after result.
-                    </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                ) : undefined}
+              />
             ) : (
               <div className="text-center px-6 text-slate-400">
                 <div className="text-sm font-semibold uppercase tracking-widest">Barbershop Visit & Style Studio</div>
@@ -3639,22 +3677,12 @@ const App: React.FC = () => {
         >
           <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center min-w-0">
             {outfitSelfie ? (
-              <div className="w-full h-full min-w-0 grid md:grid-cols-2 gap-px bg-slate-800/60">
-                <div className="flex flex-col bg-slate-950/70">
-                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">Before</div>
-                  <img src={outfitSelfie} alt="Before outfit selfie" className="w-full h-full object-contain bg-slate-950" />
-                </div>
-                <div className="flex flex-col bg-slate-950/70">
-                  <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-fuchsia-300 border-b border-fuchsia-500/20">After</div>
-                  {outfitAfterImage ? (
-                    <img src={outfitAfterImage} alt="After outfit try-on" className="w-full h-full object-contain bg-slate-950" />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
-                      Generate an outfit to preview your final look before heading out.
-                    </div>
-                  )}
-                </div>
-              </div>
+              <BeforeAfterViewer
+                beforeImage={outfitSelfie}
+                afterImage={outfitAfterImage}
+                emptyText="Generate an outfit to preview your final look before heading out."
+                accentClass="text-fuchsia-300"
+              />
             ) : (
               <div className="text-center px-6 text-slate-400">
                 <div className="text-sm font-semibold uppercase tracking-widest">Outfit Studio & Style Studio</div>

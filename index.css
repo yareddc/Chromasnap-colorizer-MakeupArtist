@@ -13,6 +13,8 @@ body {
     background-color: #0f172a;
     color: #f8fafc;
     overflow-x: hidden;
+    /* clip (unlike hidden) doesn't make body a scroll container, so sticky header/back button keep working */
+    overflow-x: clip;
     max-width: 100%;
 }
 

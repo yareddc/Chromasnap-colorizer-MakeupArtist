@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { findThisLook, type FindThisLookResult } from '../services/geminiService';
+import { findThisLook, type FindThisLookResult, type ProductRecommendation, type ServiceRecommendation } from '../services/geminiService';
 import { friendlyError } from '../services/errorMessages';
 
 const CATEGORY_OPTIONS = [
@@ -15,6 +15,25 @@ const serviceTypeLabel = (type: string) => {
   if (type === 'barber') return 'Barber';
   return 'Stylist';
 };
+
+const CATEGORY_ICONS: Record<string, string> = {
+  shoes: '👟',
+  clothing: '👕',
+  bag: '👜',
+  jewelry: '💍',
+  sunglasses: '🕶️',
+  hat: '🧢',
+  beauty: '💄',
+  accessory: '⌚',
+};
+
+// The AI provider never fabricates product URLs, so fall back to a real shopping search.
+const productShopUrl = (item: ProductRecommendation) =>
+  item.affiliateUrl || item.productUrl ||
+  `https://www.google.com/search?tbm=shop&q=${encodeURIComponent([item.brand, item.name].filter(Boolean).join(' '))}`;
+
+const serviceMapUrl = (service: ServiceRecommendation, location: string) =>
+  `https://www.google.com/maps/search/${encodeURIComponent([serviceTypeLabel(service.type), service.location || location].filter(Boolean).join(' near '))}`;
 
 const FindThisLook: React.FC = () => {
   const [description, setDescription] = useState('');
@@ -94,21 +113,38 @@ const FindThisLook: React.FC = () => {
       {result && result.fashion.length > 0 && (
         <div className="mt-6 space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-300">Similar Products</h3>
+          <div className="grid gap-3 md:grid-cols-2">
           {result.fashion.map((item, idx) => (
-            <div key={idx} className="rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-slate-100">{item.name}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-indigo-300 mt-0.5">{item.category}</div>
-                </div>
-                {item.price && <div className="shrink-0 text-xs font-semibold text-emerald-300">{item.price}</div>}
+            <div key={idx} className="flex gap-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-3">
+              <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-slate-800 flex items-center justify-center text-2xl">
+                {item.image
+                  ? <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
+                  : <span aria-hidden="true">{CATEGORY_ICONS[item.category.toLowerCase()] || '🛍️'}</span>}
               </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {item.brand && <span className="text-[10px] rounded-full bg-slate-800 px-2 py-0.5 text-slate-300">{item.brand}</span>}
-                {item.retailer && <span className="text-[10px] rounded-full bg-slate-800 px-2 py-0.5 text-slate-400">{item.retailer}</span>}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-slate-100">{item.name}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-indigo-300 mt-0.5">{item.category}</div>
+                  </div>
+                  {item.price && <div className="shrink-0 text-xs font-semibold text-emerald-300">{item.price}</div>}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {item.brand && <span className="text-[10px] rounded-full bg-slate-800 px-2 py-0.5 text-slate-300">{item.brand}</span>}
+                  {item.retailer && <span className="text-[10px] rounded-full bg-slate-800 px-2 py-0.5 text-slate-400">{item.retailer}</span>}
+                  <a
+                    href={productShopUrl(item)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-200 hover:bg-emerald-500/25"
+                  >
+                    Shop
+                  </a>
+                </div>
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
 
@@ -120,6 +156,14 @@ const FindThisLook: React.FC = () => {
               <div className="text-xs font-semibold text-slate-100">{service.name}</div>
               <div className="text-[10px] uppercase tracking-wider text-fuchsia-300 mt-0.5">{serviceTypeLabel(service.type)}</div>
               {service.description && <div className="text-[11px] text-slate-400 mt-1">{service.description}</div>}
+              <a
+                href={serviceMapUrl(service, location.trim())}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-flex rounded-full border border-fuchsia-500/40 bg-fuchsia-500/15 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-fuchsia-200 hover:bg-fuchsia-500/25"
+              >
+                Find nearby
+              </a>
             </div>
           ))}
         </div>

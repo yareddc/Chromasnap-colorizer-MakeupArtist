@@ -8,6 +8,7 @@ import {
   type CreateMyLookPlan,
 } from '../services/geminiService';
 import { friendlyError } from '../services/errorMessages';
+import BeforeAfterViewer from './BeforeAfterViewer';
 
 const OCCASION_OPTIONS = [
   { value: 'wedding', label: 'Wedding' },
@@ -237,13 +238,15 @@ const CreateMyLook: React.FC = () => {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
                   <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-indigo-300 border-b border-slate-800">Hair Preview</div>
                   {generating === 'hair' ? (
-                    <div className="h-56 flex items-center justify-center text-xs text-slate-400">Generating…</div>
-                  ) : hairImage ? (
-                    <img src={hairImage} alt="Hairstyle preview" className="w-full h-56 object-contain bg-slate-950" />
+                    <div className="h-80 sm:h-96 flex items-center justify-center text-xs text-slate-400">Generating…</div>
+                  ) : selfie ? (
+                    <div className="h-80 sm:h-96">
+                      <BeforeAfterViewer beforeImage={selfie} afterImage={hairImage} afterLabel="New Hair" emptyText="Hair preview unavailable — tap Change Hair to retry." accentClass="text-indigo-300" />
+                    </div>
                   ) : (
                     <div className="h-56 flex items-center justify-center text-xs text-slate-500">—</div>
                   )}
@@ -256,9 +259,11 @@ const CreateMyLook: React.FC = () => {
                 <div className="rounded-2xl border border-slate-800 bg-slate-900/40 overflow-hidden">
                   <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-rose-300 border-b border-slate-800">Beauty Preview</div>
                   {generating === 'beauty' ? (
-                    <div className="h-56 flex items-center justify-center text-xs text-slate-400">Generating…</div>
-                  ) : beautyImage ? (
-                    <img src={beautyImage} alt="Beauty preview" className="w-full h-56 object-contain bg-slate-950" />
+                    <div className="h-80 sm:h-96 flex items-center justify-center text-xs text-slate-400">Generating…</div>
+                  ) : selfie ? (
+                    <div className="h-80 sm:h-96">
+                      <BeforeAfterViewer beforeImage={selfie} afterImage={beautyImage} afterLabel="Beauty Look" emptyText="Beauty preview unavailable — tap Change Beauty to retry." accentClass="text-rose-300" />
+                    </div>
                   ) : (
                     <div className="h-56 flex items-center justify-center text-xs text-slate-500">—</div>
                   )}

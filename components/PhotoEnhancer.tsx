@@ -3,6 +3,7 @@ import React, { useRef, useState } from 'react';
 import { enhancePhoto, saveLook } from '../services/geminiService';
 import { friendlyError } from '../services/errorMessages';
 import { downloadAsset } from '../services/downloadService';
+import BeforeAfterViewer from './BeforeAfterViewer';
 
 const ENHANCEMENT_OPTIONS = [
   { value: 'quality', label: 'Improve Quality' },
@@ -88,22 +89,14 @@ const PhotoEnhancer: React.FC = () => {
     >
       <div className="h-[52vh] sm:h-[62vh] lg:h-[70vh] bg-slate-950/70 flex items-center justify-center min-w-0">
         {selfie ? (
-          <div className="w-full h-full min-w-0 grid md:grid-cols-2 gap-px bg-slate-800/60">
-            <div className="flex flex-col bg-slate-950/70">
-              <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-cyan-300 border-b border-cyan-500/20">Original</div>
-              <img src={selfie} alt="Original" className="w-full h-full object-contain bg-slate-950" />
-            </div>
-            <div className="flex flex-col bg-slate-950/70">
-              <div className="px-3 py-2 text-[10px] uppercase tracking-wider font-bold text-cyan-300 border-b border-cyan-500/20">Enhanced</div>
-              {afterImage ? (
-                <img src={afterImage} alt="Enhanced" className="w-full h-full object-contain bg-slate-950" />
-              ) : (
-                <div className="h-full flex items-center justify-center text-[10px] text-slate-400 px-3 text-center">
-                  Choose an enhancement and generate to preview.
-                </div>
-              )}
-            </div>
-          </div>
+          <BeforeAfterViewer
+            beforeImage={selfie}
+            afterImage={afterImage}
+            beforeLabel="Original"
+            afterLabel="Enhanced"
+            emptyText="Choose an enhancement and generate to preview."
+            accentClass="text-cyan-300"
+          />
         ) : (
           <div className="text-center px-6 text-slate-400">
             <div className="text-sm font-semibold uppercase tracking-widest text-cyan-200">Photo Enhancement</div>
